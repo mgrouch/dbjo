@@ -5,9 +5,9 @@ import java.util.*;
 
 public final class RevEngApp {
 
-    // Default: embedded in-memory DB. Override via args (recommended for real use).
-    // Example for server: jdbc:hsqldb:hsql://localhost:9001/dbjo
-    private static final String DEFAULT_URL  = "jdbc:hsqldb:mem:dbjo";
+    // Connect to an existing running HSQLDB Server on localhost.
+    // Make sure your server is started with DB name "dbjo" on port 9001.
+    private static final String DEFAULT_URL  = "jdbc:hsqldb:hsql://localhost:9001/dbjo";
     private static final String DEFAULT_USER = "SA";
     private static final String DEFAULT_PASS = "";
 
@@ -16,7 +16,17 @@ public final class RevEngApp {
         String user = args.length > 1 ? args[1] : DEFAULT_USER;
         String pass = args.length > 2 ? args[2] : DEFAULT_PASS;
 
+        // Ensure the driver is present/registered (helps when classpath is wrong).
+        Class.forName("org.hsqldb.jdbc.JDBCDriver");
+
         try (Connection conn = DriverManager.getConnection(url, user, pass)) {
+            DatabaseMetaData md = conn.getMetaData();
+            System.out.println("Connected:");
+            System.out.println("  url     = " + url);
+            System.out.println("  db      = " + md.getDatabaseProductName() + " " + md.getDatabaseProductVersion());
+            System.out.println("  driver  = " + md.getDriverName() + " " + md.getDriverVersion());
+            System.out.println();
+
             printAllTablesAndColumns(conn);
         }
     }
@@ -34,14 +44,16 @@ public final class RevEngApp {
         }
         schemas.sort(String.CASE_INSENSITIVE_ORDER);
 
-        // If driver returns no schemas, fall back to "PUBLIC" (HSQLDB default)
+        // HSQLDB default user schema is PUBLIC; keep it if schemas list is empty.
         if (schemas.isEmpty()) schemas.add("PUBLIC");
+
+        boolean foundAny = false;
 
         for (String schema : schemas) {
             if (isSystemSchema(schema)) continue;
 
             List<String> tables = new ArrayList<>();
-            try (ResultSet rs = meta.getTables(null, schema, "%", new String[] {"TABLE"})) {
+            try (ResultSet rs = meta.getTables(null, schema, "%", new String[]{"TABLE"})) {
                 while (rs.next()) {
                     tables.add(rs.getString("TABLE_NAME"));
                 }
@@ -50,7 +62,7 @@ public final class RevEngApp {
             tables.sort(String.CASE_INSENSITIVE_ORDER);
             if (tables.isEmpty()) continue;
 
-            System.out.println();
+            foundAny = true;
             System.out.println("Schema: " + schema);
 
             for (String table : tables) {
@@ -74,7 +86,6 @@ public final class RevEngApp {
 
                 cols.sort(Comparator.comparingInt(c -> c.pos));
 
-                System.out.println();
                 System.out.println("  " + table);
                 for (Column c : cols) {
                     String type = formatType(c.typeName, c.size, c.scale);
@@ -90,11 +101,16 @@ public final class RevEngApp {
                             isPk ? "  PK" : "",
                             isAi ? "  AI" : ""
                     );
-
-                    // If you want defaults printed too, uncomment:
-                    // if (c.defaultValue != null) System.out.println("        default: " + c.defaultValue);
                 }
+                System.out.println();
             }
+            System.out.println();
+        }
+
+        if (!foundAny) {
+            System.out.println("No user tables found.");
+            System.out.println("If you expected tables, confirm you are connecting to the correct server URL.");
+            System.out.println("Example: jdbc:hsqldb:hsql://localhost:9001/dbjo");
         }
     }
 
@@ -112,7 +128,6 @@ public final class RevEngApp {
 
     private static boolean isSystemSchema(String schema) {
         String s = schema.toUpperCase(Locale.ROOT);
-        // HSQLDB commonly has INFORMATION_SCHEMA; other DBs have additional system schemas.
         return s.equals("INFORMATION_SCHEMA")
                 || s.startsWith("SYSTEM")
                 || s.startsWith("SYS");
@@ -122,16 +137,12 @@ public final class RevEngApp {
         if (typeName == null) return "UNKNOWN";
         String t = typeName.toUpperCase(Locale.ROOT);
 
-        // Add (size) for character-like types
         if (t.contains("CHAR") || t.contains("BINARY") || t.contains("VAR")) {
             return t + "(" + size + ")";
         }
-
-        // Add (precision,scale) for numeric precision types
         if (t.contains("DECIMAL") || t.contains("NUMERIC")) {
             return t + "(" + size + "," + scale + ")";
         }
-
         return t;
     }
 
