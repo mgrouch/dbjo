@@ -8,7 +8,7 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 
-public final class ServerApp {
+public final class App {
 
   private static final String USER = "SA";
   private static final String PASS = "";
