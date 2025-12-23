@@ -1,43 +1,57 @@
 package org.github.dbjo;
 
+import org.hsqldb.Server;
+import org.hsqldb.persist.HsqlProperties;
+
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 
-/**
- * Minimal demo:
- *  - creates an embedded in-memory HSQLDB (lives for the JVM lifetime)
- *  - executes src/main/resources/schema.sql to create 3 tables
- *  - prints the created tables
- */
-public final class App {
+public final class ServerApp {
 
-  // In-memory DB named "dbjo". "shutdown=true" ensures clean shutdown on close.
-  private static final String JDBC_URL = "jdbc:hsqldb:mem:dbjo;shutdown=true";
   private static final String USER = "SA";
   private static final String PASS = "";
 
   public static void main(String[] args) throws Exception {
-    // Connecting starts the embedded in-memory database.
-    try (Connection conn = DriverManager.getConnection(JDBC_URL, USER, PASS)) {
-      conn.setAutoCommit(true);
+    Server server = new Server();
+    server.setProperties(new HsqlProperties());
+    server.setSilent(true);
+    server.setTrace(false);
 
-      // Create tables via SQL DDL script:
+    // In-memory DB hosted by server
+    server.setDatabaseName(0, "dbjo");
+    server.setDatabasePath(0, "mem:dbjo");
+    server.setPort(9001);
+
+    server.start();
+
+    Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+      try { server.stop(); } catch (Exception ignored) {}
+    }));
+
+    // Connect through TCP to initialize schema
+    String url = "jdbc:hsqldb:hsql://localhost:9001/dbjo";
+    try (Connection conn = DriverManager.getConnection(url, USER, PASS)) {
       SqlRunner.runClasspathScript(conn, "schema.sql");
 
-      // Verify by listing user tables:
       try (PreparedStatement ps = conn.prepareStatement(
-          "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES " +
-          "WHERE TABLE_SCHEMA = 'PUBLIC' AND TABLE_TYPE = 'BASE TABLE' " +
-          "ORDER BY TABLE_NAME")) {
+              "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES " +
+                      "WHERE TABLE_SCHEMA = 'PUBLIC' AND TABLE_TYPE = 'BASE TABLE' " +
+                      "ORDER BY TABLE_NAME")) {
         try (ResultSet rs = ps.executeQuery()) {
           System.out.println("Tables in PUBLIC schema:");
-          while (rs.next()) {
-            System.out.println(" - " + rs.getString(1));
-          }
+          while (rs.next()) System.out.println(" - " + rs.getString(1));
         }
       }
     }
+
+    System.out.println();
+    System.out.println("HSQLDB Server running.");
+    System.out.println("Connect using: jdbc:hsqldb:hsql://localhost:9001/dbjo");
+    System.out.println("Press ENTER to stop...");
+    System.in.read();
+
+    server.stop();
   }
 }

@@ -8,6 +8,7 @@
   <packaging>pom</packaging>
   <modules>
     <module>dbjo-sim-db</module>
+    <module>dbjo-reveng</module>
   </modules>
   <build>
     <plugins>
