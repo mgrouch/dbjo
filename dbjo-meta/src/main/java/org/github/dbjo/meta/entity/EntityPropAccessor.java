@@ -1,12 +1,13 @@
 package org.github.dbjo.meta.entity;
 
+import java.io.Serializable;
 import java.util.List;
 
-public abstract class EntityPropAccessor<B> {
+public interface EntityPropAccessor<B> {
 
-    public abstract List<PropAccessor<B, ?>> getAllProps();
+    List<? extends PropAccessor<B, Serializable>> getAllProps();
 
-    public abstract List<String> getAllPropsNames();
+    List<String> getAllPropsNames();
 
-    public abstract List<Class<?>> getAllPropsTypes();
+    List<Class<?>> getAllPropsTypes();
 }
