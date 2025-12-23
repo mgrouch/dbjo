@@ -7,6 +7,7 @@
   <version>1.0.0-SNAPSHOT</version>
   <packaging>pom</packaging>
   <modules>
+    <module>dbjo-meta</module>
     <module>dbjo-sim-db</module>
     <module>dbjo-reveng</module>
   </modules>
