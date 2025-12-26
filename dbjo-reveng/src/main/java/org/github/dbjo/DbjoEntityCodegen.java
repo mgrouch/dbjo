@@ -311,14 +311,14 @@ public final class DbjoEntityCodegen {
         }
 
         // Lists
-        sb.append("\n  public static final List<String> ALL_PROP_NAMES = List.of(\n");
+        sb.append("\n  public static final List<String> _ALL_PROP_NAMES = List.of(\n");
         for (int i = 0; i < props.size(); i++) {
             sb.append("      \"").append(props.get(i).propName).append("\"");
             sb.append(i < props.size() - 1 ? ",\n" : "\n");
         }
         sb.append("  );\n\n");
 
-        sb.append("  public static final List<Class<?>> ALL_PROP_TYPES = List.of(\n");
+        sb.append("  public static final List<Class<?>> _ALL_PROP_TYPES = List.of(\n");
         for (int i = 0; i < props.size(); i++) {
             sb.append("      ").append(props.get(i).classLiteral);
             sb.append(i < props.size() - 1 ? ",\n" : "\n");
@@ -327,7 +327,7 @@ public final class DbjoEntityCodegen {
 
         // EntityMeta wants List<PropertyMeta<B, Serializable>> in your definition, so we cast once.
         sb.append("  @SuppressWarnings({\"rawtypes\", \"unchecked\"})\n");
-        sb.append("  public static final List<PropertyMeta<").append(beanClass).append(", Serializable>> ALL_PROPERTY_METAS =\n");
+        sb.append("  public static final List<PropertyMeta<").append(beanClass).append(", Serializable>> _ALL_PROPERTY_METAS =\n");
         sb.append("      (List) List.of(\n");
         for (int i = 0; i < props.size(); i++) {
             sb.append("          ").append(props.get(i).constName);
@@ -336,9 +336,9 @@ public final class DbjoEntityCodegen {
         sb.append("      );\n\n");
 
         sb.append("  public static final EntityMeta<").append(beanClass).append("> META = new EntityMeta<>(\n");
-        sb.append("      ALL_PROPERTY_METAS,\n");
-        sb.append("      ALL_PROP_NAMES,\n");
-        sb.append("      ALL_PROP_TYPES\n");
+        sb.append("      _ALL_PROPERTY_METAS,\n");
+        sb.append("      _ALL_PROP_NAMES,\n");
+        sb.append("      _ALL_PROP_TYPES\n");
         sb.append("  );\n");
 
         sb.append("}\n");
