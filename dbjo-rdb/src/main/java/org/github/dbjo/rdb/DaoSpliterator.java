@@ -84,7 +84,7 @@ final class DaoSpliterator<K, T> implements Spliterator<Map.Entry<K, T>>, AutoCl
             if (idxCf == null) throw new IllegalArgumentException("Unknown index: " + indexNameOf(p));
             scanCf = idxCf;
 
-            if (p instanceof IndexEq eq) {
+            if (p instanceof IndexPredicate.Eq eq) {
                 byte[] prefix = ByteArrays.concat(eq.valueKey(), SEP);
                 this.iterFrom = prefix;
                 this.iterFromInc = true;
@@ -95,7 +95,7 @@ final class DaoSpliterator<K, T> implements Spliterator<Map.Entry<K, T>>, AutoCl
                 this.idxValueTo = eq.valueKey();   this.idxValueToInc = true;
 
                 tmpEqPrefix = prefix;
-            } else if (p instanceof IndexRange r) {
+            } else if (p instanceof IndexPredicate.Range r) {
                 byte[] fromPrefix = ByteArrays.concat(r.from(), SEP);
                 byte[] toPrefix = ByteArrays.concat(r.to(), SEP);
 
@@ -123,8 +123,8 @@ final class DaoSpliterator<K, T> implements Spliterator<Map.Entry<K, T>>, AutoCl
     }
 
     private static String indexNameOf(IndexPredicate p) {
-        if (p instanceof IndexEq eq) return eq.indexName();
-        if (p instanceof IndexRange r) return r.indexName();
+        if (p instanceof IndexPredicate.Eq eq) return eq.indexName();
+        if (p instanceof IndexPredicate.Range r) return r.indexName();
         throw new IllegalArgumentException("Unknown predicate: " + p);
     }
 
