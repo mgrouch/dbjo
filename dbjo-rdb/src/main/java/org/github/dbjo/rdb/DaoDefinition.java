@@ -1,23 +1,22 @@
 package org.github.dbjo.rdb;
 
 import org.rocksdb.ColumnFamilyHandle;
-
 import java.util.Map;
 
-public record DaoDefinition<T,K>(
+public record DaoDefinition<T, K, D extends AbstractRocksDao<T, K>>(
         String name,
         String primaryCf,
-        Map<String,String> indexNameToCf,
+        Map<String, String> indexNameToCf,
         KeyCodec<K> keyCodec,
         Codec<T> valueCodec,
-        DaoFactory<T,K> factory
+        Factory<T, K, D> factory
 ) {
-    public interface DaoFactory<T,K> {
-        AbstractRocksDao<T,K> create(SpringRocksAccess access,
-                                     ColumnFamilyHandle primary,
-                                     Map<String, ColumnFamilyHandle> indexes,
-                                     KeyCodec<K> keyCodec,
-                                     Codec<T> valueCodec);
+    @FunctionalInterface
+    public interface Factory<T, K, D extends AbstractRocksDao<T, K>> {
+        D create(SpringRocksAccess access,
+                 ColumnFamilyHandle primaryCf,
+                 Map<String, ColumnFamilyHandle> indexCfs,
+                 KeyCodec<K> keyCodec,
+                 Codec<T> valueCodec);
     }
 }
-
