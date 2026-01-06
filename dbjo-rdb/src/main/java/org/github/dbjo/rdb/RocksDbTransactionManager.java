@@ -4,85 +4,94 @@ import org.rocksdb.*;
 import org.springframework.transaction.*;
 import org.springframework.transaction.support.*;
 
-import java.util.Objects;
-
 public final class RocksDbTransactionManager extends AbstractPlatformTransactionManager {
-    private final TransactionDB txDb; // or OptimisticTransactionDB
-    private final WriteOptions writeOptions;
 
-    public RocksDbTransactionManager(TransactionDB txDb) {
-        this.txDb = Objects.requireNonNull(txDb);
-        this.writeOptions = new WriteOptions();
+    private final TransactionDB db;
+
+    public RocksDbTransactionManager(TransactionDB db) {
+        this.db = db;
         setNestedTransactionAllowed(false);
     }
 
-    @Override
-    protected Object doGetTransaction() {
-        return new TxObject();
+    private static final class TxObject {
+        RocksTxResource resource;
     }
 
-    @Override
-    protected boolean isExistingTransaction(Object transaction) {
-        TxObject tx = (TxObject) transaction;
-        return tx.transaction != null;
-    }
+    static final class RocksTxResource implements AutoCloseable {
+        final Transaction txn;
+        final WriteOptions wo;
+        final TransactionOptions to;
 
-    @Override
-    protected void doBegin(Object transaction, TransactionDefinition definition) {
-        TxObject tx = (TxObject) transaction;
-        tx.transaction = txDb.beginTransaction(writeOptions);
-        // Optional: snapshot for repeatable reads
-        tx.snapshot = txDb.getSnapshot();
-        tx.readOptions = new ReadOptions().setSnapshot(tx.snapshot);
+        RocksTxResource(Transaction txn, WriteOptions wo, TransactionOptions to) {
+            this.txn = txn;
+            this.wo = wo;
+            this.to = to;
+        }
 
-        TransactionSynchronizationManager.bindResource(txDb, tx);
-    }
-
-    @Override
-    protected void doCommit(DefaultTransactionStatus status) {
-        TxObject tx = (TxObject) TransactionSynchronizationManager.getResource(txDb);
-        try {
-            tx.transaction.commit();
-        } catch (RocksDBException e) {
-            throw new TransactionSystemException("RocksDB commit failed", e);
-        } finally {
-            cleanup(tx);
+        @Override public void close() {
+            txn.close(); // Transaction is AutoCloseable
+            wo.close();
+            to.close();
         }
     }
 
     @Override
-    protected void doRollback(DefaultTransactionStatus status) {
-        TxObject tx = (TxObject) TransactionSynchronizationManager.getResource(txDb);
+    protected Object doGetTransaction() {
+        TxObject obj = new TxObject();
+        obj.resource = (RocksTxResource) TransactionSynchronizationManager.getResource(db);
+        return obj;
+    }
+
+    @Override
+    protected boolean isExistingTransaction(Object transaction) {
+        return ((TxObject) transaction).resource != null;
+    }
+
+    @Override
+    protected void doBegin(Object transaction, TransactionDefinition definition) {
+        TxObject obj = (TxObject) transaction;
+        if (obj.resource != null) return;
+
+        WriteOptions wo = new WriteOptions();
+        TransactionOptions to = new TransactionOptions();
+        Transaction txn = db.beginTransaction(wo, to); // :contentReference[oaicite:3]{index=3}
+
+        // Optional (recommended for repeatable reads inside txn):
+        txn.setSnapshot(); // :contentReference[oaicite:4]{index=4}
+
+        obj.resource = new RocksTxResource(txn, wo, to);
+
+        TransactionSynchronizationManager.bindResource(db, obj.resource);
+    }
+
+    @Override
+    protected void doCommit(DefaultTransactionStatus status) throws TransactionException {
+        TxObject obj = (TxObject) status.getTransaction();
         try {
-            tx.transaction.rollback();
+            obj.resource.txn.commit();
+        } catch (RocksDBException e) {
+            throw new TransactionSystemException("RocksDB commit failed", e);
+        }
+    }
+
+    @Override
+    protected void doRollback(DefaultTransactionStatus status) throws TransactionException {
+        TxObject obj = (TxObject) status.getTransaction();
+        try {
+            obj.resource.txn.rollback();
         } catch (RocksDBException e) {
             throw new TransactionSystemException("RocksDB rollback failed", e);
-        } finally {
-            cleanup(tx);
         }
     }
 
     @Override
     protected void doCleanupAfterCompletion(Object transaction) {
-        TxObject tx = (TxObject) TransactionSynchronizationManager.unbindResource(txDb);
-        if (tx != null) cleanup(tx);
-    }
-
-    private void cleanup(TxObject tx) {
-        try {
-            if (tx.readOptions != null) tx.readOptions.close();
-            if (tx.snapshot != null) txDb.releaseSnapshot(tx.snapshot);
-            if (tx.transaction != null) tx.transaction.close();
-        } finally {
-            tx.transaction = null;
-            tx.snapshot = null;
-            tx.readOptions = null;
+        TxObject obj = (TxObject) transaction;
+        RocksTxResource res = obj.resource;
+        if (res != null) {
+            TransactionSynchronizationManager.unbindResource(db);
+            res.close();
+            obj.resource = null;
         }
-    }
-
-    public static final class TxObject {
-        Transaction transaction;
-        Snapshot snapshot;
-        ReadOptions readOptions;
     }
 }

@@ -94,7 +94,7 @@ public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
         DaoSpliterator<K, T> sp = new DaoSpliterator<>(
                 sessions.current(),
                 primaryCf,
-                indexCfs,     // <-- missing argument
+                indexCfs,
                 keyCodec,
                 valueCodec,
                 q
