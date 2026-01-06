@@ -3,181 +3,122 @@ package org.github.dbjo.rdb;
 import org.rocksdb.*;
 
 import java.util.*;
-import java.util.function.Consumer;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
-    protected final RocksDB db;
-    protected final ColumnFamilyHandle cf; // can be default CF too
+    protected final SpringRocksAccess access;
+    protected final ColumnFamilyHandle primaryCf;
     protected final KeyCodec<K> keyCodec;
     protected final Codec<T> valueCodec;
 
-    protected final ReadOptions readOptions;
-    protected final WriteOptions writeOptions;
+    // index CFs (recommended): indexName -> CF
+    protected final Map<String, ColumnFamilyHandle> indexCfs;
 
-    protected AbstractRocksDao(
-            RocksDB db,
-            ColumnFamilyHandle cf,
-            KeyCodec<K> keyCodec,
-            Codec<T> valueCodec,
-            ReadOptions readOptions,
-            WriteOptions writeOptions
-    ) {
-        this.db = Objects.requireNonNull(db);
-        this.cf = Objects.requireNonNull(cf);
-        this.keyCodec = Objects.requireNonNull(keyCodec);
-        this.valueCodec = Objects.requireNonNull(valueCodec);
-        this.readOptions = (readOptions != null) ? readOptions : new ReadOptions();
-        this.writeOptions = (writeOptions != null) ? writeOptions : new WriteOptions();
+    protected AbstractRocksDao(SpringRocksAccess access,
+                               ColumnFamilyHandle primaryCf,
+                               KeyCodec<K> keyCodec,
+                               Codec<T> valueCodec,
+                               Map<String, ColumnFamilyHandle> indexCfs) {
+        this.access = access;
+        this.primaryCf = primaryCf;
+        this.keyCodec = keyCodec;
+        this.valueCodec = valueCodec;
+        this.indexCfs = Map.copyOf(indexCfs);
     }
 
-    @Override
     public Optional<T> get(K key) {
-        Objects.requireNonNull(key);
         try {
-            byte[] k = keyCodec.encodeKey(key);
-            byte[] v = db.get(cf, readOptions, k);
-            if (v == null) return Optional.empty();
-            return Optional.ofNullable(valueCodec.decode(v));
+            byte[] kb = keyCodec.encodeKey(key);
+            Transaction txn = access.currentTxnOrNull();
+            if (txn != null) {
+                ReadOptions ro = access.currentReadOptionsOrNull();
+                byte[] v = txn.get(primaryCf, ro, kb);
+                return v == null ? Optional.empty() : Optional.of(valueCodec.decode(v));
+            } else {
+                byte[] v = access.txDb().get(primaryCf, kb);
+                return v == null ? Optional.empty() : Optional.of(valueCodec.decode(v));
+            }
         } catch (RocksDBException e) {
             throw new RocksDaoException("get failed", e);
         }
     }
 
-    @Override
-    public boolean containsKey(K key) {
-        return get(key).isPresent();
-    }
+    public void upsert(K key, T value) {
+        try {
+            byte[] kb = keyCodec.encodeKey(key);
+            byte[] vb = valueCodec.encode(value);
 
-    @Override
-    public void put(K key, T value) {
-        Objects.requireNonNull(key);
-        Objects.requireNonNull(value);
-
-        // Optional hook: maintain secondary indexes
-        // We do: read old value (if any), compute index deltas.
-        Optional<T> old = get(key);
-
-        try (WriteBatch batch = new WriteBatch()) {
-            byte[] k = keyCodec.encodeKey(key);
-            byte[] v = valueCodec.encode(value);
-            batch.put(cf, k, v);
-
-            if (old.isPresent()) {
-                onUpdateIndexes(batch, key, old.get(), value);
+            Transaction txn = access.currentTxnOrNull();
+            if (txn != null) {
+                // maintain indexes using a WriteBatch-like pattern on the txn
+                Optional<T> old = get(key);
+                txn.put(primaryCf, kb, vb);
+                maintainIndexes(txn, key, old.orElse(null), value);
             } else {
-                onInsertIndexes(batch, key, value);
+                // outside tx: do batch write
+                Optional<T> old = get(key);
+                try (WriteBatch wb = new WriteBatch(); WriteOptions wo = new WriteOptions()) {
+                    wb.put(primaryCf, kb, vb);
+                    maintainIndexes(wb, key, old.orElse(null), value);
+                    access.txDb().write(wo, wb);
+                }
             }
-
-            db.write(writeOptions, batch);
         } catch (RocksDBException e) {
-            throw new RocksDaoException("put failed", e);
+            throw new RocksDaoException("upsert failed", e);
         }
     }
 
-    @Override
     public boolean delete(K key) {
-        Objects.requireNonNull(key);
-
         Optional<T> old = get(key);
         if (old.isEmpty()) return false;
 
-        try (WriteBatch batch = new WriteBatch()) {
-            byte[] k = keyCodec.encodeKey(key);
-            batch.delete(cf, k);
-
-            onDeleteIndexes(batch, key, old.get());
-
-            db.write(writeOptions, batch);
+        try {
+            byte[] kb = keyCodec.encodeKey(key);
+            Transaction txn = access.currentTxnOrNull();
+            if (txn != null) {
+                txn.delete(primaryCf, kb);
+                maintainIndexesOnDelete(txn, key, old.get());
+            } else {
+                try (WriteBatch wb = new WriteBatch(); WriteOptions wo = new WriteOptions()) {
+                    wb.delete(primaryCf, kb);
+                    maintainIndexesOnDelete(wb, key, old.get());
+                    access.txDb().write(wo, wb);
+                }
+            }
             return true;
         } catch (RocksDBException e) {
             throw new RocksDaoException("delete failed", e);
         }
     }
 
-    @Override
-    public Map<K, T> getAll(Collection<K> keys) {
-        Objects.requireNonNull(keys);
-        if (keys.isEmpty()) return Map.of();
-
-        try {
-            // RocksJava multiGet requires list of byte[] keys
-            List<byte[]> keyBytes = new ArrayList<>(keys.size());
-            List<K> keyList = new ArrayList<>(keys.size());
-            for (K k : keys) {
-                keyList.add(k);
-                keyBytes.add(keyCodec.encodeKey(k));
-            }
-
-            Map<byte[], byte[]> raw = db.multiGetAsList(
-                    Collections.nCopies(keyBytes.size(), cf),
-                    keyBytes
-            ).stream().collect(HashMap::new, (m, v) -> {
-                // multiGetAsList returns values list, so we handle below; easiest is manual loop.
-            }, HashMap::putAll);
-
-            // The above stream approach is awkward; do manual:
-            List<byte[]> values = db.multiGetAsList(Collections.nCopies(keyBytes.size(), cf), keyBytes);
-            Map<K, T> out = new LinkedHashMap<>();
-            for (int i = 0; i < keyList.size(); i++) {
-                byte[] v = values.get(i);
-                if (v != null) out.put(keyList.get(i), valueCodec.decode(v));
-            }
-            return out;
-        } catch (RocksDBException e) {
-            throw new RocksDaoException("getAll failed", e);
-        }
+    /** Criteria query -> Stream (closes iterator on close). */
+    public Stream<Map.Entry<K,T>> stream(Query<K> q) {
+        var spliterator = new DaoSpliterator<>(this, q);
+        return StreamSupport.stream(spliterator, false).onClose(spliterator::close);
     }
 
-    @Override
-    public void putAll(Map<K, T> entries) {
-        Objects.requireNonNull(entries);
-        if (entries.isEmpty()) return;
+    // ---- Index maintenance hooks (batch or txn) ----
+    protected abstract void maintainIndexes(IndexWriter w, K key, T oldValueOrNull, T newValue) throws RocksDBException;
+    protected abstract void maintainIndexesOnDelete(IndexWriter w, K key, T oldValue) throws RocksDBException;
 
-        try (WriteBatch batch = new WriteBatch()) {
-            // If you need index maintenance in bulk, you can:
-            // 1) multiGet old values
-            // 2) apply deltas
-            // For simplicity, this bulk put does NOT diff old vs new; override if needed.
-            for (var e : entries.entrySet()) {
-                byte[] k = keyCodec.encodeKey(e.getKey());
-                byte[] v = valueCodec.encode(e.getValue());
-                batch.put(cf, k, v);
-            }
-            db.write(writeOptions, batch);
-        } catch (RocksDBException e) {
-            throw new RocksDaoException("putAll failed", e);
-        }
+    /** Unifies WriteBatch and Transaction for index updates. */
+    protected interface IndexWriter {
+        void put(ColumnFamilyHandle cf, byte[] key, byte[] value) throws RocksDBException;
+        void delete(ColumnFamilyHandle cf, byte[] key) throws RocksDBException;
     }
 
-    @Override
-    public void forEach(Consumer<Map.Entry<K, T>> consumer) {
-        Objects.requireNonNull(consumer);
-        try (RocksIterator it = db.newIterator(cf, readOptions)) {
-            for (it.seekToFirst(); it.isValid(); it.next()) {
-                K k = keyCodec.decodeKey(it.key());
-                T v = valueCodec.decode(it.value());
-                consumer.accept(Map.entry(k, v));
-            }
-        }
+    protected static IndexWriter writer(WriteBatch wb) {
+        return new IndexWriter() {
+            @Override public void put(ColumnFamilyHandle cf, byte[] key, byte[] value) throws RocksDBException { wb.put(cf, key, value); }
+            @Override public void delete(ColumnFamilyHandle cf, byte[] key) throws RocksDBException { wb.delete(cf, key); }
+        };
     }
 
-    @Override
-    public long approximateSize() {
-        // Could be improved with RocksDB properties / estimate
-        // If you need accurate counts, store a counter key and update it transactionally.
-        return -1;
-    }
-
-    // ---- Secondary index hooks (optional) ----
-    // Override these in concrete DAOs if you want indexes.
-    protected void onInsertIndexes(WriteBatch batch, K key, T value) throws RocksDBException {}
-    protected void onUpdateIndexes(WriteBatch batch, K key, T oldValue, T newValue) throws RocksDBException {}
-    protected void onDeleteIndexes(WriteBatch batch, K key, T oldValue) throws RocksDBException {}
-
-    @Override
-    public void close() {
-        // DO NOT close RocksDB here if it's shared across DAOs.
-        // Close per-DAO options if you own them:
-        // readOptions.close(); writeOptions.close();
+    protected static IndexWriter writer(Transaction txn) {
+        return new IndexWriter() {
+            @Override public void put(ColumnFamilyHandle cf, byte[] key, byte[] value) throws RocksDBException { txn.put(cf, key, value); }
+            @Override public void delete(ColumnFamilyHandle cf, byte[] key) throws RocksDBException { txn.delete(cf, key); }
+        };
     }
 }
