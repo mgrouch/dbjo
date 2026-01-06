@@ -6,11 +6,10 @@ import org.rocksdb.RocksDBException;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.stream.Stream;
-import java.util.stream.StreamSupport;
 
 public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
-    private final RocksSessions sessions;              // provider (tx-aware outside DAO)
+
+    private final RocksSessions sessions;
     protected final ColumnFamilyHandle primaryCf;
     protected final KeyCodec<K> keyCodec;
     protected final Codec<T> valueCodec;
@@ -37,7 +36,7 @@ public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
             RocksSession s = sessions.current();
             byte[] kb = keyCodec.encodeKey(key);
             byte[] vb = s.get(primaryCf, kb);
-            return vb == null ? Optional.empty() : Optional.of(valueCodec.decode(vb));
+            return (vb == null) ? Optional.empty() : Optional.of(valueCodec.decode(vb));
         } catch (RocksDBException e) {
             throw new RocksDaoException("get failed", e);
         }
@@ -75,7 +74,6 @@ public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
 
         try {
             RocksSession s = sessions.current();
-
             byte[] kb = keyCodec.encodeKey(key);
 
             RocksWriteBatch batch = new RocksWriteBatch();
@@ -90,23 +88,44 @@ public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
         }
     }
 
+    /**
+     * Optimized existence check (avoids decoding value).
+     * Overrides Dao.default containsKey().
+     */
+    @Override
+    public boolean containsKey(K key) {
+        Objects.requireNonNull(key);
+        return existsKeyBytes(keyCodec.encodeKey(key));
+    }
+
     protected boolean existsKeyBytes(byte[] kb) {
         try {
             RocksSession s = sessions.current();
             try (var ro = s.newReadOptions()) {
                 return s.get(primaryCf, ro, kb) != null;
             }
-        } catch (org.rocksdb.RocksDBException e) {
+        } catch (RocksDBException e) {
             throw new RocksDaoException("exists failed", e);
         }
     }
 
+    /**
+     * Base iteration implementation using your existing Query/Spliterator scanning.
+     * This satisfies Dao.forEach(...).
+     */
     @Override
-    public boolean containsKey(K key) {
-        return existsKeyBytes(keyCodec.encodeKey(key));
+    public void forEach(java.util.function.Consumer<Map.Entry<K, T>> consumer) {
+        Objects.requireNonNull(consumer);
+        var q = Query.<K>builder().build(); // full scan
+        try (var st = stream(q)) {
+            st.forEach(consumer);
+        }
     }
 
-    public Stream<Map.Entry<K, T>> stream(Query<K> q) {
+    /**
+     * Not in Dao interface, but useful API. You can also move this into Dao if you want.
+     */
+    public java.util.stream.Stream<Map.Entry<K, T>> stream(Query<K> q) {
         DaoSpliterator<K, T> sp = new DaoSpliterator<>(
                 sessions.current(),
                 primaryCf,
@@ -115,8 +134,13 @@ public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
                 valueCodec,
                 q
         );
-        return StreamSupport.stream(sp, false).onClose(sp::close);
+        return java.util.stream.StreamSupport.stream(sp, false).onClose(sp::close);
     }
+
+    // Leave close() as no-op unless your DAO owns resources.
+    @Override
+    public void close() { /* no-op */ }
+
     protected abstract void maintainIndexes(RocksWriteBatch batch, K key, T oldValueOrNull, T newValue) throws RocksDBException;
     protected abstract void maintainIndexesOnDelete(RocksWriteBatch batch, K key, T oldValue) throws RocksDBException;
 }
