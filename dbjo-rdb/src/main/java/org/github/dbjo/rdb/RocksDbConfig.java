@@ -56,7 +56,7 @@ public class RocksDbConfig {
     }
 
     @Bean
-    public DaoRegistry daoRegistry() {
-        return new DaoRegistry();
+    public DaoRegistry daoRegistry(RocksDbHandle h) {
+        return new DaoRegistry(h.db(), h.cfByName());
     }
 }
