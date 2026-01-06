@@ -16,20 +16,26 @@ final class DaoSpliterator<K, T> implements Spliterator<Map.Entry<K, T>>, AutoCl
     private final KeyCodec<K> keyCodec;
     private final Codec<T> valueCodec;
 
+    private final RocksSession.IteratorHandle ih;
     private final RocksIterator it;
+    private final ReadOptions ro;
+
     private final boolean indexScan;
     private final boolean descending;
 
     private int remaining;
     private boolean closed;
 
-    // Bounds for iterator keys (not decoded K; these are raw key-bytes bounds)
-    private final byte[] iterFrom;        // inclusive seek anchor (ascending) / lower bound filter (descending)
+    // Bounds for iterator keys (raw key bytes)
+    private final byte[] iterFrom;
     private final boolean iterFromInc;
-    private final byte[] iterTo;          // upper bound filter (ascending) / seek anchor (descending)
+    private final byte[] iterTo;
     private final boolean iterToInc;
 
-    // For index-range exclusive filtering, we may need value-only bounds
+    // Extra: for IndexEq stop condition when iterTo == null
+    private final byte[] eqPrefixOrNull;
+
+    // For index-range filtering
     private final byte[] idxValueFrom;
     private final boolean idxValueFromInc;
     private final byte[] idxValueTo;
@@ -49,14 +55,14 @@ final class DaoSpliterator<K, T> implements Spliterator<Map.Entry<K, T>>, AutoCl
 
         this.remaining = q.limit();
         this.descending = q.descending();
-
-        // Decide scan plan: if any index predicate exists, drive scan via the FIRST predicate.
-        // (Full multi-predicate intersection is doable, but needs a bit more plumbing.)
         this.indexScan = !q.indexPredicates().isEmpty();
 
+        ColumnFamilyHandle scanCf;
+        byte[] tmpEqPrefix = null;
+
         if (!indexScan) {
-            // Primary scan over primary CF keys
-            this.it = newIterator(primaryCf);
+            // Primary scan over primary CF
+            scanCf = primaryCf;
 
             var kr = q.keyRange().orElse(null);
             if (kr != null) {
@@ -69,22 +75,16 @@ final class DaoSpliterator<K, T> implements Spliterator<Map.Entry<K, T>>, AutoCl
                 this.iterTo = null;   this.iterToInc = true;
             }
 
-            // No index-value bounds in primary scan
             this.idxValueFrom = null; this.idxValueFromInc = true;
             this.idxValueTo = null;   this.idxValueToInc = true;
-
-            seekPrimary();
         } else {
-            // Index scan over index CF keys, then fetch primary value per pk.
+            // Index scan
             IndexPredicate p = q.indexPredicates().get(0);
-
             ColumnFamilyHandle idxCf = indexCfs.get(indexNameOf(p));
             if (idxCf == null) throw new IllegalArgumentException("Unknown index: " + indexNameOf(p));
-
-            this.it = newIterator(idxCf);
+            scanCf = idxCf;
 
             if (p instanceof IndexEq eq) {
-                // prefix = valueKey + SEP
                 byte[] prefix = ByteArrays.concat(eq.valueKey(), SEP);
                 this.iterFrom = prefix;
                 this.iterFromInc = true;
@@ -93,13 +93,15 @@ final class DaoSpliterator<K, T> implements Spliterator<Map.Entry<K, T>>, AutoCl
 
                 this.idxValueFrom = eq.valueKey(); this.idxValueFromInc = true;
                 this.idxValueTo = eq.valueKey();   this.idxValueToInc = true;
+
+                tmpEqPrefix = prefix;
             } else if (p instanceof IndexRange r) {
                 byte[] fromPrefix = ByteArrays.concat(r.from(), SEP);
                 byte[] toPrefix = ByteArrays.concat(r.to(), SEP);
 
                 this.iterFrom = fromPrefix;
-                this.iterFromInc = true; // prefix scan always starts inclusive; exclusive handled by filtering
-                this.iterTo = ByteArrays.prefixEndExclusive(toPrefix); // includes all keys for r.to()
+                this.iterFromInc = true;
+                this.iterTo = ByteArrays.prefixEndExclusive(toPrefix);
                 this.iterToInc = false;
 
                 this.idxValueFrom = r.from(); this.idxValueFromInc = r.fromInclusive();
@@ -107,17 +109,17 @@ final class DaoSpliterator<K, T> implements Spliterator<Map.Entry<K, T>>, AutoCl
             } else {
                 throw new IllegalArgumentException("Unsupported predicate type: " + p.getClass().getName());
             }
-
-            seekIndex();
         }
-    }
 
-    private RocksIterator newIterator(ColumnFamilyHandle cf) {
-        try {
-            return session.newIterator(cf);
-        } catch (RocksDBException e) {
-            throw new RocksDaoException("newIterator failed", e);
-        }
+        this.eqPrefixOrNull = tmpEqPrefix;
+
+        // Allocate iterator + read options together
+        this.ih = session.openIterator(scanCf);
+        this.it = ih.it();
+        this.ro = ih.ro();
+
+        if (!indexScan) seekPrimary();
+        else seekIndex();
     }
 
     private static String indexNameOf(IndexPredicate p) {
@@ -136,16 +138,11 @@ final class DaoSpliterator<K, T> implements Spliterator<Map.Entry<K, T>>, AutoCl
             }
         } else {
             if (iterTo != null) {
-                // seek to first key >= iterTo, then step back to <= iterTo (or < iterTo if exclusive)
                 it.seek(iterTo);
                 if (!it.isValid()) it.seekToLast();
                 else {
-                    // if key == iterTo and exclusive, move back
                     if (!iterToInc && ByteArrays.compare(it.key(), iterTo) == 0) it.prev();
-                    else {
-                        // if key > iterTo (can happen), move back
-                        if (ByteArrays.compare(it.key(), iterTo) > 0) it.prev();
-                    }
+                    else if (ByteArrays.compare(it.key(), iterTo) > 0) it.prev();
                 }
             } else {
                 it.seekToLast();
@@ -154,11 +151,9 @@ final class DaoSpliterator<K, T> implements Spliterator<Map.Entry<K, T>>, AutoCl
     }
 
     private void seekIndex() {
-        // iterFrom is always a proper lower bound key in index CF
         if (!descending) {
             it.seek(iterFrom);
         } else {
-            // iterTo is endExclusive; for descending we want the last key < iterTo
             if (iterTo != null) {
                 it.seek(iterTo);
                 if (!it.isValid()) it.seekToLast();
@@ -177,7 +172,7 @@ final class DaoSpliterator<K, T> implements Spliterator<Map.Entry<K, T>>, AutoCl
             if (remaining <= 0) { close(); return false; }
             if (!it.isValid()) { close(); return false; }
 
-            // Stop on iterator bounds
+            // Stop on iterator bounds (generic)
             if (!descending) {
                 if (iterTo != null) {
                     int c = ByteArrays.compare(it.key(), iterTo);
@@ -191,7 +186,6 @@ final class DaoSpliterator<K, T> implements Spliterator<Map.Entry<K, T>>, AutoCl
             }
 
             if (!indexScan) {
-                // Primary scan emits current key/value
                 K k = keyCodec.decodeKey(it.key());
                 T v = valueCodec.decode(it.value());
                 action.accept(Map.entry(k, v));
@@ -200,54 +194,46 @@ final class DaoSpliterator<K, T> implements Spliterator<Map.Entry<K, T>>, AutoCl
                 remaining--;
                 return true;
             } else {
-                // Index scan: parse valueBytes + SEP + pkBytes
+                // IndexEq correctness: if iterTo == null we must stop when prefix no longer matches
+                if (eqPrefixOrNull != null && !startsWith(it.key(), eqPrefixOrNull)) {
+                    close();
+                    return false;
+                }
+
                 byte[] idxKey = it.key();
                 int sepPos = ByteArrays.indexOf(idxKey, SEP);
                 if (sepPos <= 0 || sepPos == idxKey.length - 1) {
-                    // malformed index key; skip
                     if (!descending) it.next(); else it.prev();
                     continue;
                 }
 
                 byte[] valuePart = java.util.Arrays.copyOfRange(idxKey, 0, sepPos);
 
-                // Apply exclusivity of IndexRange (if any)
-                if (!idxValueFromInc && ByteArrays.compare(valuePart, idxValueFrom) == 0) {
-                    if (!descending) it.next(); else it.prev();
-                    continue;
+                // Range fence (also protects against iterTo == null cases)
+                if (idxValueFrom != null) {
+                    int cFrom = ByteArrays.compare(valuePart, idxValueFrom);
+                    if (cFrom < 0 || (cFrom == 0 && !idxValueFromInc)) {
+                        if (!descending) it.next(); else it.prev();
+                        continue;
+                    }
                 }
-                if (!idxValueToInc && ByteArrays.compare(valuePart, idxValueTo) == 0) {
-                    if (!descending) it.next(); else it.prev();
-                    continue;
+                if (idxValueTo != null) {
+                    int cTo = ByteArrays.compare(valuePart, idxValueTo);
+                    if (cTo > 0 || (cTo == 0 && !idxValueToInc)) {
+                        // In ascending order, once we pass upper bound we can stop.
+                        if (!descending) { close(); return false; }
+                        // In descending, keep stepping until we’re back in range.
+                        it.prev();
+                        continue;
+                    }
                 }
 
                 byte[] pkBytes = java.util.Arrays.copyOfRange(idxKey, sepPos + 1, idxKey.length);
 
-                // Optional primary key range filter (from Query.keyRange)
-                // NOTE: this compares encoded key bytes, which is correct if your KeyCodec is order-preserving.
-                // If not, you should filter on decoded K instead.
-                // We’ll do byte compare because it matches RocksDB ordering.
-                // (If you store random hash keys, range is meaningless anyway.)
-                // ----
-                // If you want decoded-K filtering, I can switch this.
-                // ----
-                // Using the already-encoded pkBytes:
-                // (We need the primary bounds bytes from KeyRange, but those are iterFrom/iterTo only for primary scan.
-                // For index scan, use q.keyRange() if provided.)
-                // Quick approach: if Query.keyRange present, recompute bounds per pkBytes now:
-                // (That’s a tiny overhead.)
-                // ----
-                // Implemented below:
-                // ----
-                // Fetch q.keyRange again is not available here, so we skip that in this minimal impl.
-                // If you want it, pass the primary bounds into this class for index scan too.
-                // ----
-
-                // Fetch primary
                 try {
-                    byte[] vb = session.get(primaryCf, pkBytes);
+                    // Reuse same ReadOptions (snapshot-consistent and avoids per-row allocation)
+                    byte[] vb = session.get(primaryCf, ro, pkBytes);
                     if (vb == null) {
-                        // stale index entry; skip
                         if (!descending) it.next(); else it.prev();
                         continue;
                     }
@@ -266,6 +252,14 @@ final class DaoSpliterator<K, T> implements Spliterator<Map.Entry<K, T>>, AutoCl
         }
     }
 
+    private static boolean startsWith(byte[] a, byte[] prefix) {
+        if (a.length < prefix.length) return false;
+        for (int i = 0; i < prefix.length; i++) {
+            if (a[i] != prefix[i]) return false;
+        }
+        return true;
+    }
+
     @Override public Spliterator<Map.Entry<K, T>> trySplit() { return null; }
     @Override public long estimateSize() { return remaining < 0 ? Long.MAX_VALUE : remaining; }
     @Override public int characteristics() { return ORDERED | NONNULL; }
@@ -274,7 +268,7 @@ final class DaoSpliterator<K, T> implements Spliterator<Map.Entry<K, T>>, AutoCl
     public void close() {
         if (!closed) {
             closed = true;
-            it.close();
+            ih.close(); // closes iterator + ReadOptions
         }
     }
 }

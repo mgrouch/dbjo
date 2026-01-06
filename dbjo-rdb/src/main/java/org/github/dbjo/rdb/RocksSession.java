@@ -3,8 +3,7 @@ package org.github.dbjo.rdb;
 import org.rocksdb.*;
 
 public interface RocksSession {
-
-    ReadOptions newReadOptions(); // caller (or helper) closes
+    ReadOptions newReadOptions();
 
     byte[] get(ColumnFamilyHandle cf, ReadOptions ro, byte[] key) throws RocksDBException;
 
@@ -12,14 +11,14 @@ public interface RocksSession {
 
     void write(RocksWriteBatch batch) throws RocksDBException;
 
-    // ---- Convenience: common get without having to manage ReadOptions everywhere ----
+    // Convenience for simple point-get
     default byte[] get(ColumnFamilyHandle cf, byte[] key) throws RocksDBException {
         try (ReadOptions ro = newReadOptions()) {
             return get(cf, ro, key);
         }
     }
 
-    // ---- Iterator handle that closes BOTH iterator and ReadOptions ----
+    // Iterator handle that closes BOTH iterator and RO
     default IteratorHandle openIterator(ColumnFamilyHandle cf) {
         ReadOptions ro = newReadOptions();
         RocksIterator it = iterator(cf, ro);
@@ -28,7 +27,6 @@ public interface RocksSession {
 
     record IteratorHandle(RocksIterator it, ReadOptions ro) implements AutoCloseable {
         @Override public void close() {
-            // Order doesn’t matter much, but close iterator first.
             it.close();
             ro.close();
         }
