@@ -1,31 +1,34 @@
 package org.github.dbjo.rdb;
 
-import org.rocksdb.*;
+import org.rocksdb.ReadOptions;
+import org.rocksdb.Transaction;
+import org.rocksdb.TransactionDB;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.Map;
+import java.util.Objects;
 
-public final class SpringRocksAccess implements RocksAccess {
-    private final TransactionDB txDb; // or OptimisticTransactionDB
-    private final Map<String, ColumnFamilyHandle> cfs;
+public final class SpringRocksAccess {
 
-    public SpringRocksAccess(TransactionDB txDb, Map<String, ColumnFamilyHandle> cfs) {
-        this.txDb = txDb;
-        this.cfs = cfs;
+    private final TransactionDB txDb;
+    private final Map<String, ?> cfByName; // keep whatever type you had
+
+    public SpringRocksAccess(TransactionDB txDb, Map<String, ?> cfByName) {
+        this.txDb = Objects.requireNonNull(txDb);
+        this.cfByName = Objects.requireNonNull(cfByName);
     }
 
-    @Override public Transaction currentTxnOrNull() {
-        var res = TransactionSynchronizationManager.getResource(txDb);
-        if (res instanceof RocksDbTransactionManager.TxObject txObj) return txObj.transaction;
-        return null;
+    public TransactionDB txDb() {
+        return txDb;
+    }
+
+    public Transaction currentTxnOrNull() {
+        Object res = TransactionSynchronizationManager.getResource(RocksDbTransactionManager.Keys.TXN);
+        return (res instanceof Transaction t) ? t : null;
     }
 
     public ReadOptions currentReadOptionsOrNull() {
-        var res = TransactionSynchronizationManager.getResource(txDb);
-        if (res instanceof RocksDbTransactionManager.TxObject txObj) return txObj.readOptions;
-        return null;
+        Object res = TransactionSynchronizationManager.getResource(RocksDbTransactionManager.Keys.READ_OPTIONS);
+        return (res instanceof ReadOptions ro) ? ro : null;
     }
-
-    @Override public TransactionDB txDb() { return txDb; }
-    @Override public ColumnFamilyHandle cf(String name) { return cfs.get(name); }
 }

@@ -1,97 +1,89 @@
 package org.github.dbjo.rdb;
 
 import org.rocksdb.*;
-import org.springframework.transaction.*;
-import org.springframework.transaction.support.*;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.AbstractPlatformTransactionManager;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.DefaultTransactionStatus;
 
 public final class RocksDbTransactionManager extends AbstractPlatformTransactionManager {
 
-    private final TransactionDB db;
-
-    public RocksDbTransactionManager(TransactionDB db) {
-        this.db = db;
-        setNestedTransactionAllowed(false);
+    /** Public resource keys (no leaking TxObject type). */
+    public static final class Keys {
+        private Keys() {}
+        public static final Object TXN = new Object();
+        public static final Object READ_OPTIONS = new Object();
     }
 
-    private static final class TxObject {
-        RocksTxResource resource;
-    }
+    private final TransactionDB txDb;
 
-    static final class RocksTxResource implements AutoCloseable {
-        final Transaction txn;
-        final WriteOptions wo;
-        final TransactionOptions to;
-
-        RocksTxResource(Transaction txn, WriteOptions wo, TransactionOptions to) {
-            this.txn = txn;
-            this.wo = wo;
-            this.to = to;
-        }
-
-        @Override public void close() {
-            txn.close(); // Transaction is AutoCloseable
-            wo.close();
-            to.close();
-        }
+    public RocksDbTransactionManager(TransactionDB txDb) {
+        this.txDb = txDb;
     }
 
     @Override
     protected Object doGetTransaction() {
-        TxObject obj = new TxObject();
-        obj.resource = (RocksTxResource) TransactionSynchronizationManager.getResource(db);
-        return obj;
+        // We don't need a custom transaction object for binding.
+        return new Object();
     }
 
     @Override
     protected boolean isExistingTransaction(Object transaction) {
-        return ((TxObject) transaction).resource != null;
+        return TransactionSynchronizationManager.getResource(Keys.TXN) instanceof Transaction;
     }
 
     @Override
     protected void doBegin(Object transaction, TransactionDefinition definition) {
-        TxObject obj = (TxObject) transaction;
-        if (obj.resource != null) return;
-
-        WriteOptions wo = new WriteOptions();
-        TransactionOptions to = new TransactionOptions();
-        Transaction txn = db.beginTransaction(wo, to); // :contentReference[oaicite:3]{index=3}
-
-        // Optional (recommended for repeatable reads inside txn):
-        txn.setSnapshot(); // :contentReference[oaicite:4]{index=4}
-
-        obj.resource = new RocksTxResource(txn, wo, to);
-
-        TransactionSynchronizationManager.bindResource(db, obj.resource);
-    }
-
-    @Override
-    protected void doCommit(DefaultTransactionStatus status) throws TransactionException {
-        TxObject obj = (TxObject) status.getTransaction();
         try {
-            obj.resource.txn.commit();
-        } catch (RocksDBException e) {
-            throw new TransactionSystemException("RocksDB commit failed", e);
+            // You can tune these
+            WriteOptions wo = new WriteOptions();
+            Transaction txn = txDb.beginTransaction(wo);
+
+            ReadOptions ro = new ReadOptions();
+            // Optional: snapshot consistency inside a tx
+            // Snapshot snap = txDb.getSnapshot();
+            // ro.setSnapshot(snap);
+
+            TransactionSynchronizationManager.bindResource(Keys.TXN, txn);
+            TransactionSynchronizationManager.bindResource(Keys.READ_OPTIONS, ro);
+        } catch (Exception e) {
+            throw new org.springframework.transaction.TransactionSystemException("RocksDB begin failed", e);
         }
     }
 
     @Override
-    protected void doRollback(DefaultTransactionStatus status) throws TransactionException {
-        TxObject obj = (TxObject) status.getTransaction();
-        try {
-            obj.resource.txn.rollback();
-        } catch (RocksDBException e) {
-            throw new TransactionSystemException("RocksDB rollback failed", e);
+    protected void doCommit(DefaultTransactionStatus status) {
+        Object res = TransactionSynchronizationManager.getResource(Keys.TXN);
+        if (res instanceof Transaction txn) {
+            try {
+                txn.commit();
+            } catch (RocksDBException e) {
+                throw new org.springframework.transaction.TransactionSystemException("RocksDB commit failed", e);
+            }
+        }
+    }
+
+    @Override
+    protected void doRollback(DefaultTransactionStatus status) {
+        Object res = TransactionSynchronizationManager.getResource(Keys.TXN);
+        if (res instanceof Transaction txn) {
+            try {
+                txn.rollback();
+            } catch (RocksDBException e) {
+                throw new org.springframework.transaction.TransactionSystemException("RocksDB rollback failed", e);
+            }
         }
     }
 
     @Override
     protected void doCleanupAfterCompletion(Object transaction) {
-        TxObject obj = (TxObject) transaction;
-        RocksTxResource res = obj.resource;
-        if (res != null) {
-            TransactionSynchronizationManager.unbindResource(db);
-            res.close();
-            obj.resource = null;
-        }
+        Object txnObj = TransactionSynchronizationManager.unbindResourceIfPossible(Keys.TXN);
+        Object roObj  = TransactionSynchronizationManager.unbindResourceIfPossible(Keys.READ_OPTIONS);
+
+        if (txnObj instanceof Transaction txn) txn.close();
+        if (roObj instanceof ReadOptions ro) ro.close();
+
+        // If you enabled snapshots above, also release them here:
+        // if (snap != null) txDb.releaseSnapshot(snap);
     }
 }
