@@ -6,11 +6,6 @@ import java.util.function.Consumer;
 public interface Dao<T, K> extends AutoCloseable {
     Optional<T> get(K key);
 
-    // Put / update
-    void put(K key, T value);
-
-    // Create-only (fails if exists) or Update-only are easy to add later.
-
     void upsert(K key, T value);
 
     boolean delete(K key);

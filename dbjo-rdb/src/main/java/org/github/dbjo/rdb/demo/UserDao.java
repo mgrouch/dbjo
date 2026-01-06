@@ -1,14 +1,14 @@
 package org.github.dbjo.rdb.demo;
 
 import org.github.dbjo.rdb.*;
-import org.rocksdb.*;
+import org.rocksdb.ColumnFamilyHandle;
+import org.rocksdb.RocksDBException;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 public final class UserDao extends AbstractRocksDao<User, String> {
 
-    public static final String CF_USERS = "users";
     public static final String IDX_EMAIL = "users_email_idx";
 
     public UserDao(RocksSessions sessions,

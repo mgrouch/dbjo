@@ -90,6 +90,22 @@ public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
         }
     }
 
+    protected boolean existsKeyBytes(byte[] kb) {
+        try {
+            RocksSession s = sessions.current();
+            try (var ro = s.newReadOptions()) {
+                return s.get(primaryCf, ro, kb) != null;
+            }
+        } catch (org.rocksdb.RocksDBException e) {
+            throw new RocksDaoException("exists failed", e);
+        }
+    }
+
+    @Override
+    public boolean containsKey(K key) {
+        return existsKeyBytes(keyCodec.encodeKey(key));
+    }
+
     public Stream<Map.Entry<K, T>> stream(Query<K> q) {
         DaoSpliterator<K, T> sp = new DaoSpliterator<>(
                 sessions.current(),
