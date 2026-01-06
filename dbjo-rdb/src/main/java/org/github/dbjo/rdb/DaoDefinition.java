@@ -13,7 +13,7 @@ public record DaoDefinition<T, K, D extends AbstractRocksDao<T, K>>(
 ) {
     @FunctionalInterface
     public interface Factory<T, K, D extends AbstractRocksDao<T, K>> {
-        D create(SpringRocksAccess access,
+        D create(RocksSessions access,
                  ColumnFamilyHandle primaryCf,
                  Map<String, ColumnFamilyHandle> indexCfs,
                  KeyCodec<K> keyCodec,

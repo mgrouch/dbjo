@@ -1,5 +1,6 @@
-package org.github.dbjo.rdb;
+package org.github.dbjo.rdb.demo;
 
+import org.github.dbjo.rdb.*;
 import org.rocksdb.*;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.*;

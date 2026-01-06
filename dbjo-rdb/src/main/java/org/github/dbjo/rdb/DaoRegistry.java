@@ -1,42 +1,48 @@
 package org.github.dbjo.rdb;
 
 import org.rocksdb.ColumnFamilyHandle;
-import org.rocksdb.TransactionDB;
 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 
 public final class DaoRegistry implements AutoCloseable {
-    private final TransactionDB txDb;
-    private final Map<String, ColumnFamilyHandle> cfByName;
-    private final SpringRocksAccess access;
+    private final RocksSessions sessions;
+    private final RocksDbHandle h;
+    private final Map<String, Dao<?, ?>> daosByName = new HashMap<>();
 
-    private final Map<String, AbstractRocksDao<?, ?>> daos = new HashMap<>();
-
-    public DaoRegistry(TransactionDB txDb, Map<String, ColumnFamilyHandle> cfByName) {
-        this.txDb = Objects.requireNonNull(txDb);
-        this.cfByName = Map.copyOf(Objects.requireNonNull(cfByName));
-        this.access = new SpringRocksAccess(txDb, this.cfByName);
+    public DaoRegistry(RocksSessions sessions, RocksDbHandle h) {
+        this.sessions = Objects.requireNonNull(sessions);
+        this.h = Objects.requireNonNull(h);
     }
 
-    public <T, K, D extends AbstractRocksDao<T, K>> D register(DaoDefinition<T, K, D> def) {
-        ColumnFamilyHandle primary = cfByName.get(def.primaryCf());
-        if (primary == null) throw new IllegalArgumentException("Unknown CF: " + def.primaryCf());
+    public <T, K, D extends Dao<T, K>> D register(DaoDefinition<T, K, D> def) {
+        Objects.requireNonNull(def);
+
+        ColumnFamilyHandle primary = h.cf(def.primaryCf());
 
         Map<String, ColumnFamilyHandle> idx = new HashMap<>();
-        def.indexNameToCf().forEach((idxName, cfName) -> {
-            ColumnFamilyHandle cf = cfByName.get(cfName);
-            if (cf == null) throw new IllegalArgumentException("Unknown index CF: " + cfName);
-            idx.put(idxName, cf);
-        });
+        def.indexNameToCf().forEach((idxName, cfName) -> idx.put(idxName, h.cf(cfName)));
 
-        D dao = def.factory().create(access, primary, Map.copyOf(idx), def.keyCodec(), def.valueCodec());
-        daos.put(def.name(), dao);
+        D dao = def.factory().create(
+                sessions,
+                primary,
+                Map.copyOf(idx),
+                def.keyCodec(),
+                def.valueCodec()
+        );
+
+        daosByName.put(def.name(), dao);
         return dao;
     }
 
-    @Override public void close() {
-        daos.clear();
+    @SuppressWarnings("unchecked")
+    public <D extends Dao<?, ?>> D get(String name) {
+        return (D) daosByName.get(name);
+    }
+
+    @Override
+    public void close() {
+        daosByName.clear();
     }
 }
