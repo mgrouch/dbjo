@@ -3,12 +3,14 @@ package org.github.dbjo.rdb.demo;
 import org.github.dbjo.rdb.RocksDbHandle;
 import org.github.dbjo.rdb.RocksProps;
 import org.rocksdb.*;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.*;
 
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 @Configuration(proxyBeanMethods = false)
+@EnableConfigurationProperties(RocksProps.class)
 public class RocksDbConfig {
 
     @Bean(destroyMethod = "close")

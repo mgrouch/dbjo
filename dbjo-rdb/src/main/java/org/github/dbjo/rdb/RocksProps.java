@@ -1,7 +1,13 @@
 package org.github.dbjo.rdb;
 
-import org.rocksdb.*;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-@ConfigurationProperties(prefix = "dbjo.rocksdb")
-public record RocksProps(String path) {}
+@ConfigurationProperties(prefix = "rocks")
+public record RocksProps(String path) {
+    public RocksProps {
+        if (path == null || path.isBlank()) {
+            // default for demo
+            path = "/tmp/rocksdb";
+        }
+    }
+}
