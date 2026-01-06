@@ -11,6 +11,8 @@ public interface Dao<T, K> extends AutoCloseable {
 
     // Create-only (fails if exists) or Update-only are easy to add later.
 
+    void upsert(K key, T value);
+
     boolean delete(K key);
 
     boolean containsKey(K key);

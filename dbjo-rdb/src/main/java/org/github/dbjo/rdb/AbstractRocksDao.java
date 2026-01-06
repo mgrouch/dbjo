@@ -90,11 +90,17 @@ public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
         }
     }
 
-    public Stream<Map.Entry<K, T>> stream(Query<K> q) throws RocksDBException {
-        var sp = new DaoSpliterator<>(sessions.current(), primaryCf, keyCodec, valueCodec, q);
+    public Stream<Map.Entry<K, T>> stream(Query<K> q) {
+        DaoSpliterator<K, T> sp = new DaoSpliterator<>(
+                sessions.current(),
+                primaryCf,
+                indexCfs,     // <-- missing argument
+                keyCodec,
+                valueCodec,
+                q
+        );
         return StreamSupport.stream(sp, false).onClose(sp::close);
     }
-
     protected abstract void maintainIndexes(RocksWriteBatch batch, K key, T oldValueOrNull, T newValue) throws RocksDBException;
     protected abstract void maintainIndexesOnDelete(RocksWriteBatch batch, K key, T oldValue) throws RocksDBException;
 }
