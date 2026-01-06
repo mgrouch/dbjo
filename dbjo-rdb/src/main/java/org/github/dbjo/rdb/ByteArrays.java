@@ -44,4 +44,12 @@ final class ByteArrays {
         for (int i = 0; i < a.length; i++) if (a[i] == sep) return i;
         return -1;
     }
+
+    public static byte[] indexKey(byte[] valueBytes, byte sep, byte[] pkBytes) {
+        byte[] out = new byte[valueBytes.length + 1 + pkBytes.length];
+        System.arraycopy(valueBytes, 0, out, 0, valueBytes.length);
+        out[valueBytes.length] = sep;
+        System.arraycopy(pkBytes, 0, out, valueBytes.length + 1, pkBytes.length);
+        return out;
+    }
 }

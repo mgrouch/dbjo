@@ -56,7 +56,7 @@ public class RocksDao<T, K> extends AbstractRocksDao<T, K> {
         Set<ByteArrayWrapper> out = new HashSet<>();
         for (byte[] valueBytes : idx.valueBytesExtractor().apply(entity)) {
             if (valueBytes == null) continue;
-            out.add(new ByteArrayWrapper(ByteArrays.concat(valueBytes, (byte) 0x00, pkBytes)));
+            out.add(new ByteArrayWrapper(ByteArrays.indexKey(valueBytes, (byte) 0x00, pkBytes)));
         }
         return out;
     }
