@@ -12,11 +12,11 @@ public final class SpringRocksSessions implements RocksSessions {
 
     @Override
     public RocksSession current() {
-        var res = (RocksDbTransactionManager.RocksTxResource)
-                TransactionSynchronizationManager.getResource(db);
-
-        if (res == null) return new AutoCommitSession(db);
-        return new TxBoundSession(db, res);
+        Object txnObj = TransactionSynchronizationManager.getResource(RocksDbTransactionManager.Keys.TXN);
+        if (txnObj instanceof Transaction txn) {
+            return new TxBoundSession(db, txn);
+        }
+        return new AutoCommitSession(db);
     }
 
     private static final class AutoCommitSession implements RocksSession {
@@ -50,37 +50,38 @@ public final class SpringRocksSessions implements RocksSessions {
     }
 
     private static final class TxBoundSession implements RocksSession {
-        private final TransactionDB db;
-        private final RocksDbTransactionManager.RocksTxResource res;
+        @SuppressWarnings("unused")
+        private final TransactionDB db; // not strictly needed, but handy if you extend later
+        private final Transaction txn;
 
-        TxBoundSession(TransactionDB db, RocksDbTransactionManager.RocksTxResource res) {
+        TxBoundSession(TransactionDB db, Transaction txn) {
             this.db = db;
-            this.res = res;
+            this.txn = txn;
         }
 
         @Override public ReadOptions newReadOptions() {
             ReadOptions ro = new ReadOptions();
-            // Ensure consistent reads inside tx if snapshot was set:
-            var snap = res.txn.getSnapshot();
+            // If your tx manager called txn.setSnapshot() at begin, this gives repeatable reads:
+            Snapshot snap = txn.getSnapshot();
             if (snap != null) ro.setSnapshot(snap);
             return ro;
         }
 
         @Override
         public byte[] get(ColumnFamilyHandle cf, ReadOptions ro, byte[] key) throws RocksDBException {
-            return res.txn.get(cf, ro, key); // reads txn’s uncommitted writes too :contentReference[oaicite:5]{index=5}
+            return txn.get(cf, ro, key); // sees uncommitted txn writes
         }
 
         @Override
         public RocksIterator iterator(ColumnFamilyHandle cf, ReadOptions ro) {
-            return res.txn.getIterator(ro, cf); // includes uncommitted txn writes :contentReference[oaicite:6]{index=6}
+            return txn.getIterator(ro, cf); // can include uncommitted txn writes
         }
 
         @Override
         public void write(RocksWriteBatch batch) throws RocksDBException {
             for (var op : batch.ops()) {
-                if (op instanceof RocksWriteBatch.Put p) res.txn.put(p.cf(), p.key(), p.value());
-                else if (op instanceof RocksWriteBatch.Delete d) res.txn.delete(d.cf(), d.key());
+                if (op instanceof RocksWriteBatch.Put p) txn.put(p.cf(), p.key(), p.value());
+                else if (op instanceof RocksWriteBatch.Delete d) txn.delete(d.cf(), d.key());
             }
         }
     }
