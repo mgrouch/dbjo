@@ -2,37 +2,54 @@ package org.github.dbjo.rdb;
 
 import org.rocksdb.*;
 
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 public final class RocksDbHandle implements AutoCloseable {
     private final TransactionDB db;
     private final DBOptions dbOptions;
     private final TransactionDBOptions txOptions;
-    private final List<ColumnFamilyHandle> cfHandles;
+    private final ColumnFamilyOptions cfOptions;
+
+    private final List<ColumnFamilyHandle> handles;
     private final Map<String, ColumnFamilyHandle> cfByName;
 
     public RocksDbHandle(TransactionDB db,
                          DBOptions dbOptions,
                          TransactionDBOptions txOptions,
-                         List<ColumnFamilyHandle> cfHandles,
+                         ColumnFamilyOptions cfOptions,
+                         List<ColumnFamilyHandle> handles,
                          Map<String, ColumnFamilyHandle> cfByName) {
         this.db = db;
         this.dbOptions = dbOptions;
         this.txOptions = txOptions;
-        this.cfHandles = cfHandles;
+        this.cfOptions = cfOptions;
+        this.handles = handles;
         this.cfByName = cfByName;
     }
 
-    public TransactionDB db() { return db; }
-    public ColumnFamilyHandle cf(String name) { return cfByName.get(name); }
-    public Map<String, ColumnFamilyHandle> cfByName() { return cfByName; }
+    public TransactionDB db() {
+        return db;
+    }
 
-    @Override public void close() {
-        // Close CF handles first, then DB/options.
-        for (var h : cfHandles) h.close();
+    public Map<String, ColumnFamilyHandle> cfByName() {
+        return cfByName;
+    }
+
+    public ColumnFamilyHandle cf(String name) {
+        ColumnFamilyHandle h = cfByName.get(name);
+        if (h == null) throw new IllegalArgumentException("Unknown CF: " + name);
+        return h;
+    }
+
+    @Override
+    public void close() {
+        // Close CF handles first, then DB, then options.
+        for (ColumnFamilyHandle h : handles) {
+            if (h != null) h.close();
+        }
         db.close();
         txOptions.close();
         dbOptions.close();
+        cfOptions.close();
     }
 }

@@ -1,59 +1,51 @@
 package org.github.dbjo.rdb.demo;
 
-import org.github.dbjo.rdb.*;
+import org.github.dbjo.rdb.RocksDbHandle;
+import org.github.dbjo.rdb.RocksProps;
 import org.rocksdb.*;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.*;
-import org.springframework.transaction.annotation.EnableTransactionManagement;
 
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
-@Configuration
-@EnableTransactionManagement
-@EnableConfigurationProperties(RocksProps.class)
+@Configuration(proxyBeanMethods = false)
 public class RocksDbConfig {
 
     @Bean(destroyMethod = "close")
     public RocksDbHandle rocksDbHandle(RocksProps props) throws RocksDBException {
-        // Define CFs you want. For demo we hardcode: users + email index.
-        List<ColumnFamilyDescriptor> cfs = List.of(
-                new ColumnFamilyDescriptor(RocksDB.DEFAULT_COLUMN_FAMILY, new ColumnFamilyOptions()),
-                new ColumnFamilyDescriptor("users".getBytes(StandardCharsets.UTF_8), new ColumnFamilyOptions()),
-                new ColumnFamilyDescriptor("users_email_idx".getBytes(StandardCharsets.UTF_8), new ColumnFamilyOptions())
-        );
+        RocksDB.loadLibrary();
 
-        var handles = new ArrayList<ColumnFamilyHandle>();
+        String path = props.path();
 
+        // Keep these ALIVE for the lifetime of the DB (don’t use try-with-resources here)
+        ColumnFamilyOptions cfOpts = new ColumnFamilyOptions();
         DBOptions dbOpts = new DBOptions()
                 .setCreateIfMissing(true)
                 .setCreateMissingColumnFamilies(true);
 
         TransactionDBOptions txOpts = new TransactionDBOptions();
 
-        TransactionDB db = TransactionDB.open(dbOpts, txOpts, props.path(), cfs, handles);
+        // IMPORTANT: first descriptor MUST be DEFAULT column family
+        List<ColumnFamilyDescriptor> cfDescriptors = List.of(
+                new ColumnFamilyDescriptor(RocksDB.DEFAULT_COLUMN_FAMILY, cfOpts),
+                new ColumnFamilyDescriptor("users".getBytes(StandardCharsets.UTF_8), cfOpts),
+                new ColumnFamilyDescriptor("users_email_idx".getBytes(StandardCharsets.UTF_8), cfOpts)
+        );
 
-        // Map CF name -> handle (must keep handles for the lifetime of the DB)
-        Map<String, ColumnFamilyHandle> byName = new HashMap<>();
-        for (ColumnFamilyHandle h : handles) {
-            byName.put(new String(h.getName(), StandardCharsets.UTF_8), h);
+        List<ColumnFamilyHandle> cfHandles = new ArrayList<>(cfDescriptors.size());
+
+        TransactionDB db = TransactionDB.open(dbOpts, txOpts, path, cfDescriptors, cfHandles);
+
+        // Map name -> handle (ensure "default" exists)
+        Map<String, ColumnFamilyHandle> cfByName = new HashMap<>();
+        for (int i = 0; i < cfDescriptors.size(); i++) {
+            byte[] n = cfDescriptors.get(i).getName();
+            String name = Arrays.equals(n, RocksDB.DEFAULT_COLUMN_FAMILY)
+                    ? "default"
+                    : new String(n, StandardCharsets.UTF_8);
+            cfByName.put(name, cfHandles.get(i));
         }
 
-        return new RocksDbHandle(db, dbOpts, txOpts, handles, Map.copyOf(byName));
-    }
-
-    @Bean
-    public RocksDbTransactionManager rocksTxManager(RocksDbHandle h) {
-        return new RocksDbTransactionManager(h.db());
-    }
-
-    @Bean
-    public RocksSessions rocksSessions(RocksDbHandle h) {
-        return new SpringRocksSessions(h.db());
-    }
-
-    @Bean
-    public DaoRegistry daoRegistry(RocksDbHandle h) {
-        return new DaoRegistry(h.cfByName());
+        return new RocksDbHandle(db, dbOpts, txOpts, cfOpts, cfHandles, Map.copyOf(cfByName));
     }
 }
