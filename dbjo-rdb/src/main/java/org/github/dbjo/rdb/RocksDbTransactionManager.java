@@ -2,9 +2,10 @@ package org.github.dbjo.rdb;
 
 import org.rocksdb.*;
 import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionSystemException;
 import org.springframework.transaction.support.AbstractPlatformTransactionManager;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.DefaultTransactionStatus;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 public final class RocksDbTransactionManager extends AbstractPlatformTransactionManager {
 
@@ -19,6 +20,7 @@ public final class RocksDbTransactionManager extends AbstractPlatformTransaction
 
     public RocksDbTransactionManager(TransactionDB txDb) {
         this.txDb = txDb;
+        // Optional: this.setRollbackOnCommitFailure(true);
     }
 
     @Override
@@ -35,19 +37,29 @@ public final class RocksDbTransactionManager extends AbstractPlatformTransaction
     @Override
     protected void doBegin(Object transaction, TransactionDefinition definition) {
         try {
-            // You can tune these
-            WriteOptions wo = new WriteOptions();
-            Transaction txn = txDb.beginTransaction(wo);
+            // WriteOptions is a native resource; close after beginTransaction returns.
+            Transaction txn;
+            try (WriteOptions wo = new WriteOptions()) {
+                // You can tune wo here (disableWAL, sync, etc.)
+                txn = txDb.beginTransaction(wo);
+            }
 
-            ReadOptions ro = new ReadOptions();
-            // Optional: snapshot consistency inside a tx
-            // Snapshot snap = txDb.getSnapshot();
-            // ro.setSnapshot(snap);
+            // Enable snapshot for repeatable reads inside this transaction.
+            // This makes txn.getSnapshot() non-null.
+            txn.setSnapshot();
 
+            // Bind txn for the session provider (RocksSessions)
             TransactionSynchronizationManager.bindResource(Keys.TXN, txn);
+
+            // Optionally bind a shared ReadOptions if you want a single RO instance.
+            // Your RocksSession.newReadOptions() can also just create per-use ReadOptions.
+            ReadOptions ro = new ReadOptions();
+            Snapshot snap = txn.getSnapshot();
+            if (snap != null) ro.setSnapshot(snap);
             TransactionSynchronizationManager.bindResource(Keys.READ_OPTIONS, ro);
+
         } catch (Exception e) {
-            throw new org.springframework.transaction.TransactionSystemException("RocksDB begin failed", e);
+            throw new TransactionSystemException("RocksDB begin failed", e);
         }
     }
 
@@ -58,7 +70,7 @@ public final class RocksDbTransactionManager extends AbstractPlatformTransaction
             try {
                 txn.commit();
             } catch (RocksDBException e) {
-                throw new org.springframework.transaction.TransactionSystemException("RocksDB commit failed", e);
+                throw new TransactionSystemException("RocksDB commit failed", e);
             }
         }
     }
@@ -70,20 +82,29 @@ public final class RocksDbTransactionManager extends AbstractPlatformTransaction
             try {
                 txn.rollback();
             } catch (RocksDBException e) {
-                throw new org.springframework.transaction.TransactionSystemException("RocksDB rollback failed", e);
+                throw new TransactionSystemException("RocksDB rollback failed", e);
             }
         }
     }
 
     @Override
     protected void doCleanupAfterCompletion(Object transaction) {
-        Object txnObj = TransactionSynchronizationManager.unbindResourceIfPossible(Keys.TXN);
+        // Unbind in reverse order of typical usage
         Object roObj  = TransactionSynchronizationManager.unbindResourceIfPossible(Keys.READ_OPTIONS);
+        Object txnObj = TransactionSynchronizationManager.unbindResourceIfPossible(Keys.TXN);
 
-        if (txnObj instanceof Transaction txn) txn.close();
-        if (roObj instanceof ReadOptions ro) ro.close();
+        if (roObj instanceof ReadOptions ro) {
+            ro.close();
+        }
 
-        // If you enabled snapshots above, also release them here:
-        // if (snap != null) txDb.releaseSnapshot(snap);
+        if (txnObj instanceof Transaction txn) {
+            // Clear snapshot and close txn (both native)
+            try {
+                txn.clearSnapshot();
+            } catch (Throwable ignored) {
+                // clearSnapshot may throw if txn already closed; ignore
+            }
+            txn.close();
+        }
     }
 }
