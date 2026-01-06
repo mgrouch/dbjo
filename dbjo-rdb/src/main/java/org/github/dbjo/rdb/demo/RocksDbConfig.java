@@ -14,10 +14,6 @@ import java.util.*;
 @EnableConfigurationProperties(RocksProps.class)
 public class RocksDbConfig {
 
-    static {
-        RocksDB.loadLibrary();
-    }
-
     @Bean(destroyMethod = "close")
     public RocksDbHandle rocksDbHandle(RocksProps props) throws RocksDBException {
         // Define CFs you want. For demo we hardcode: users + email index.

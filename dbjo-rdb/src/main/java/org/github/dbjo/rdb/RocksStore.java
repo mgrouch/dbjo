@@ -6,7 +6,6 @@ import java.nio.file.Path;
 import java.util.*;
 
 public final class RocksStore implements AutoCloseable {
-    static { RocksDB.loadLibrary(); }
 
     private final RocksDB db;
     private final DBOptions dbOptions;
