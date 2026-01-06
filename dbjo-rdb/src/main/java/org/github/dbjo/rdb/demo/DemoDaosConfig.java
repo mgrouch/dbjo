@@ -8,8 +8,9 @@ import org.springframework.context.annotation.*;
 public class DemoDaosConfig {
 
     @Bean
-    public UserDao userDao(DaoRegistry registry, ObjectMapper om) {
-        return registry.register(UserDao.definition(om));
+    public RocksDao<User, String> userDao(RocksSessions sessions, DaoRegistry registry, ObjectMapper om) {
+        var def = UserSchema.def(om, registry.cf("users"), registry.cf(UserSchema.IDX_EMAIL));
+        return new RocksDao<>(sessions, def);
     }
 }
 
