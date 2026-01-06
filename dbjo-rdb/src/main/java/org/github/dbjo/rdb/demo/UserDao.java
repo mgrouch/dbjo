@@ -3,8 +3,7 @@ package org.github.dbjo.rdb.demo;
 import org.github.dbjo.rdb.*;
 
 public final class UserDao extends RocksDao<User, String> {
-
-    public static final String IDX_EMAIL = UserSchema.IDX_EMAIL;
+    
     public UserDao(RocksSessions sessions, EntityDef<User, String> def) { super(sessions, def); }
 
     public java.util.stream.Stream<User> findByEmail(String email) {

@@ -30,7 +30,7 @@ public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
     }
 
     @Override
-    public Optional<T> get(K key) {
+    public Optional<T> findByKey(K key) {
         Objects.requireNonNull(key);
         try {
             RocksSession s = sessions.current();
@@ -49,7 +49,7 @@ public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
 
         try {
             RocksSession s = sessions.current();
-            Optional<T> old = get(key); // consistent if session uses snapshot in tx
+            Optional<T> old = findByKey(key); // consistent if session uses snapshot in tx
 
             byte[] kb = keyCodec.encodeKey(key);
             byte[] vb = valueCodec.encode(value);
@@ -69,7 +69,7 @@ public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
     public boolean delete(K key) {
         Objects.requireNonNull(key);
 
-        Optional<T> old = get(key);
+        Optional<T> old = findByKey(key);
         if (old.isEmpty()) return false;
 
         try {

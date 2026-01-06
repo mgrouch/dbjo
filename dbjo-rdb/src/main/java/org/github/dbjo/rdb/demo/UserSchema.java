@@ -15,7 +15,7 @@ public final class UserSchema {
         var userCodec = new JacksonCodec<>(om, User.class);
 
         return new EntityDef<>(
-                "users",
+                USERS_CF,
                 usersCf,
                 KeyCodec.stringUtf8(),
                 userCodec,

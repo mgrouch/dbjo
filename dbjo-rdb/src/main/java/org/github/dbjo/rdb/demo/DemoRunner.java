@@ -15,7 +15,7 @@ public class DemoRunner {
         return args -> {
             svc.insertDemoUsers();
 
-            System.out.println("get(u2) = " + userDao.get("u2").orElse(null));
+            System.out.println("get(u2) = " + userDao.findByKey("u2").orElse(null));
 
             // Range scan over primary keys [u1, u9)
             var qRange = Query.<String>builder()

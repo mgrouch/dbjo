@@ -5,9 +5,7 @@ import java.util.function.Consumer;
 
 public interface Dao<T, K> extends AutoCloseable {
 
-    // ---- Required primitives ----
-
-    Optional<T> get(K key);
+    Optional<T> findByKey(K key);
 
     /** Insert or replace. */
     void upsert(K key, T value);
@@ -26,21 +24,21 @@ public interface Dao<T, K> extends AutoCloseable {
 
     /** Default existence check. Override for a cheaper existence probe. */
     default boolean containsKey(K key) {
-        return get(key).isPresent();
+        return findByKey(key).isPresent();
     }
 
     /** Bulk get; returns only found keys. Override for batched RocksDB multiGet. */
-    default Map<K, T> getAll(Collection<K> keys) {
+    default Map<K, T> findByKeys(Collection<K> keys) {
         Objects.requireNonNull(keys, "keys");
         Map<K, T> out = new LinkedHashMap<>(Math.max(16, keys.size() * 2));
         for (K k : keys) {
-            get(k).ifPresent(v -> out.put(k, v));
+            findByKey(k).ifPresent(v -> out.put(k, v));
         }
         return out;
     }
 
     /** Bulk put; default is a loop. Override for a true batch/write-optimized implementation. */
-    default void putAll(Map<K, T> entries) {
+    default void storeAll(Map<K, T> entries) {
         Objects.requireNonNull(entries, "entries");
         for (var e : entries.entrySet()) {
             upsert(e.getKey(), e.getValue());
