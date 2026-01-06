@@ -1,124 +1,100 @@
 package org.github.dbjo.rdb;
 
-import org.rocksdb.*;
+import org.rocksdb.ColumnFamilyHandle;
+import org.rocksdb.RocksDBException;
 
-import java.util.*;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
 public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
-    protected final SpringRocksAccess access;
+    private final RocksSessions sessions;              // provider (tx-aware outside DAO)
     protected final ColumnFamilyHandle primaryCf;
     protected final KeyCodec<K> keyCodec;
     protected final Codec<T> valueCodec;
-
-    // index CFs (recommended): indexName -> CF
     protected final Map<String, ColumnFamilyHandle> indexCfs;
 
-    protected AbstractRocksDao(SpringRocksAccess access,
-                               ColumnFamilyHandle primaryCf,
-                               KeyCodec<K> keyCodec,
-                               Codec<T> valueCodec,
-                               Map<String, ColumnFamilyHandle> indexCfs) {
-        this.access = access;
-        this.primaryCf = primaryCf;
-        this.keyCodec = keyCodec;
-        this.valueCodec = valueCodec;
+    protected AbstractRocksDao(
+            RocksSessions sessions,
+            ColumnFamilyHandle primaryCf,
+            KeyCodec<K> keyCodec,
+            Codec<T> valueCodec,
+            Map<String, ColumnFamilyHandle> indexCfs
+    ) {
+        this.sessions = Objects.requireNonNull(sessions);
+        this.primaryCf = Objects.requireNonNull(primaryCf);
+        this.keyCodec = Objects.requireNonNull(keyCodec);
+        this.valueCodec = Objects.requireNonNull(valueCodec);
         this.indexCfs = Map.copyOf(indexCfs);
     }
 
+    @Override
     public Optional<T> get(K key) {
+        Objects.requireNonNull(key);
         try {
+            RocksSession s = sessions.current();
             byte[] kb = keyCodec.encodeKey(key);
-            Transaction txn = access.currentTxnOrNull();
-            if (txn != null) {
-                ReadOptions ro = access.currentReadOptionsOrNull();
-                byte[] v = txn.get(primaryCf, ro, kb);
-                return v == null ? Optional.empty() : Optional.of(valueCodec.decode(v));
-            } else {
-                byte[] v = access.txDb().get(primaryCf, kb);
-                return v == null ? Optional.empty() : Optional.of(valueCodec.decode(v));
-            }
+            byte[] vb = s.get(primaryCf, kb);
+            return vb == null ? Optional.empty() : Optional.of(valueCodec.decode(vb));
         } catch (RocksDBException e) {
             throw new RocksDaoException("get failed", e);
         }
     }
 
+    @Override
     public void upsert(K key, T value) {
+        Objects.requireNonNull(key);
+        Objects.requireNonNull(value);
+
         try {
+            RocksSession s = sessions.current();
+            Optional<T> old = get(key); // consistent if session uses snapshot in tx
+
             byte[] kb = keyCodec.encodeKey(key);
             byte[] vb = valueCodec.encode(value);
 
-            Transaction txn = access.currentTxnOrNull();
-            if (txn != null) {
-                // maintain indexes using a WriteBatch-like pattern on the txn
-                Optional<T> old = get(key);
-                txn.put(primaryCf, kb, vb);
-                maintainIndexes(txn, key, old.orElse(null), value);
-            } else {
-                // outside tx: do batch write
-                Optional<T> old = get(key);
-                try (WriteBatch wb = new WriteBatch(); WriteOptions wo = new WriteOptions()) {
-                    wb.put(primaryCf, kb, vb);
-                    maintainIndexes(wb, key, old.orElse(null), value);
-                    access.txDb().write(wo, wb);
-                }
-            }
+            RocksWriteBatch batch = new RocksWriteBatch();
+            batch.put(primaryCf, kb, vb);
+
+            maintainIndexes(batch, key, old.orElse(null), value);
+
+            s.write(batch);
         } catch (RocksDBException e) {
             throw new RocksDaoException("upsert failed", e);
         }
     }
 
+    @Override
     public boolean delete(K key) {
+        Objects.requireNonNull(key);
+
         Optional<T> old = get(key);
         if (old.isEmpty()) return false;
 
         try {
+            RocksSession s = sessions.current();
+
             byte[] kb = keyCodec.encodeKey(key);
-            Transaction txn = access.currentTxnOrNull();
-            if (txn != null) {
-                txn.delete(primaryCf, kb);
-                maintainIndexesOnDelete(txn, key, old.get());
-            } else {
-                try (WriteBatch wb = new WriteBatch(); WriteOptions wo = new WriteOptions()) {
-                    wb.delete(primaryCf, kb);
-                    maintainIndexesOnDelete(wb, key, old.get());
-                    access.txDb().write(wo, wb);
-                }
-            }
+
+            RocksWriteBatch batch = new RocksWriteBatch();
+            batch.delete(primaryCf, kb);
+
+            maintainIndexesOnDelete(batch, key, old.get());
+
+            s.write(batch);
             return true;
         } catch (RocksDBException e) {
             throw new RocksDaoException("delete failed", e);
         }
     }
 
-    /** Criteria query -> Stream (closes iterator on close). */
-    public Stream<Map.Entry<K,T>> stream(Query<K> q) {
-        var spliterator = new DaoSpliterator<>(this, q);
-        return StreamSupport.stream(spliterator, false).onClose(spliterator::close);
+    public Stream<Map.Entry<K, T>> stream(Query<K> q) {
+        var sp = new DaoSpliterator<>(sessions.current(), primaryCf, keyCodec, valueCodec, q);
+        return StreamSupport.stream(sp, false).onClose(sp::close);
     }
 
-    // ---- Index maintenance hooks (batch or txn) ----
-    protected abstract void maintainIndexes(IndexWriter w, K key, T oldValueOrNull, T newValue) throws RocksDBException;
-    protected abstract void maintainIndexesOnDelete(IndexWriter w, K key, T oldValue) throws RocksDBException;
-
-    /** Unifies WriteBatch and Transaction for index updates. */
-    protected interface IndexWriter {
-        void put(ColumnFamilyHandle cf, byte[] key, byte[] value) throws RocksDBException;
-        void delete(ColumnFamilyHandle cf, byte[] key) throws RocksDBException;
-    }
-
-    protected static IndexWriter writer(WriteBatch wb) {
-        return new IndexWriter() {
-            @Override public void put(ColumnFamilyHandle cf, byte[] key, byte[] value) throws RocksDBException { wb.put(cf, key, value); }
-            @Override public void delete(ColumnFamilyHandle cf, byte[] key) throws RocksDBException { wb.delete(cf, key); }
-        };
-    }
-
-    protected static IndexWriter writer(Transaction txn) {
-        return new IndexWriter() {
-            @Override public void put(ColumnFamilyHandle cf, byte[] key, byte[] value) throws RocksDBException { txn.put(cf, key, value); }
-            @Override public void delete(ColumnFamilyHandle cf, byte[] key) throws RocksDBException { txn.delete(cf, key); }
-        };
-    }
+    protected abstract void maintainIndexes(RocksWriteBatch batch, K key, T oldValueOrNull, T newValue) throws RocksDBException;
+    protected abstract void maintainIndexesOnDelete(RocksWriteBatch batch, K key, T oldValue) throws RocksDBException;
 }
