@@ -177,6 +177,21 @@ public final class User extends AbstractMessageLite<User, User.Builder> {
             return b;
         }
 
+        @Override
+        public User getDefaultInstanceForType() {
+            return User.getDefaultInstance();
+        }
+
+        @Override
+        public boolean isInitialized() {
+            return true; // proto3: no required fields
+        }
+
+        @Override
+        protected Builder internalMergeFrom(User message) {
+            return mergeFrom(message);
+        }
+
         public Builder setId(String id) {
             this.id = Objects.requireNonNull(id, "id");
             return this;
