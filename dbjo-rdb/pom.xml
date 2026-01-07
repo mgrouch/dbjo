@@ -12,12 +12,6 @@
     <artifactId>dbjo-rdb</artifactId>
     <packaging>jar</packaging>
 
-    <properties>
-        <maven.compiler.release>21</maven.compiler.release>
-        <spring-boot.version>4.0.1</spring-boot.version>
-        <rocksdbjni.version>10.2.1</rocksdbjni.version>
-    </properties>
-
     <dependencyManagement>
         <dependencies>
             <dependency>
@@ -33,6 +27,13 @@
                 <artifactId>rocksdbjni</artifactId>
                 <version>${rocksdbjni.version}</version>
             </dependency>
+
+            <dependency>
+                <groupId>com.google.protobuf</groupId>
+                <artifactId>protobuf-java</artifactId>
+                <version>${protobuf.version}</version>
+            </dependency>
+
         </dependencies>
     </dependencyManagement>
 
@@ -89,6 +90,11 @@
             <artifactId>spring-boot-starter-json</artifactId>
         </dependency>
 
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java</artifactId>
+        </dependency>
+
     </dependencies>
 
     <build>
@@ -111,4 +117,11 @@
             </plugin>
         </plugins>
     </build>
+
+    <properties>
+        <maven.compiler.release>21</maven.compiler.release>
+        <spring-boot.version>4.0.1</spring-boot.version>
+        <rocksdbjni.version>10.2.1</rocksdbjni.version>
+        <protobuf.version>4.33.2</protobuf.version>
+    </properties>
 </project>
