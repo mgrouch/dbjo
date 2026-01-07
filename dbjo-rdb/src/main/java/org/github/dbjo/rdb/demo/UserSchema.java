@@ -1,6 +1,5 @@
 package org.github.dbjo.rdb.demo;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.github.dbjo.rdb.*;
 import org.rocksdb.ColumnFamilyHandle;
 
@@ -11,8 +10,9 @@ public final class UserSchema {
     public static final String USERS_CF = "users";
     public static final String IDX_EMAIL = "users_email_idx";
 
-    public static EntityDef<User, String> def(ObjectMapper om, ColumnFamilyHandle usersCf, ColumnFamilyHandle emailIdxCf) {
-        var userCodec = new JacksonCodec<>(om, User.class);
+    public static EntityDef<User, String> def(ColumnFamilyHandle usersCf, ColumnFamilyHandle emailIdxCf) {
+        // protobuf codec (your DAOs store protobuf bytes directly)
+        Codec<User> userCodec = ProtobufCodec.ofDefault(User.getDefaultInstance());
 
         return new EntityDef<>(
                 USERS_CF,
@@ -23,9 +23,18 @@ public final class UserSchema {
                         IndexDef.unique(
                                 IDX_EMAIL,
                                 emailIdxCf,
-                                u -> u.email() == null ? null : u.email().getBytes(StandardCharsets.UTF_8)
+                                u -> {
+                                    // Works for BOTH: optional string (presence) and non-optional string.
+                                    // In proto3, unset string reads back as "".
+                                    String email = u.getEmail();
+                                    return email == null || email.isEmpty()
+                                            ? null
+                                            : email.getBytes(StandardCharsets.UTF_8);
+                                }
                         )
                 )
         );
     }
+
+    private UserSchema() {}
 }
