@@ -17,7 +17,7 @@ public class DemoDaosConfig {
                 sessions,
                 usersCf,
                 indexCfs,
-                Codec<User> codec = ProtobufCodec.ofDefault(User.getDefaultInstance())
+                ProtobufCodec.ofDefault(User.getDefaultInstance())
         );
     }
 }
