@@ -146,6 +146,15 @@ public final class User extends AbstractMessageLite<User, User.Builder> {
         return true; // no required fields in proto3
     }
 
+    @Override
+    public String toString() {
+        return "User{" +
+                "id='" + id + '\'' +
+                ", email='" + email + '\'' +
+                ", name='" + name + '\'' +
+                '}';
+    }
+
     // --- Builder ---
     public static final class Builder extends AbstractMessageLite.Builder<User, Builder> {
         private String id = "";
