@@ -1,11 +1,6 @@
 package org.github.dbjo.rdb.demo;
 
-import com.google.protobuf.AbstractMessageLite;
-import com.google.protobuf.CodedInputStream;
-import com.google.protobuf.CodedOutputStream;
-import com.google.protobuf.ExtensionRegistryLite;
-import com.google.protobuf.InvalidProtocolBufferException;
-import com.google.protobuf.Parser;
+import com.google.protobuf.*;
 
 import java.io.IOException;
 import java.util.Objects;
@@ -36,17 +31,17 @@ public final class User extends AbstractMessageLite<User, User.Builder> {
     private static final int TAG_NAME  = (NAME_FIELD_NUMBER << 3) | 2;  // 26
 
     private static final User DEFAULT_INSTANCE = new User("", false, "", false, "");
-    private static final Parser<User> PARSER = new Parser<>() {
+    private static final Parser<User> PARSER = new AbstractParser<>() {
         @Override
         public User parsePartialFrom(CodedInputStream input, ExtensionRegistryLite ext)
                 throws InvalidProtocolBufferException {
             try {
-                Builder b = newBuilder();
+                Builder b = User.newBuilder();
                 b.mergeFrom(input, ext);
                 return b.buildPartial();
             } catch (InvalidProtocolBufferException e) {
                 throw e;
-            } catch (IOException e) {
+            } catch (Exception e) {
                 throw new InvalidProtocolBufferException(e);
             }
         }
@@ -161,6 +156,27 @@ public final class User extends AbstractMessageLite<User, User.Builder> {
 
         private Builder() {}
 
+        @Override
+        public Builder clear() {
+            id = "";
+            hasEmail = false;
+            email = "";
+            hasName = false;
+            name = "";
+            return this;
+        }
+
+        @Override
+        public Builder clone() {
+            Builder b = new Builder();
+            b.id = this.id;
+            b.hasEmail = this.hasEmail;
+            b.email = this.email;
+            b.hasName = this.hasName;
+            b.name = this.name;
+            return b;
+        }
+
         public Builder setId(String id) {
             this.id = Objects.requireNonNull(id, "id");
             return this;
@@ -216,7 +232,6 @@ public final class User extends AbstractMessageLite<User, User.Builder> {
         @Override
         public Builder mergeFrom(CodedInputStream input, ExtensionRegistryLite extensionRegistry)
                 throws IOException {
-
             while (true) {
                 final int tag = input.readTag();
                 if (tag == 0) break;
