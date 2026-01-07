@@ -19,5 +19,12 @@ public record KeyRange<K>(K from, boolean fromInclusive, K to, boolean toInclusi
     public static <K> KeyRange<K> betweenInclusive(K from, K to) {
         return new KeyRange<>(from, true, to, true);
     }
-}
 
+    public static <K> KeyRange<K> closedOpen(K fromInclusive, K toExclusive) {
+        return new KeyRange<>(fromInclusive, true, toExclusive, false);
+    }
+
+    public static <K> KeyRange<K> all() {
+        return new KeyRange<>(null, true, null, true);
+    }
+}
