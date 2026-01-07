@@ -175,8 +175,6 @@ public final class DbjoProtoCodegen {
             List<Col> cols,
             Set<String> pkColsUpper
     ) {
-        // Decide imports based on types used
-        boolean needWrappers = false;
         boolean needTimestamp = false;
 
         List<ProtoField> fields = new ArrayList<>();
@@ -184,18 +182,18 @@ public final class DbjoProtoCodegen {
             boolean nullable = c.nullable != DatabaseMetaData.columnNoNulls; // includes unknown => treat as nullable
             boolean isPk = pkColsUpper.contains(c.colName.toUpperCase(Locale.ROOT));
 
-            ProtoType pt = mapSqlTypeToProto(c.sqlType, nullable);
+            ProtoType pt = mapSqlTypeToProto(c.sqlType);
 
-            if (pt.needsWrappers) needWrappers = true;
             if (pt.needsTimestamp) needTimestamp = true;
 
-            // Use proto lower_snake field name (conventional)
             String fieldName = toLowerSnake(sanitizeProtoIdentifier(toFieldName(c.colName)));
-
-            // Field number: deterministic based on ordinal position
             int fieldNumber = Math.max(1, c.pos);
 
-            fields.add(new ProtoField(fieldName, pt.protoType, fieldNumber, c, isPk));
+            // Only put "optional" on scalars/strings/bytes/enums.
+            // Do NOT add "optional" to message types like google.protobuf.Timestamp.
+            boolean isOptional = nullable && pt.allowOptional;
+
+            fields.add(new ProtoField(fieldName, pt.protoType, isOptional, fieldNumber, c, isPk));
         }
 
         String protoPkg = PROTO_PKG_BASE + "." + toLowerSnake(table.schema);
@@ -204,14 +202,11 @@ public final class DbjoProtoCodegen {
         sb.append("syntax = \"proto3\";\n\n");
         sb.append("package ").append(protoPkg).append(";\n\n");
 
-        // Java options
         sb.append("option java_package = \"").append(JAVA_PKG).append("\";\n");
         sb.append("option java_multiple_files = true;\n");
         sb.append("option java_outer_classname = \"").append(messageName).append("Proto\";\n\n");
 
-        if (needWrappers) sb.append("import \"google/protobuf/wrappers.proto\";\n");
-        if (needTimestamp) sb.append("import \"google/protobuf/timestamp.proto\";\n");
-        if (needWrappers || needTimestamp) sb.append("\n");
+        if (needTimestamp) sb.append("import \"google/protobuf/timestamp.proto\";\n\n");
 
         sb.append("// DB: ").append(table.schema).append(".").append(table.table).append("\n");
         sb.append("message ").append(messageName).append(" {\n");
@@ -222,7 +217,9 @@ public final class DbjoProtoCodegen {
             if ("YES".equalsIgnoreCase(f.col.isAutoIncrement)) sb.append(" (AI)");
             sb.append("\n");
 
-            sb.append("  ").append(f.protoType).append(" ").append(f.name)
+            sb.append("  ");
+            if (f.optional) sb.append("optional ");
+            sb.append(f.protoType).append(" ").append(f.name)
                     .append(" = ").append(f.number).append(";\n\n");
         }
 
@@ -232,72 +229,42 @@ public final class DbjoProtoCodegen {
 
     // -------------------- Type mapping --------------------
 
-    private static ProtoType mapSqlTypeToProto(int sqlType, boolean nullable) {
-        // If nullable -> wrapper type (preserve null vs default).
-        // If not nullable -> primitive (or string/bytes) where possible.
+    private static ProtoType mapSqlTypeToProto(int sqlType) {
+        // Here we return the *base* proto type (scalar/string/bytes/message).
+        // Nullable handling (optional) is applied in renderProtoFile() based on allowOptional.
         return switch (sqlType) {
-            case Types.TINYINT, Types.SMALLINT, Types.INTEGER -> nullable
-                    ? ProtoType.w("google.protobuf.Int32Value", true, false)
-                    : ProtoType.p("int32");
+            case Types.TINYINT, Types.SMALLINT, Types.INTEGER -> ProtoType.scalar("int32");
+            case Types.BIGINT -> ProtoType.scalar("int64");
 
-            case Types.BIGINT -> nullable
-                    ? ProtoType.w("google.protobuf.Int64Value", true, false)
-                    : ProtoType.p("int64");
-
-            case Types.FLOAT, Types.REAL -> nullable
-                    ? ProtoType.w("google.protobuf.FloatValue", true, false)
-                    : ProtoType.p("float");
-
-            case Types.DOUBLE -> nullable
-                    ? ProtoType.w("google.protobuf.DoubleValue", true, false)
-                    : ProtoType.p("double");
+            case Types.FLOAT, Types.REAL -> ProtoType.scalar("float");
+            case Types.DOUBLE -> ProtoType.scalar("double");
 
             case Types.DECIMAL, Types.NUMERIC ->
-                    // No built-in decimal; safest interoperable representation:
-                    // - string (e.g., "123.45") OR
-                    // - bytes (scaled int) if you want strictness.
-                    // Keep it string, preserve null via wrapper.
-                    nullable
-                        ? ProtoType.w("google.protobuf.StringValue", true, false)
-                        : ProtoType.p("string");
+                // No decimal in protobuf; keep portable: string
+                    ProtoType.scalar("string");
 
-            case Types.BIT, Types.BOOLEAN -> nullable
-                    ? ProtoType.w("google.protobuf.BoolValue", true, false)
-                    : ProtoType.p("bool");
+            case Types.BIT, Types.BOOLEAN -> ProtoType.scalar("bool");
 
             case Types.CHAR, Types.VARCHAR, Types.LONGVARCHAR,
-                 Types.NCHAR, Types.NVARCHAR, Types.LONGNVARCHAR -> nullable
-                    ? ProtoType.w("google.protobuf.StringValue", true, false)
-                    : ProtoType.p("string");
+                    Types.NCHAR, Types.NVARCHAR, Types.LONGNVARCHAR -> ProtoType.scalar("string");
 
-            case Types.BINARY, Types.VARBINARY, Types.LONGVARBINARY, Types.BLOB -> nullable
-                    ? ProtoType.w("google.protobuf.BytesValue", true, false)
-                    : ProtoType.p("bytes");
+            case Types.BINARY, Types.VARBINARY, Types.LONGVARBINARY, Types.BLOB -> ProtoType.scalar("bytes");
 
             case Types.TIMESTAMP, Types.TIMESTAMP_WITH_TIMEZONE ->
-                    // Timestamp supports presence in proto3 (message type => nullable by nature),
-                    // so we don't need wrappers for it.
-                    ProtoType.ts("google.protobuf.Timestamp");
+                    ProtoType.message("google.protobuf.Timestamp", true);
 
             case Types.DATE, Types.TIME, Types.TIME_WITH_TIMEZONE ->
-                    // Keep portable: ISO string (e.g. "2026-01-06", "13:45:10.123")
-                    // If you want stricter types later, we can move to google.type.Date/TimeOfDay.
-                    nullable
-                        ? ProtoType.w("google.protobuf.StringValue", true, false)
-                        : ProtoType.p("string");
+                // Keep portable: ISO string
+                    ProtoType.scalar("string");
 
             default ->
-                    // fallback: store as string
-                    nullable
-                        ? ProtoType.w("google.protobuf.StringValue", true, false)
-                        : ProtoType.p("string");
+                    ProtoType.scalar("string");
         };
     }
 
-    private record ProtoType(String protoType, boolean needsWrappers, boolean needsTimestamp) {
-        static ProtoType p(String t) { return new ProtoType(t, false, false); }
-        static ProtoType w(String t, boolean wrappers, boolean ts) { return new ProtoType(t, wrappers, ts); }
-        static ProtoType ts(String t) { return new ProtoType(t, false, true); }
+    private record ProtoType(String protoType, boolean allowOptional, boolean needsTimestamp) {
+        static ProtoType scalar(String t) { return new ProtoType(t, true, false); }
+        static ProtoType message(String t, boolean ts) { return new ProtoType(t, false, ts); }
     }
 
     // -------------------- DB Introspection (same as your original) --------------------
@@ -438,5 +405,6 @@ public final class DbjoProtoCodegen {
             String defaultValue
     ) {}
 
-    private record ProtoField(String name, String protoType, int number, Col col, boolean isPk) {}
+    private record ProtoField(String name, String protoType, boolean optional, int number, Col col, boolean isPk) {}
+
 }
