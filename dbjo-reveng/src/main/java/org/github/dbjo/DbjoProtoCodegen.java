@@ -3,6 +3,7 @@ package org.github.dbjo;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
+import java.nio.file.attribute.PosixFilePermission;
 import java.sql.*;
 import java.util.*;
 
@@ -95,26 +96,23 @@ public final class DbjoProtoCodegen {
 
     // -------------------- protoc invocation --------------------
 
-    /**
-     * Runs protoc to generate Java from the generated .proto files.
-     *
-     * By default it runs "protoc" from PATH.
-     * You can override with:
-     *  - system property: -Dprotoc=/path/to/protoc
-     *  - env var: PROTOC=/path/to/protoc
-     */
     private static void runProtoc(List<Path> protoFiles) throws IOException, InterruptedException {
-        String protoc = System.getProperty("protoc");
-        if (protoc == null || protoc.isBlank()) protoc = System.getenv("PROTOC");
-        if (protoc == null || protoc.isBlank()) protoc = "protoc";
+        Path protoc = resolveProtocPath();
+        ensureExecutable(protoc);
 
         List<String> cmd = new ArrayList<>();
-        cmd.add(protoc);
+        cmd.add(protoc.toAbsolutePath().toString());
 
-        // Important: include path to our generated protos
+        // Your generated .proto dir
         cmd.add("-I" + OUT_PROTO.toAbsolutePath());
 
-        // Generate Java
+        // Optional: include dir for google/protobuf/*.proto (wrappers, timestamp, etc.)
+        Path includeDir = resolveProtocIncludeDir();
+        if (Files.isDirectory(includeDir)) {
+            cmd.add("-I" + includeDir.toAbsolutePath());
+        }
+
+        // Java output
         cmd.add("--java_out=" + OUT_JAVA.toAbsolutePath());
 
         // Compile all protos in one run
@@ -127,8 +125,45 @@ public final class DbjoProtoCodegen {
                 .start();
 
         int code = proc.waitFor();
-        if (code != 0) {
-            throw new RuntimeException("protoc failed with exit code " + code);
+        if (code != 0) throw new RuntimeException("protoc failed with exit code " + code);
+    }
+
+    private static Path resolveProtocPath() {
+        String p = System.getProperty("protoc");
+        if (p != null && !p.isBlank()) return Paths.get(p);
+        boolean win = System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("win");
+        return Paths.get("target", "tools", "protoc", win ? "protoc.exe" : "protoc");
+    }
+
+    private static Path resolveProtocIncludeDir() {
+        String p = System.getProperty("protoc.include");
+        if (p != null && !p.isBlank()) return Paths.get(p);
+        return Paths.get("target", "tools", "protoc", "include");
+    }
+
+    private static void ensureExecutable(Path protoc) throws IOException {
+        if (!Files.exists(protoc)) {
+            throw new IOException("protoc not found: " + protoc.toAbsolutePath());
+        }
+        if (!Files.isExecutable(protoc)) {
+            // Works on most OSes; on Windows it's irrelevant
+            boolean ok = protoc.toFile().setExecutable(true);
+            // If still not executable on a POSIX FS, try chmod-style perms
+            if (!Files.isExecutable(protoc)) {
+                try {
+                    Set<PosixFilePermission> perms = EnumSet.of(
+                            PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE, PosixFilePermission.OWNER_EXECUTE,
+                            PosixFilePermission.GROUP_READ, PosixFilePermission.GROUP_EXECUTE,
+                            PosixFilePermission.OTHERS_READ, PosixFilePermission.OTHERS_EXECUTE
+                    );
+                    Files.setPosixFilePermissions(protoc, perms);
+                } catch (UnsupportedOperationException ignored) {
+                    // non-POSIX FS
+                }
+            }
+            if (!Files.isExecutable(protoc) && !ok) {
+                throw new IOException("protoc exists but is not executable: " + protoc.toAbsolutePath());
+            }
         }
     }
 

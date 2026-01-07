@@ -30,34 +30,146 @@
                 <version>1.7.1</version>
             </extension>
         </extensions>
+
         <plugins>
+
+            <!-- 1) Download protoc into target/tools/protoc BEFORE codegen runs -->
             <plugin>
-                <groupId>org.xolstice.maven.plugins</groupId>
-                <artifactId>protobuf-maven-plugin</artifactId>
-                <version>0.6.1</version>
-                <configuration>
-                    <protocArtifact>
-                        com.google.protobuf:protoc:${protoc.version}:exe:${os.detected.classifier}
-                    </protocArtifact>
-
-                    <!-- where your generated .proto files live -->
-                    <protoSourceRoot>${project.build.directory}/dbjo-generated/proto</protoSourceRoot>
-
-                    <!-- where generated Java should go -->
-                    <outputDirectory>${project.build.directory}/dbjo-generated/proto-java</outputDirectory>
-                </configuration>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <version>3.6.1</version>
                 <executions>
                     <execution>
+                        <id>copy-protoc</id>
+                        <phase>generate-resources</phase>
                         <goals>
-                            <goal>compile</goal>
+                            <goal>copy</goal>
                         </goals>
+                        <configuration>
+                            <artifactItems>
+                                <artifactItem>
+                                    <groupId>com.google.protobuf</groupId>
+                                    <artifactId>protoc</artifactId>
+                                    <version>${protoc.version}</version>
+                                    <classifier>${os.detected.classifier}</classifier>
+                                    <type>exe</type>
+                                    <outputDirectory>${project.build.directory}/tools/protoc</outputDirectory>
+                                    <destFileName>${protoc.bin}</destFileName>
+                                </artifactItem>
+                            </artifactItems>
+                            <overWriteReleases>true</overWriteReleases>
+                            <overWriteSnapshots>true</overWriteSnapshots>
+                        </configuration>
+                    </execution>
+
+                    <!-- Optional but recommended if your .proto imports google/protobuf/*.proto
+                         (wrappers.proto, timestamp.proto, etc.). This unpacks those .proto files
+                         into target/tools/protoc/include so your Java-run protoc can resolve imports. -->
+                    <execution>
+                        <id>unpack-wkt-protos</id>
+                        <phase>generate-resources</phase>
+                        <goals>
+                            <goal>unpack</goal>
+                        </goals>
+                        <configuration>
+                            <artifactItems>
+                                <artifactItem>
+                                    <groupId>com.google.protobuf</groupId>
+                                    <artifactId>protobuf-java</artifactId>
+                                    <version>${protobuf.version}</version>
+                                    <type>jar</type>
+                                    <includes>google/protobuf/*.proto</includes>
+                                    <outputDirectory>${project.build.directory}/tools/protoc/include</outputDirectory>
+                                </artifactItem>
+                            </artifactItems>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>
+
+            <!-- 2) Run your Java codegen in generate-sources -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.2.0</version>
+                <executions>
+                    <execution>
+                        <id>dbjo-codegen</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>java</goal>
+                        </goals>
+                        <configuration>
+                            <mainClass>org.github.dbjo.DbjoProtoCodegen</mainClass>
+                            <classpathScope>compile</classpathScope>
+
+                            <!-- Pass protoc location to your Java code -->
+                            <systemProperties>
+                                <systemProperty>
+                                    <key>protoc</key>
+                                    <value>${project.build.directory}/tools/protoc/${protoc.bin}</value>
+                                </systemProperty>
+                                <systemProperty>
+                                    <key>protoc.include</key>
+                                    <value>${project.build.directory}/tools/protoc/include</value>
+                                </systemProperty>
+                            </systemProperties>
+
+                            <!-- optional: pass JDBC args if you want (else your defaults apply)
+                            <arguments>
+                              <argument>jdbc:hsqldb:hsql://localhost:9001/dbjo</argument>
+                              <argument>SA</argument>
+                              <argument></argument>
+                            </arguments>
+                            -->
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- 3) Make generated Java compile -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <id>add-generated-sources</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>add-source</goal>
+                        </goals>
+                        <configuration>
+                            <sources>
+                                <source>${project.build.directory}/dbjo-generated/proto-java</source>
+                            </sources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>windows</id>
+            <activation>
+                <os>
+                    <family>Windows</family>
+                </os>
+            </activation>
+            <properties>
+                <protoc.bin>protoc.exe</protoc.bin>
+            </properties>
+        </profile>
+    </profiles>
+
     <properties>
         <protobuf.version>3.25.3</protobuf.version>
         <protoc.version>3.25.3</protoc.version>
+
+        <!-- default for unix-like -->
+        <protoc.bin>protoc</protoc.bin>
     </properties>
 </project>
