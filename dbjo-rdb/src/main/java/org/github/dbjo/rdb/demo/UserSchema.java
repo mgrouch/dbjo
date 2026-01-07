@@ -20,17 +20,8 @@ public final class UserSchema {
                 KeyCodec.stringUtf8(),
                 userCodec,
                 List.of(
-                        IndexDef.unique(
-                                IDX_EMAIL,
-                                emailIdxCf,
-                                u -> {
-                                    // Works for BOTH: optional string (presence) and non-optional string.
-                                    // In proto3, unset string reads back as "".
-                                    String email = u.getEmail();
-                                    return email == null || email.isEmpty()
-                                            ? null
-                                            : email.getBytes(StandardCharsets.UTF_8);
-                                }
+                        IndexDef.unique(IDX_EMAIL, emailIdxCf,
+                                (User u) -> u.hasEmail() ? u.getEmail() : null
                         )
                 )
         );
