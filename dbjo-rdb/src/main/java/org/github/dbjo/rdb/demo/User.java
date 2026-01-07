@@ -21,4 +21,13 @@ public final class User {
 
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
+
+    @Override
+    public String toString() {
+        return "User{" +
+                "id='" + id + '\'' +
+                ", email='" + email + '\'' +
+                ", name='" + name + '\'' +
+                '}';
+    }
 }
