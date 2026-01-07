@@ -2,6 +2,7 @@ package org.github.dbjo.rdb.demo;
 
 import org.github.dbjo.rdb.IndexPredicate;
 import org.github.dbjo.rdb.Query;
+import org.github.dbjo.rdb.demo.generated.proto.User;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 

@@ -1,6 +1,7 @@
 package org.github.dbjo.rdb.demo;
 
 import org.github.dbjo.rdb.*;
+import org.github.dbjo.rdb.demo.generated.proto.User;
 import org.springframework.context.annotation.*;
 
 import java.util.Map;

@@ -1,4 +1,4 @@
-package org.github.dbjo.rdb.demo;
+package org.github.dbjo.rdb.demo.generated.proto;
 
 /**
  * Placeholder for your generator's `java_outer_classname = "UserProto"`.
