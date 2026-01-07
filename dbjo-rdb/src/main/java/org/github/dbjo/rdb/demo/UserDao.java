@@ -1,16 +1,24 @@
 package org.github.dbjo.rdb.demo;
 
 import org.github.dbjo.rdb.*;
+import org.rocksdb.ColumnFamilyHandle;
 
-public final class UserDao extends RocksDao<User, String> {
-    
-    public UserDao(RocksSessions sessions, EntityDef<User, String> def) { super(sessions, def); }
+import java.util.List;
+import java.util.Map;
 
-    public java.util.stream.Stream<User> findByEmail(String email) {
-        if (email == null || email.isBlank()) return java.util.stream.Stream.empty();
-        byte[] b = email.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+public final class UserDao extends IndexedRocksDao<User, String> {
 
-        var q = Query.<String>builder().where(new IndexPredicate.Eq(UserSchema.IDX_EMAIL, b)).build();
-        return stream(q).map(java.util.Map.Entry::getValue);
+    public static final String CF_USERS = "users";
+    public static final String IDX_EMAIL = "users_email_idx";
+
+    private static final List<IndexDef<User>> INDEXES = List.of(
+            IndexDef.unique(IDX_EMAIL, IndexKeyCodec.utf8(), User::getEmail)
+    );
+
+    public UserDao(RocksSessions sessions,
+                   ColumnFamilyHandle usersCf,
+                   Map<String, ColumnFamilyHandle> indexCfs,
+                   Codec<User> codec) {
+        super(sessions, usersCf, KeyCodec.stringUtf8(), codec, indexCfs, INDEXES);
     }
 }
