@@ -22,7 +22,6 @@
     </dependencies>
 
     <build>
-        <!-- detects ${os.detected.classifier} -->
         <extensions>
             <extension>
                 <groupId>kr.motd.maven</groupId>
@@ -33,7 +32,7 @@
 
         <plugins>
 
-            <!-- 1) Download protoc into target/tools/protoc BEFORE codegen runs -->
+            <!-- 1) Download protoc into target/tools/protoc BEFORE codegen -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-dependency-plugin</artifactId>
@@ -41,10 +40,8 @@
                 <executions>
                     <execution>
                         <id>copy-protoc</id>
-                        <phase>generate-resources</phase>
-                        <goals>
-                            <goal>copy</goal>
-                        </goals>
+                        <phase>initialize</phase>
+                        <goals><goal>copy</goal></goals>
                         <configuration>
                             <artifactItems>
                                 <artifactItem>
@@ -62,15 +59,11 @@
                         </configuration>
                     </execution>
 
-                    <!-- Optional but recommended if your .proto imports google/protobuf/*.proto
-                         (wrappers.proto, timestamp.proto, etc.). This unpacks those .proto files
-                         into target/tools/protoc/include so your Java-run protoc can resolve imports. -->
+                    <!-- 2) Optional but important if your generated protos import wrappers/timestamp -->
                     <execution>
                         <id>unpack-wkt-protos</id>
-                        <phase>generate-resources</phase>
-                        <goals>
-                            <goal>unpack</goal>
-                        </goals>
+                        <phase>initialize</phase>
+                        <goals><goal>unpack</goal></goals>
                         <configuration>
                             <artifactItems>
                                 <artifactItem>
@@ -87,7 +80,7 @@
                 </executions>
             </plugin>
 
-            <!-- 2) Run your Java codegen in generate-sources -->
+            <!-- 3) Run DB -> .proto -> protoc during generate-sources -->
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>exec-maven-plugin</artifactId>
@@ -96,14 +89,10 @@
                     <execution>
                         <id>dbjo-codegen</id>
                         <phase>generate-sources</phase>
-                        <goals>
-                            <goal>java</goal>
-                        </goals>
+                        <goals><goal>java</goal></goals>
                         <configuration>
                             <mainClass>org.github.dbjo.DbjoProtoCodegen</mainClass>
                             <classpathScope>compile</classpathScope>
-
-                            <!-- Pass protoc location to your Java code -->
                             <systemProperties>
                                 <systemProperty>
                                     <key>protoc</key>
@@ -114,20 +103,12 @@
                                     <value>${project.build.directory}/tools/protoc/include</value>
                                 </systemProperty>
                             </systemProperties>
-
-                            <!-- optional: pass JDBC args if you want (else your defaults apply)
-                            <arguments>
-                              <argument>jdbc:hsqldb:hsql://localhost:9001/dbjo</argument>
-                              <argument>SA</argument>
-                              <argument></argument>
-                            </arguments>
-                            -->
                         </configuration>
                     </execution>
                 </executions>
             </plugin>
 
-            <!-- 3) Make generated Java compile -->
+            <!-- 4) Compile generated Java -->
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>build-helper-maven-plugin</artifactId>
@@ -136,9 +117,7 @@
                     <execution>
                         <id>add-generated-sources</id>
                         <phase>generate-sources</phase>
-                        <goals>
-                            <goal>add-source</goal>
-                        </goals>
+                        <goals><goal>add-source</goal></goals>
                         <configuration>
                             <sources>
                                 <source>${project.build.directory}/dbjo-generated/proto-java</source>
@@ -151,13 +130,17 @@
         </plugins>
     </build>
 
+    <properties>
+        <protobuf.version>3.25.3</protobuf.version>
+        <protoc.version>3.25.3</protoc.version>
+        <protoc.bin>protoc</protoc.bin>
+    </properties>
+
     <profiles>
         <profile>
             <id>windows</id>
             <activation>
-                <os>
-                    <family>Windows</family>
-                </os>
+                <os><family>Windows</family></os>
             </activation>
             <properties>
                 <protoc.bin>protoc.exe</protoc.bin>
@@ -165,11 +148,4 @@
         </profile>
     </profiles>
 
-    <properties>
-        <protobuf.version>3.25.3</protobuf.version>
-        <protoc.version>3.25.3</protoc.version>
-
-        <!-- default for unix-like -->
-        <protoc.bin>protoc</protoc.bin>
-    </properties>
 </project>
