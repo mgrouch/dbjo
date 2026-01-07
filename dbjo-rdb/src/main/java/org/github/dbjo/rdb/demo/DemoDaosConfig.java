@@ -12,7 +12,7 @@ public class DemoDaosConfig {
     @Bean
     public UserDao userDao(RocksSessions sessions, DaoRegistry registry) {
         var usersCf = registry.cf(UserSchema.USERS_CF);
-        var indexCfs = Map.of(UserDao.IDX_EMAIL, registry.cf(UserDao.IDX_EMAIL));
+        var indexCfs = Map.of(UserSchema.IDX_EMAIL, registry.cf(UserSchema.IDX_EMAIL));
 
         return new UserDao(
                 sessions,

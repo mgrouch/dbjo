@@ -1,11 +1,14 @@
 package org.github.dbjo.rdb;
 
 import org.rocksdb.ColumnFamilyHandle;
+import org.rocksdb.ReadOptions;
 import org.rocksdb.RocksDBException;
 
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
 
@@ -29,16 +32,31 @@ public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
         this.indexCfs = Map.copyOf(indexCfs);
     }
 
+    /** Convenience: matches your EntityDef-based design. */
+    protected AbstractRocksDao(RocksSessions sessions, EntityDef<T, K> entity, Map<String, ColumnFamilyHandle> indexCfs) {
+        this(sessions, entity.primaryCf(), entity.keyCodec(), entity.valueCodec(), indexCfs);
+    }
+
+    protected AbstractRocksDao(RocksSessions sessions, ResolvedEntityDef<T, K> ent) {
+        this(sessions,
+                ent.def().primaryCf(),
+                ent.def().keyCodec(),
+                ent.def().valueCodec(),
+                ent.indexCfs());
+    }
+
     @Override
     public Optional<T> findByKey(K key) {
         Objects.requireNonNull(key);
         try {
             RocksSession s = sessions.current();
             byte[] kb = keyCodec.encodeKey(key);
-            byte[] vb = s.get(primaryCf, kb);
-            return (vb == null) ? Optional.empty() : Optional.of(valueCodec.decode(vb));
+            try (ReadOptions ro = s.newReadOptions()) {
+                byte[] vb = s.get(primaryCf, ro, kb);
+                return vb == null ? Optional.empty() : Optional.of(valueCodec.decode(vb));
+            }
         } catch (RocksDBException e) {
-            throw new RocksDaoException("get failed", e);
+            throw new RocksDaoException("findByKey failed", e);
         }
     }
 
@@ -49,15 +67,19 @@ public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
 
         try {
             RocksSession s = sessions.current();
-            Optional<T> old = findByKey(key); // consistent if session uses snapshot in tx
-
             byte[] kb = keyCodec.encodeKey(key);
-            byte[] vb = valueCodec.encode(value);
+
+            // Read old using one RO (tx snapshot-consistent)
+            T oldOrNull;
+            try (ReadOptions ro = s.newReadOptions()) {
+                byte[] oldBytes = s.get(primaryCf, ro, kb);
+                oldOrNull = (oldBytes == null) ? null : valueCodec.decode(oldBytes);
+            }
 
             RocksWriteBatch batch = new RocksWriteBatch();
-            batch.put(primaryCf, kb, vb);
+            batch.put(primaryCf, kb, valueCodec.encode(value));
 
-            maintainIndexes(batch, key, old.orElse(null), value);
+            maintainIndexes(batch, key, oldOrNull, value);
 
             s.write(batch);
         } catch (RocksDBException e) {
@@ -69,17 +91,22 @@ public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
     public boolean delete(K key) {
         Objects.requireNonNull(key);
 
-        Optional<T> old = findByKey(key);
-        if (old.isEmpty()) return false;
-
         try {
             RocksSession s = sessions.current();
             byte[] kb = keyCodec.encodeKey(key);
 
+            T oldOrNull;
+            try (ReadOptions ro = s.newReadOptions()) {
+                byte[] oldBytes = s.get(primaryCf, ro, kb);
+                oldOrNull = (oldBytes == null) ? null : valueCodec.decode(oldBytes);
+            }
+
+            if (oldOrNull == null) return false;
+
             RocksWriteBatch batch = new RocksWriteBatch();
             batch.delete(primaryCf, kb);
 
-            maintainIndexesOnDelete(batch, key, old.get());
+            maintainIndexesOnDelete(batch, key, oldOrNull);
 
             s.write(batch);
             return true;
@@ -88,10 +115,6 @@ public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
         }
     }
 
-    /**
-     * Optimized existence check (avoids decoding value).
-     * Overrides Dao.default containsKey().
-     */
     @Override
     public boolean containsKey(K key) {
         Objects.requireNonNull(key);
@@ -101,7 +124,7 @@ public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
     protected boolean existsKeyBytes(byte[] kb) {
         try {
             RocksSession s = sessions.current();
-            try (var ro = s.newReadOptions()) {
+            try (ReadOptions ro = s.newReadOptions()) {
                 return s.get(primaryCf, ro, kb) != null;
             }
         } catch (RocksDBException e) {
@@ -109,23 +132,16 @@ public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
         }
     }
 
-    /**
-     * Base iteration implementation using your existing Query/Spliterator scanning.
-     * This satisfies Dao.forEach(...).
-     */
     @Override
     public void forEach(java.util.function.Consumer<Map.Entry<K, T>> consumer) {
         Objects.requireNonNull(consumer);
-        var q = Query.<K>builder().build(); // full scan
-        try (var st = stream(q)) {
+        try (Stream<Map.Entry<K, T>> st = stream(Query.<K>builder().limit(Integer.MAX_VALUE).build())) {
             st.forEach(consumer);
         }
     }
 
-    /**
-     * Not in Dao interface, but useful API. You can also move this into Dao if you want.
-     */
-    public java.util.stream.Stream<Map.Entry<K, T>> stream(Query<K> q) {
+    /** Your scan API (primary or index-driven) */
+    public Stream<Map.Entry<K, T>> stream(Query<K> q) {
         DaoSpliterator<K, T> sp = new DaoSpliterator<>(
                 sessions.current(),
                 primaryCf,
@@ -134,10 +150,9 @@ public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
                 valueCodec,
                 q
         );
-        return java.util.stream.StreamSupport.stream(sp, false).onClose(sp::close);
+        return StreamSupport.stream(sp, false).onClose(sp::close);
     }
 
-    // Leave close() as no-op unless your DAO owns resources.
     @Override
     public void close() { /* no-op */ }
 
