@@ -10,4 +10,8 @@ public record RocksProps(String path) {
             path = "/tmp/rocksdb";
         }
     }
+
+    public boolean wipeOnStart() {
+        return true;
+    }
 }

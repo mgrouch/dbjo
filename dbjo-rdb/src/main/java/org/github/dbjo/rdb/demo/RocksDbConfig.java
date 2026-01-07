@@ -7,6 +7,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.*;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.*;
 
 @Configuration(proxyBeanMethods = false)
@@ -18,6 +19,10 @@ public class RocksDbConfig {
         RocksDB.loadLibrary();
 
         String path = props.path();
+
+        if (props.wipeOnStart()) {
+            destroyIfExists(Path.of(props.path()));
+        }
 
         // Keep these ALIVE for the lifetime of the DB (don’t use try-with-resources here)
         ColumnFamilyOptions cfOpts = new ColumnFamilyOptions();
@@ -49,5 +54,14 @@ public class RocksDbConfig {
         }
 
         return new RocksDbHandle(db, dbOpts, txOpts, cfOpts, cfHandles, Map.copyOf(cfByName));
+    }
+
+    static void destroyIfExists(Path dir) {
+        try (Options opt = new Options()) {
+            // safe even if dir doesn’t exist (it’ll throw in some versions; wrap if needed)
+            RocksDB.destroyDB(dir.toString(), opt);
+        } catch (RocksDBException ignore) {
+            // If you prefer: log it
+        }
     }
 }
