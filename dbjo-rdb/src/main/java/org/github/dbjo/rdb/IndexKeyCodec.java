@@ -1,6 +1,5 @@
 package org.github.dbjo.rdb;
 
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 
@@ -8,16 +7,15 @@ import java.util.Objects;
 public interface IndexKeyCodec<V> {
     byte[] encode(V v);
 
-    static IndexKeyCodec<String> utf8() {
-        return s -> s.getBytes(StandardCharsets.UTF_8);
+    static IndexKeyCodec<String> stringUtf8() {
+        return s -> (s == null) ? null : s.getBytes(StandardCharsets.UTF_8);
     }
 
-    /** Order-preserving long (big-endian). */
-    static IndexKeyCodec<Long> int64be() {
-        return v -> ByteBuffer.allocate(Long.BYTES).putLong(v).array();
+    static IndexKeyCodec<byte[]> rawBytes() {
+        return b -> b; // already encoded
     }
 
-    static IndexKeyCodec<byte[]> bytes() {
-        return Objects::requireNonNull;
+    static <V> IndexKeyCodec<V> requireNonNull(IndexKeyCodec<V> c) {
+        return v -> Objects.requireNonNull(c.encode(v), "encoded index key is null");
     }
 }
