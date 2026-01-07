@@ -61,7 +61,6 @@ final class DaoSpliterator<K, T> implements Spliterator<Map.Entry<K, T>>, AutoCl
         byte[] tmpEqPrefix = null;
 
         if (!indexScan) {
-            // Primary scan over primary CF
             scanCf = primaryCf;
 
             var kr = q.keyRange().orElse(null);
@@ -77,18 +76,15 @@ final class DaoSpliterator<K, T> implements Spliterator<Map.Entry<K, T>>, AutoCl
 
             this.idxValueFrom = null; this.idxValueFromInc = true;
             this.idxValueTo = null;   this.idxValueToInc = true;
-        } else {
-            // Index scan: drive by the FIRST predicate
-            IndexPredicate p = q.indexPredicates().get(0);
 
+        } else {
+            IndexPredicate p = q.indexPredicates().get(0);
             ColumnFamilyHandle idxCf = indexCfs.get(indexNameOf(p));
             if (idxCf == null) throw new IllegalArgumentException("Unknown index: " + indexNameOf(p));
             scanCf = idxCf;
 
             if (p instanceof IndexPredicate.Eq eq) {
-                // prefix = valueBytes + SEP
                 byte[] prefix = ByteArrays.concat(eq.valueBytes(), SEP);
-
                 this.iterFrom = prefix;
                 this.iterFromInc = true;
                 this.iterTo = ByteArrays.prefixEndExclusive(prefix);
@@ -98,17 +94,19 @@ final class DaoSpliterator<K, T> implements Spliterator<Map.Entry<K, T>>, AutoCl
                 this.idxValueTo = eq.valueBytes();   this.idxValueToInc = true;
 
                 tmpEqPrefix = prefix;
+
             } else if (p instanceof IndexPredicate.Range r) {
                 byte[] fromPrefix = ByteArrays.concat(r.from(), SEP);
-                byte[] toPrefix   = ByteArrays.concat(r.to(), SEP);
+                byte[] toPrefix = ByteArrays.concat(r.to(), SEP);
 
                 this.iterFrom = fromPrefix;
-                this.iterFromInc = true; // exclusivity handled by filtering below
+                this.iterFromInc = true;
                 this.iterTo = ByteArrays.prefixEndExclusive(toPrefix);
                 this.iterToInc = false;
 
                 this.idxValueFrom = r.from(); this.idxValueFromInc = r.fromInclusive();
-                this.idxValueTo   = r.to();   this.idxValueToInc   = r.toInclusive();
+                this.idxValueTo = r.to();     this.idxValueToInc = r.toInclusive();
+
             } else {
                 throw new IllegalArgumentException("Unsupported predicate type: " + p.getClass().getName());
             }
@@ -116,7 +114,6 @@ final class DaoSpliterator<K, T> implements Spliterator<Map.Entry<K, T>>, AutoCl
 
         this.eqPrefixOrNull = tmpEqPrefix;
 
-        // Allocate iterator + read options together
         this.ih = session.openIterator(scanCf);
         this.it = ih.it();
         this.ro = ih.ro();
@@ -173,9 +170,9 @@ final class DaoSpliterator<K, T> implements Spliterator<Map.Entry<K, T>>, AutoCl
 
         while (true) {
             if (remaining <= 0) { close(); return false; }
-            if (!it.isValid()) { close(); return false; }
+            if (!it.isValid())  { close(); return false; }
 
-            // Stop on iterator bounds (generic)
+            // bounds
             if (!descending) {
                 if (iterTo != null) {
                     int c = ByteArrays.compare(it.key(), iterTo);
@@ -196,14 +193,14 @@ final class DaoSpliterator<K, T> implements Spliterator<Map.Entry<K, T>>, AutoCl
                 if (!descending) it.next(); else it.prev();
                 remaining--;
                 return true;
+
             } else {
-                // Eq correctness: stop when prefix no longer matches (defensive)
+                // if no iterTo (prefixEndExclusive returned null), stop when prefix no longer matches
                 if (eqPrefixOrNull != null && !startsWith(it.key(), eqPrefixOrNull)) {
                     close();
                     return false;
                 }
 
-                // Parse: valueBytes + SEP + pkBytes
                 byte[] idxKey = it.key();
                 int sepPos = ByteArrays.indexOf(idxKey, SEP);
                 if (sepPos <= 0 || sepPos == idxKey.length - 1) {
@@ -213,7 +210,6 @@ final class DaoSpliterator<K, T> implements Spliterator<Map.Entry<K, T>>, AutoCl
 
                 byte[] valuePart = java.util.Arrays.copyOfRange(idxKey, 0, sepPos);
 
-                // Range fence (handles exclusive endpoints)
                 if (idxValueFrom != null) {
                     int cFrom = ByteArrays.compare(valuePart, idxValueFrom);
                     if (cFrom < 0 || (cFrom == 0 && !idxValueFromInc)) {
@@ -246,6 +242,7 @@ final class DaoSpliterator<K, T> implements Spliterator<Map.Entry<K, T>>, AutoCl
                     if (!descending) it.next(); else it.prev();
                     remaining--;
                     return true;
+
                 } catch (RocksDBException e) {
                     throw new RocksDaoException("index-driven fetch failed", e);
                 }
@@ -255,9 +252,7 @@ final class DaoSpliterator<K, T> implements Spliterator<Map.Entry<K, T>>, AutoCl
 
     private static boolean startsWith(byte[] a, byte[] prefix) {
         if (a.length < prefix.length) return false;
-        for (int i = 0; i < prefix.length; i++) {
-            if (a[i] != prefix[i]) return false;
-        }
+        for (int i = 0; i < prefix.length; i++) if (a[i] != prefix[i]) return false;
         return true;
     }
 
