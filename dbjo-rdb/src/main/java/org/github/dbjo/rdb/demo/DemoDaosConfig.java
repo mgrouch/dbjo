@@ -12,7 +12,7 @@ public class DemoDaosConfig {
     }
 
     @Bean
-    public UserDao userDao(RocksSessions sessions, DaoRegistry registry, UserProtoMapper mapper) {
-        return new UserDao(sessions, registry, mapper);
+    public UserDao userDao(RocksSessions sessions, DaoRegistry registry) {
+        return new UserDao(sessions, registry);
     }
 }
