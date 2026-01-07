@@ -8,10 +8,60 @@
         <version>1.0.0-SNAPSHOT</version>
     </parent>
     <artifactId>dbjo-reveng</artifactId>
-    <dependencies>
+
+<properties>
+  <protobuf.version>3.25.3</protobuf.version>
+  <protoc.version>3.25.3</protoc.version>
+</properties>
+
+<dependencies>
+  <dependency>
+    <groupId>com.google.protobuf</groupId>
+    <artifactId>protobuf-java</artifactId>
+    <version>${protobuf.version}</version>
+  </dependency>
+    
         <dependency>
             <groupId>org.hsqldb</groupId>
             <artifactId>hsqldb</artifactId>
         </dependency>
-    </dependencies>
+         
+</dependencies>
+
+<build>
+  <!-- detects ${os.detected.classifier} -->
+  <extensions>
+    <extension>
+      <groupId>kr.motd.maven</groupId>
+      <artifactId>os-maven-plugin</artifactId>
+      <version>1.7.1</version>
+    </extension>
+  </extensions>
+
+  <plugins>
+    <plugin>
+      <groupId>org.xolstice.maven.plugins</groupId>
+      <artifactId>protobuf-maven-plugin</artifactId>
+      <version>0.6.1</version>
+      <configuration>
+        <protocArtifact>
+          com.google.protobuf:protoc:${protoc.version}:exe:${os.detected.classifier}
+        </protocArtifact>
+
+        <!-- where your generated .proto files live -->
+        <protoSourceRoot>${project.build.directory}/dbjo-generated/proto</protoSourceRoot>
+
+        <!-- where generated Java should go -->
+        <outputDirectory>${project.build.directory}/dbjo-generated/proto-java</outputDirectory>
+      </configuration>
+      <executions>
+        <execution>
+          <goals>
+            <goal>compile</goal>
+          </goals>
+        </execution>
+      </executions>
+    </plugin>
+  </plugins>
+</build>         
 </project>
