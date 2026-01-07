@@ -7,7 +7,7 @@ import org.springframework.context.annotation.*;
 public class DemoDaosConfig {
 
     @Bean
-    public UserDao userDao(RocksSessions sessions, DaoRegistry registry) {
-        return new UserDao(sessions, registry);
+    public UserDao userDao(RocksSessions sessions, DaoRegistry registry, UserProtoMapper mapper) {
+        return new UserDao(sessions, registry, mapper);
     }
 }
