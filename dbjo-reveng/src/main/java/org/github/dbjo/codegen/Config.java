@@ -54,7 +54,7 @@ public record Config(
 
     public static final String DEFAULT_BEAN_PKG = "org.github.dbjo.generated.model.entity";
     public static final String DEFAULT_META_PKG = "org.github.dbjo.generated.model.meta";
-    public static final String DEFAULT_BASE_META_PKG = "org.github.dbjo.generated.model.meta";
+    public static final String DEFAULT_BASE_META_PKG = "org.github.dbjo.meta.entity";
 
     public static final String DEFAULT_PROTO_JAVA_PKG  = "org.github.dbjo.generated.model.proto";
     public static final String DEFAULT_PROTO_PKG_BASE  = "dbjo";
