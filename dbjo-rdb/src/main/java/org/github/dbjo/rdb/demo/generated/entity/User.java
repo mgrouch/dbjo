@@ -1,4 +1,4 @@
-package org.github.dbjo.rdb.demo;
+package org.github.dbjo.rdb.demo.generated.entity;
 
 public final class User {
     private String id;

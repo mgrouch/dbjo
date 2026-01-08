@@ -1,6 +1,8 @@
 package org.github.dbjo.rdb.demo;
 
 import org.github.dbjo.rdb.*;
+import org.github.dbjo.rdb.demo.generated.entity.User;
+import org.github.dbjo.rdb.demo.generated.protomap.UserProtoMapper;
 import org.rocksdb.ColumnFamilyHandle;
 
 import java.util.List;

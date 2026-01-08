@@ -4,6 +4,8 @@ import org.github.dbjo.rdb.IndexKeyCodec;
 import org.github.dbjo.rdb.IndexPredicate;
 import org.github.dbjo.rdb.KeyRange;
 import org.github.dbjo.rdb.Query;
+import org.github.dbjo.rdb.demo.generated.dao.UserDao;
+import org.github.dbjo.rdb.demo.generated.entity.User;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 

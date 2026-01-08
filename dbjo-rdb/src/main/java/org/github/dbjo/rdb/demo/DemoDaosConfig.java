@@ -1,6 +1,8 @@
 package org.github.dbjo.rdb.demo;
 
 import org.github.dbjo.rdb.*;
+import org.github.dbjo.rdb.demo.generated.dao.UserDao;
+import org.github.dbjo.rdb.demo.generated.protomap.UserProtoMapper;
 import org.springframework.context.annotation.*;
 
 @Configuration(proxyBeanMethods = false)

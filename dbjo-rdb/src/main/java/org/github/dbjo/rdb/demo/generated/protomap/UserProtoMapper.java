@@ -1,6 +1,7 @@
-package org.github.dbjo.rdb.demo;
+package org.github.dbjo.rdb.demo.generated.protomap;
 
 import org.github.dbjo.rdb.ProtobufPojoCodec;
+import org.github.dbjo.rdb.demo.generated.entity.User;
 
 public final class UserProtoMapper
         implements ProtobufPojoCodec.ProtoMapper<User, org.github.dbjo.rdb.demo.generated.proto.User> {
