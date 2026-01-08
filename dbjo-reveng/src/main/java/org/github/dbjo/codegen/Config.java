@@ -42,21 +42,21 @@ public record Config(
         // entity/meta
         String beanPkg,
         String metaPkg,
-        String baseMetaPkg
-) {
+        String baseMetaPkg,
+        Path codegenOutJava) {
     // ---------------- defaults ----------------
     public static final String DEFAULT_URL    = "jdbc:hsqldb:hsql://localhost:9001/dbjo";
     public static final String DEFAULT_USER   = "SA";
     public static final String DEFAULT_PASS   = "";
     public static final String DEFAULT_DRIVER = "org.hsqldb.jdbc.JDBCDriver";
 
-    public static final Path   DEFAULT_OUT_BASE = Paths.get("target", "dbjo-generated");
+    public static final Path   DEFAULT_OUT_BASE = Paths.get("target", "generated-sources");
 
-    public static final String DEFAULT_BEAN_PKG = "org.github.dbjo.generated";
-    public static final String DEFAULT_META_PKG = "org.github.dbjo.meta.entity";
-    public static final String DEFAULT_BASE_META_PKG = "org.github.dbjo.meta.entity";
+    public static final String DEFAULT_BEAN_PKG = "org.github.dbjo.generated.model.entity";
+    public static final String DEFAULT_META_PKG = "org.github.dbjo.generated.model.meta";
+    public static final String DEFAULT_BASE_META_PKG = "org.github.dbjo.generated.model.meta";
 
-    public static final String DEFAULT_PROTO_JAVA_PKG  = "org.github.dbjo.generated.proto";
+    public static final String DEFAULT_PROTO_JAVA_PKG  = "org.github.dbjo.generated.model.proto";
     public static final String DEFAULT_PROTO_PKG_BASE  = "dbjo";
     public static final String DEFAULT_PROTO_OUTER_SUFFIX = "Proto";
     public static final boolean DEFAULT_PROTO_PER_TABLE = true;
@@ -107,6 +107,8 @@ public record Config(
         Path protocPath = resolveProtocPath(am);
         Path protocInclude = resolveProtocIncludeDir(am);
 
+        Path codegenOutJava  = Paths.get(am.get("codegenOutJava",  outBase.resolve("codegen-java").toString()));
+
         String beanPkg = am.get("beanPkg", DEFAULT_BEAN_PKG);
         String metaPkg = am.get("metaPkg", DEFAULT_META_PKG);
         String baseMetaPkg = am.get("baseMetaPkg", DEFAULT_BASE_META_PKG);
@@ -120,7 +122,7 @@ public record Config(
                 protoJavaPkg, protoPkgBase, protoOuterSuffix,
                 protoPerTable, protoRunProtoc, protoExperimentalOptional,
                 protocPath, protocInclude,
-                beanPkg, metaPkg, baseMetaPkg
+                beanPkg, metaPkg, baseMetaPkg, codegenOutJava
         );
     }
 

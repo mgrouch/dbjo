@@ -13,6 +13,7 @@ import java.sql.Types;
 import java.util.*;
 
 public final class EntityGenerator {
+
     private final Config cfg;
 
     public EntityGenerator(Config cfg) {
@@ -20,8 +21,8 @@ public final class EntityGenerator {
     }
 
     public int generateAll(List<TableModel> tables) throws IOException {
-        Path beanDir = cfg.outBase().resolve(cfg.beanPkg().replace('.', '/'));
-        Path metaDir = cfg.outBase().resolve(cfg.metaPkg().replace('.', '/'));
+        Path beanDir = cfg.codegenOutJava().resolve(cfg.beanPkg().replace('.', '/'));
+        Path metaDir = cfg.codegenOutJava().resolve(cfg.metaPkg().replace('.', '/'));
         Files.createDirectories(beanDir);
         Files.createDirectories(metaDir);
 
@@ -216,7 +217,7 @@ public final class EntityGenerator {
         }
         sb.append("      );\n\n");
 
-        sb.append("  public static final EntityMeta<").append(beanClass).append("> META = new EntityMeta<>(\n");
+        sb.append("  public static final EntityMeta<").append(beanClass).append("> _META = new EntityMeta<>(\n");
         sb.append("      _ALL_PROPERTY_METAS,\n");
         sb.append("      _ALL_PROP_NAMES,\n");
         sb.append("      _ALL_PROP_TYPES\n");
