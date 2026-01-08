@@ -43,7 +43,20 @@ public record Config(
         String beanPkg,
         String metaPkg,
         String baseMetaPkg,
-        Path codegenOutJava) {
+        Path codegenOutJava,
+
+        // RocksDB DAO generator
+        String daoPkg,
+        String schemaPkg,
+        String daoClassSuffix,
+        String schemaClassSuffix,
+        String cfConstSuffix,
+        String daoBaseClass,   // e.g. IndexedRocksDao
+
+        // Protobuf mapper generator
+        String protoMapperPkg,
+        String protoMapperSuffix
+) {
     // ---------------- defaults ----------------
     public static final String DEFAULT_URL    = "jdbc:hsqldb:hsql://localhost:9001/dbjo";
     public static final String DEFAULT_USER   = "SA";
@@ -56,16 +69,28 @@ public record Config(
     public static final String DEFAULT_META_PKG = "org.github.dbjo.generated.model.meta";
     public static final String DEFAULT_BASE_META_PKG = "org.github.dbjo.meta.entity";
 
-    public static final String DEFAULT_PROTO_JAVA_PKG  = "org.github.dbjo.generated.model.proto";
+    public static final String DEFAULT_PROTO_JAVA_PKG  = "org.github.dbjo.generated.proto";
     public static final String DEFAULT_PROTO_PKG_BASE  = "dbjo";
     public static final String DEFAULT_PROTO_OUTER_SUFFIX = "Proto";
     public static final boolean DEFAULT_PROTO_PER_TABLE = true;
 
-    public enum RunMode {
-        ALL, PROTO, ENTITY;
+    public static final String DEFAULT_DAO_PKG = "org.github.dbjo.generated.rdb.dao";
+    public static final String DEFAULT_SCHEMA_PKG = DEFAULT_DAO_PKG;
+    public static final String DEFAULT_DAO_CLASS_SUFFIX = "Dao";
+    public static final String DEFAULT_SCHEMA_CLASS_SUFFIX = "Schema";
+    public static final String DEFAULT_CF_CONST_SUFFIX = "_CF";
+    public static final String DEFAULT_DAO_BASE_CLASS = "IndexedRocksDao";
 
-        public boolean runProto()  { return this == ALL || this == PROTO; }
-        public boolean runEntity() { return this == ALL || this == ENTITY; }
+    public static final String DEFAULT_PROTO_MAPPER_PKG = "org.github.dbjo.generated.rdb.mapper";
+    public static final String DEFAULT_PROTO_MAPPER_SUFFIX = "ProtoMapper";
+
+    public enum RunMode {
+        ALL, PROTO, ENTITY, DAO, MAPPER, RDB;
+
+        public boolean runProto()   { return this == ALL || this == PROTO; }
+        public boolean runEntity()  { return this == ALL || this == ENTITY; }
+        public boolean runDao()     { return this == ALL || this == DAO || this == RDB; }
+        public boolean runMapper()  { return this == ALL || this == MAPPER || this == RDB; }
 
         public static RunMode parse(String s) {
             if (s == null) return ALL;
@@ -73,7 +98,10 @@ public record Config(
                 case "all", "both" -> ALL;
                 case "proto" -> PROTO;
                 case "entity", "entities" -> ENTITY;
-                default -> throw new IllegalArgumentException("Unknown --run=" + s + " (use all|proto|entity)");
+                case "dao", "daos" -> DAO;
+                case "mapper", "mappers" -> MAPPER;
+                case "rdb", "rocks", "rocksdb" -> RDB;
+                default -> throw new IllegalArgumentException("Unknown --run=" + s + " (use all|proto|entity|dao|mapper|rdb)");
             };
         }
     }
@@ -113,6 +141,16 @@ public record Config(
         String metaPkg = am.get("metaPkg", DEFAULT_META_PKG);
         String baseMetaPkg = am.get("baseMetaPkg", DEFAULT_BASE_META_PKG);
 
+        String daoPkg = am.get("daoPkg", DEFAULT_DAO_PKG);
+        String schemaPkg = am.get("schemaPkg", DEFAULT_SCHEMA_PKG);
+        String daoClassSuffix = am.get("daoClassSuffix", DEFAULT_DAO_CLASS_SUFFIX);
+        String schemaClassSuffix = am.get("schemaClassSuffix", DEFAULT_SCHEMA_CLASS_SUFFIX);
+        String cfConstSuffix = am.get("cfConstSuffix", DEFAULT_CF_CONST_SUFFIX);
+        String daoBaseClass = am.get("daoBaseClass", DEFAULT_DAO_BASE_CLASS);
+
+        String protoMapperPkg = am.get("protoMapperPkg", DEFAULT_PROTO_MAPPER_PKG);
+        String protoMapperSuffix = am.get("protoMapperSuffix", DEFAULT_PROTO_MAPPER_SUFFIX);
+
         return new Config(
                 driver, url, user, pass,
                 outBase, overwrite,
@@ -122,7 +160,9 @@ public record Config(
                 protoJavaPkg, protoPkgBase, protoOuterSuffix,
                 protoPerTable, protoRunProtoc, protoExperimentalOptional,
                 protocPath, protocInclude,
-                beanPkg, metaPkg, baseMetaPkg, codegenOutJava
+                beanPkg, metaPkg, baseMetaPkg, codegenOutJava,
+                daoPkg, schemaPkg, daoClassSuffix, schemaClassSuffix, cfConstSuffix, daoBaseClass,
+                protoMapperPkg, protoMapperSuffix
         );
     }
 

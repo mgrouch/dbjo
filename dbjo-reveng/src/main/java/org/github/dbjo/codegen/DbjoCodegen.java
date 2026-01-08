@@ -5,6 +5,8 @@ import org.github.dbjo.codegen.entity.EntityGenerator;
 import org.github.dbjo.codegen.model.TableModel;
 import org.github.dbjo.codegen.proto.ProtoGenerator;
 import org.github.dbjo.codegen.proto.ProtocInvoker;
+import org.github.dbjo.codegen.rdb.RocksDaoGenerator;
+import org.github.dbjo.codegen.rdb.ProtoMapperGenerator;
 
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
@@ -64,6 +66,18 @@ public final class DbjoCodegen {
             if (cfg.runMode().runEntity()) {
                 int n = new EntityGenerator(cfg).generateAll(tables);
                 System.out.println("Generated entity/meta for " + n + " table(s) into: " + cfg.outBase().toAbsolutePath());
+                System.out.println();
+            }
+
+            if (cfg.runMode().runDao()) {
+                int n = new RocksDaoGenerator(cfg).generateAll(tables);
+                System.out.println("Generated RocksDB DAO(s): " + n);
+                System.out.println();
+            }
+
+            if (cfg.runMode().runMapper()) {
+                int n = new ProtoMapperGenerator(cfg).generateAll(tables);
+                System.out.println("Generated Proto mapper(s): " + n);
                 System.out.println();
             }
         }
