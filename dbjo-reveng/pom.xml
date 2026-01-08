@@ -91,7 +91,7 @@
                         <phase>generate-sources</phase>
                         <goals><goal>java</goal></goals>
                         <configuration>
-                            <mainClass>org.github.dbjo.DbjoProtoCodegen</mainClass>
+                            <mainClass>org.github.dbjo.codegen.DbjoCodegen</mainClass>
                             <classpathScope>compile</classpathScope>
                             <systemProperties>
                                 <systemProperty>
