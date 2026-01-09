@@ -51,7 +51,6 @@ public final class ProtoMapperGenerator {
     ) {
         boolean importBean = beanPkg != null && !beanPkg.equals(mapperPkg);
 
-        // imports needed by conversions
         Set<String> imports = new TreeSet<>();
         imports.add("org.github.dbjo.rdb.ProtobufPojoCodec");
         if (importBean) imports.add(beanPkg + "." + beanClass);
@@ -63,7 +62,8 @@ public final class ProtoMapperGenerator {
         boolean needSqlTimestamp = false;
         boolean needProtoTimestamp = false;
 
-        record FieldInfo(String prop, String cap, TypeMappings.JavaType jt, TypeMappings.ProtoType pt, boolean nullable, boolean hasPresence) {}
+        record FieldInfo(String prop, String cap, TypeMappings.JavaType jt, TypeMappings.ProtoType pt,
+                         boolean nullable, boolean hasPresence) {}
         List<FieldInfo> fields = new ArrayList<>();
 
         for (Col c : tm.cols()) {
@@ -75,8 +75,8 @@ public final class ProtoMapperGenerator {
             var jt = TypeMappings.mapSqlTypeToJava(c.sqlType(), null);
             var pt = TypeMappings.mapSqlTypeToProto(c.sqlType());
 
-            boolean protoOptional = nullable && pt.allowOptional(); // we only mark optional for scalars/bytes/string
-            boolean hasPresence = pt.isMessage() || protoOptional;  // message fields have hasX() too
+            boolean protoOptional = nullable && pt.allowOptional(); // scalars/bytes/string
+            boolean hasPresence = pt.isMessage() || protoOptional;  // message fields OR optional scalars
 
             fields.add(new FieldInfo(prop, cap, jt, pt, nullable, hasPresence));
 
@@ -84,6 +84,7 @@ public final class ProtoMapperGenerator {
             if ("byte[]".equals(jt.javaType())) needByteString = true;
             if ("Date".equals(jt.javaType())) needSqlDate = true;
             if ("Time".equals(jt.javaType())) needSqlTime = true;
+
             if ("Timestamp".equals(jt.javaType())) {
                 needSqlTimestamp = true;
                 needProtoTimestamp = true;
@@ -96,7 +97,7 @@ public final class ProtoMapperGenerator {
         if (needSqlTime) imports.add("java.sql.Time");
         if (needSqlTimestamp) imports.add("java.sql.Timestamp");
         if (needByteString) imports.add("com.google.protobuf.ByteString");
-        if (needProtoTimestamp) imports.add("com.google.protobuf.Timestamp");
+        // IMPORTANT: do NOT import com.google.protobuf.Timestamp (name-clash with java.sql.Timestamp)
 
         StringBuilder sb = new StringBuilder(6000);
         sb.append("package ").append(mapperPkg).append(";\n\n");
@@ -143,16 +144,17 @@ public final class ProtoMapperGenerator {
 
         // Timestamp helpers if needed
         if (needProtoTimestamp || needSqlTimestamp) {
-            sb.append("    private static Timestamp fromProtoTimestamp(Timestamp t) {\n");
+            sb.append("    private static java.sql.Timestamp fromProtoTimestamp(com.google.protobuf.Timestamp t) {\n");
             sb.append("        long millis = t.getSeconds() * 1000L + (t.getNanos() / 1_000_000L);\n");
-            sb.append("        Timestamp ts = new Timestamp(millis);\n");
+            sb.append("        java.sql.Timestamp ts = new java.sql.Timestamp(millis);\n");
             sb.append("        ts.setNanos(t.getNanos());\n");
             sb.append("        return ts;\n");
             sb.append("    }\n\n");
-            sb.append("    private static Timestamp toProtoTimestamp(Timestamp ts) {\n");
+
+            sb.append("    private static com.google.protobuf.Timestamp toProtoTimestamp(java.sql.Timestamp ts) {\n");
             sb.append("        long seconds = ts.getTime() / 1000L;\n");
             sb.append("        int nanos = ts.getNanos();\n");
-            sb.append("        return Timestamp.newBuilder().setSeconds(seconds).setNanos(nanos).build();\n");
+            sb.append("        return com.google.protobuf.Timestamp.newBuilder().setSeconds(seconds).setNanos(nanos).build();\n");
             sb.append("    }\n\n");
         }
 
@@ -171,7 +173,6 @@ public final class ProtoMapperGenerator {
     }
 
     private static String fromProtoExpr(String javaType, String protoType, String protoGetExpr) {
-        // protoType is useful for Timestamp (message)
         return switch (javaType) {
             case "Short" -> "(short) " + protoGetExpr;
             case "byte[]" -> protoGetExpr + ".toByteArray()";

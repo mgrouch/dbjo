@@ -75,7 +75,7 @@ public record Config(
     public static final boolean DEFAULT_PROTO_PER_TABLE = true;
 
     public static final String DEFAULT_DAO_PKG = "org.github.dbjo.generated.rdb.dao";
-    public static final String DEFAULT_SCHEMA_PKG = DEFAULT_DAO_PKG;
+    public static final String DEFAULT_SCHEMA_PKG = "org.github.dbjo.generated.rdb.schema";
     public static final String DEFAULT_DAO_CLASS_SUFFIX = "Dao";
     public static final String DEFAULT_SCHEMA_CLASS_SUFFIX = "Schema";
     public static final String DEFAULT_CF_CONST_SUFFIX = "_CF";

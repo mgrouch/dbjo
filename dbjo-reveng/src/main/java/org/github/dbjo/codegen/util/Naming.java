@@ -79,4 +79,16 @@ public final class Naming {
             default -> n;
         };
     }
+
+    public static String toUpperConst(String s) {
+        if (s == null || s.isBlank()) return "X";
+        String n = s.replaceAll("[^A-Za-z0-9]+", "_").toUpperCase(Locale.ROOT);
+        if (!n.isEmpty() && Character.isDigit(n.charAt(0))) n = "_" + n;
+        return sanitizeJavaIdentifier(n);
+    }
+
+    public static String toLowerCamel(String s) {
+        String c = toCamelCase(s, false);
+        return c.isEmpty() ? "x" : c;
+    }
 }

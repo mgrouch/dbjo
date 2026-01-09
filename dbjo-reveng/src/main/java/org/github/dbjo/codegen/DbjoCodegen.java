@@ -69,6 +69,13 @@ public final class DbjoCodegen {
                 System.out.println();
             }
 
+            if (cfg.runMode().runDao() || cfg.runMode().runMapper()) {
+                // ensure schema exists first if you're generating rdb artifacts
+                int ns = new org.github.dbjo.codegen.rdb.RocksSchemaGenerator(cfg).generateAll(tables);
+                System.out.println("Generated RocksDB Schema(s): " + ns);
+                System.out.println();
+            }
+
             if (cfg.runMode().runDao()) {
                 int n = new RocksDaoGenerator(cfg).generateAll(tables);
                 System.out.println("Generated RocksDB DAO(s): " + n);
