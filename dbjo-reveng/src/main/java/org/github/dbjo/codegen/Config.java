@@ -55,7 +55,10 @@ public record Config(
 
         // Protobuf mapper generator
         String protoMapperPkg,
-        String protoMapperSuffix
+        String protoMapperSuffix,
+
+        // SQL DB mappings
+        String dbMetaPkg
 ) {
     // ---------------- defaults ----------------
     public static final String DEFAULT_URL    = "jdbc:hsqldb:hsql://localhost:9001/dbjo";
@@ -83,6 +86,7 @@ public record Config(
 
     public static final String DEFAULT_PROTO_MAPPER_PKG = "org.github.dbjo.generated.rdb.mapper";
     public static final String DEFAULT_PROTO_MAPPER_SUFFIX = "ProtoMapper";
+    private static final String DEFAULT_SQL_DB_MAPPER_PKG = "org.github.dbjo.generated.db.meta";
 
     public enum RunMode {
         ALL, PROTO, ENTITY, DAO, MAPPER, RDB;
@@ -151,6 +155,8 @@ public record Config(
         String protoMapperPkg = am.get("protoMapperPkg", DEFAULT_PROTO_MAPPER_PKG);
         String protoMapperSuffix = am.get("protoMapperSuffix", DEFAULT_PROTO_MAPPER_SUFFIX);
 
+        String dbMetaPkg = am.get("dbMetaPkg", DEFAULT_SQL_DB_MAPPER_PKG);
+
         return new Config(
                 driver, url, user, pass,
                 outBase, overwrite,
@@ -162,14 +168,13 @@ public record Config(
                 protocPath, protocInclude,
                 beanPkg, metaPkg, baseMetaPkg, codegenOutJava,
                 daoPkg, schemaPkg, daoClassSuffix, schemaClassSuffix, cfConstSuffix, daoBaseClass,
-                protoMapperPkg, protoMapperSuffix
+                protoMapperPkg, protoMapperSuffix, dbMetaPkg
         );
     }
 
     private static Path resolveProtocPath(ArgMap am) {
         String p = am.get("protoc", System.getProperty("protoc"));
         if (p != null && !p.isBlank()) return Paths.get(p);
-
         boolean win = System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("win");
         return Paths.get("target", "tools", "protoc", win ? "protoc.exe" : "protoc");
     }
