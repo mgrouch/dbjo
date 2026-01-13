@@ -11,6 +11,7 @@
     <module>dbjo-sim-db</module>
     <module>dbjo-reveng</module>
     <module>dbjo-rdb</module>
+    <module>dbjo-maven-plugins</module>
   </modules>
   <dependencyManagement>
     <dependencies>
