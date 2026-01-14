@@ -104,8 +104,10 @@ public final class DbjoCodegenMojo extends AbstractMojo {
         argv.add("--run=" + run);
         argv.add("--driver=" + driver);
         if (url != null && !url.isBlank()) argv.add("--url=" + url);
-        argv.add("--user=" + user);
-        argv.add("--pass=" + pass);
+        String user0 = (user == null) ? "" : user;
+        String pass0 = (pass == null) ? "" : pass;
+        argv.add("--user=" + user0);
+        argv.add("--pass=" + pass0);
         argv.add("--overwrite=" + overwrite);
 
         argv.add("--codegenOutJava=" + codegenOutJava.getAbsolutePath());
