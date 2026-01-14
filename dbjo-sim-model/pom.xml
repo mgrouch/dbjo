@@ -34,6 +34,15 @@
                         </goals>
 
                         <configuration>
+                            <!-- optional: if present, Mojo will infer protoc=33.2 from 4.33.2 -->
+                            <protobufJavaVersion>${protobuf.version}</protobufJavaVersion>
+
+                            <!-- optional override -->
+                            <!-- <protocVersion>33.2</protocVersion> -->
+
+                            <downloadProtoc>true</downloadProtoc>
+                            <protocInstallDir>${project.build.directory}/tools/protoc</protocInstallDir>
+
                             <!-- generator mode -->
                             <run>all</run>
 
@@ -75,4 +84,9 @@
             </plugin>
         </plugins>
     </build>
+    <properties>
+        <protobuf.version>3.25.3</protobuf.version>
+        <protoc.version>3.25.3</protoc.version>
+        <protoc.bin>protoc</protoc.bin>
+    </properties>
 </project>
