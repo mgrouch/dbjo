@@ -92,6 +92,25 @@ public final class DbjoCodegenMojo extends AbstractMojo {
     @Parameter
     private List<String> args;
 
+    @Parameter(property = "dbjo.codegen.protobufJavaVersion", defaultValue = "${protobuf.version}")
+    private String protobufJavaVersion;
+
+    @Parameter(property = "dbjo.codegen.protocVersion")
+    private String protocVersion; // optional override (e.g. "33.2")
+
+    @Parameter(property = "dbjo.codegen.protocInstallDir", defaultValue = "${project.build.directory}/tools/protoc")
+    private File protocInstallDir;
+
+    @Parameter(property = "dbjo.codegen.downloadProtoc", defaultValue = "true")
+    private boolean downloadProtoc;
+
+    @Parameter(property = "dbjo.codegen.protocBaseUrl",
+            defaultValue = "https://github.com/protocolbuffers/protobuf/releases/download")
+    private String protocBaseUrl;
+
+    @Parameter(defaultValue = "${settings.offline}", readonly = true)
+    private boolean offline;
+
     @Override
     public void execute() throws MojoExecutionException {
         if (skip) {
@@ -128,6 +147,38 @@ public final class DbjoCodegenMojo extends AbstractMojo {
         // Ensure output dirs exist
         mkdirs(codegenOutJava);
         mkdirs(protoOutJava);
+
+        // Respect explicit -Dprotoc / -Dprotoc.include if user provided them
+        String sysProtoc = System.getProperty("protoc");
+        String sysInclude = System.getProperty("protoc.include");
+
+        if ((sysProtoc == null || sysProtoc.isBlank()) && downloadProtoc) {
+            String effVer = (protocVersion != null && !protocVersion.isBlank())
+                    ? protocVersion.trim()
+                    : ProtocInstaller.inferProtocVersionFromProtobufJava(protobufJavaVersion);
+
+            if (effVer == null) {
+                throw new MojoExecutionException(
+                        "Cannot infer protoc version. Set <protocVersion>33.2</protocVersion> " +
+                                "or provide <protobufJavaVersion>4.33.2</protobufJavaVersion>."
+                );
+            }
+
+            var paths = ProtocInstaller.ensureInstalled(
+                    getLog(),
+                    protocInstallDir.toPath(),
+                    effVer,
+                    protocBaseUrl,
+                    offline
+            );
+
+            // Make your existing codegen pick it up via System.getProperty("protoc"/"protoc.include")
+            System.setProperty("protoc", paths.protocExe().toAbsolutePath().toString());
+            System.setProperty("protoc.include", paths.includeDir().toAbsolutePath().toString());
+
+            getLog().info("Using protoc=" + System.getProperty("protoc"));
+            getLog().info("Using protoc.include=" + System.getProperty("protoc.include"));
+        }
 
         // Invoke org.github.dbjo.codegen.DbjoCodegen.main(String[])
         invokeGenerator(argv.toArray(String[]::new));
