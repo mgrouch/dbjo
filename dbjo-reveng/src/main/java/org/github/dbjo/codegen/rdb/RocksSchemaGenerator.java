@@ -11,7 +11,6 @@ import org.github.dbjo.codegen.util.Naming;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.sql.DatabaseMetaData;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -50,9 +49,10 @@ public final class RocksSchemaGenerator {
         String mapperClass = beanClass + cfg.protoMapperSuffix();
         String mapperFqn = cfg.protoMapperPkg() + "." + mapperClass;
 
-        String protoFqn = cfg.protoJavaPkg() + "." + beanClass; // do NOT import to avoid name clash with entity
+        // Proto FQN (avoid import to prevent clashes with entity class)
+        String protoFqn = cfg.protoJavaPkg() + "." + beanClass;
 
-        // index models
+        // index models from DB
         List<IndexModel> indexes = tm.indexes() == null ? List.of() : tm.indexes();
 
         // column lookup for getter + type decisions
@@ -78,6 +78,9 @@ public final class RocksSchemaGenerator {
             if (ix.indexName() == null || ix.indexName().isBlank()) continue;
             if (ix.columnNames() == null || ix.columnNames().isEmpty()) continue;
 
+            // ✅ Skip pure PK indexes (Rocks primary key already provides this)
+            if (isPkIndex(ix, tm.pkColsUpper())) continue;
+
             List<String> getters = new ArrayList<>();
             boolean allStringSingle = false;
 
@@ -93,7 +96,6 @@ public final class RocksSchemaGenerator {
                 }
             } else {
                 needIdxKey = true;
-                // if any component is byte[] we need Base64
                 for (String cn : ix.columnNames()) {
                     Col c = colByUpper.get(cn.toUpperCase(Locale.ROOT));
                     if (c != null) {
@@ -109,23 +111,25 @@ public final class RocksSchemaGenerator {
             }
 
             String idxConstName = makeIndexConstName(ix.indexName(), cfName);
-            String idxConstValue = ix.indexName(); // preserve DB index name as Rocks index name
+            String idxConstValue = ix.indexName(); // keep DB index name as Rocks index name
 
             genIdx.add(new GenIndex(ix, idxConstName, idxConstValue, getters, allStringSingle));
         }
 
-        // Key type + KeyCodec expr (best-guess mapping)
+        // Key type + KeyCodec expr
         String keyType = inferKeyType(tm);
         String keyCodecExpr = keyCodecExprFor(keyType);
 
-        StringBuilder sb = new StringBuilder(8000);
+        StringBuilder sb = new StringBuilder(9000);
         sb.append("package ").append(cfg.schemaPkg()).append(";\n\n");
 
         sb.append("import org.github.dbjo.rdb.*;\n");
+
         // entity class import (if different pkg)
         if (!cfg.beanPkg().equals(cfg.schemaPkg())) {
             sb.append("import ").append(cfg.beanPkg()).append(".").append(beanClass).append(";\n");
         }
+
         // mapper import (avoid importing proto)
         if (!cfg.protoMapperPkg().equals(cfg.schemaPkg())) {
             sb.append("import ").append(mapperFqn).append(";\n");
@@ -182,10 +186,15 @@ public final class RocksSchemaGenerator {
                     extractor = "u -> idxKey(" + args + ")";
                 }
 
-                sb.append("                        IndexDef.").append(factory)
+                // ✅ Force <T,V> to stop inference failures in List.of(...)
+                sb.append("                        IndexDef.<")
+                        .append(beanClass)
+                        .append(", String>")
+                        .append(factory)
                         .append("(").append(g.constName)
                         .append(", IndexKeyCodec.stringUtf8(), ")
-                        .append(extractor).append(")");
+                        .append(extractor)
+                        .append(")");
 
                 sb.append(i < genIdx.size() - 1 ? ",\n" : "\n");
             }
@@ -248,18 +257,29 @@ public final class RocksSchemaGenerator {
     }
 
     private String keyCodecExprFor(String keyType) {
-        // best-guess based on your existing KeyCodec.stringUtf8()
         return switch (keyType) {
             case "String" -> "KeyCodec.stringUtf8()";
             case "Integer", "Short" -> "KeyCodec.int32()";
             case "Long" -> "KeyCodec.int64()";
             case "byte[]" -> "KeyCodec.bytes()";
+            case "UUID" -> "KeyCodec.uuid()";
             default -> "KeyCodec.stringUtf8()";
         };
     }
 
+    private static boolean isPkIndex(IndexModel ix, Set<String> pkColsUpper) {
+        if (pkColsUpper == null || pkColsUpper.isEmpty()) return false;
+        if (ix.columnNames() == null || ix.columnNames().isEmpty()) return false;
+
+        Set<String> idxCols = ix.columnNames().stream()
+                .filter(Objects::nonNull)
+                .map(s -> s.toUpperCase(Locale.ROOT))
+                .collect(Collectors.toSet());
+
+        return idxCols.equals(pkColsUpper);
+    }
+
     private static String makeIndexConstName(String dbIndexName, String cfName) {
-        // Heuristic: if index looks like "<cf>_<mid>_idx", use IDX_<MID>
         String n = dbIndexName.toLowerCase(Locale.ROOT);
         String cf = cfName.toLowerCase(Locale.ROOT);
         if (n.startsWith(cf + "_") && n.endsWith("_idx") && n.length() > (cf.length() + 1 + 4)) {
