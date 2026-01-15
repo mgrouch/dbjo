@@ -128,14 +128,12 @@
                             <addCompileRoots>true</addCompileRoots>
 
                             <args>
-                                <arg>--beanPkg=org.github.dbjo.sim.model.generated.entity</arg>
-                                <arg>--protoJavaPkg=org.github.dbjo.sim.model.generated.proto</arg>
-                                <arg>--protoMapperPkg=org.github.dbjo.sim.model.generated.protomap</arg>
-
-                                <arg>--daoPkg=org.github.dbjo.sim.model.generated.dao</arg>
-                                <arg>--schemaPkg=org.github.dbjo.sim.model</arg>
-
-                                <arg>--dbMetaPkg=org.github.dbjo.sim.model.generated.dbmeta</arg>
+                                <arg>--beanPkg=org.github.dbjo.generated.model.entity</arg>
+                                <arg>--protoJavaPkg=org.github.dbjo.generated.model.proto</arg>
+                                <arg>--protoMapperPkg=org.github.dbjo.generated.model.protomap</arg>
+                                <arg>--daoPkg=org.github.dbjo.generated.model.rdb.dao</arg>
+                                <arg>--schemaPkg=org.github.dbjo.generated.model.rdb.schema</arg>
+                                <arg>--dbMetaPkg=org.github.dbjo.generated.model.dbmeta</arg>
                             </args>
                         </configuration>
                     </execution>
