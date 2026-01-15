@@ -8,7 +8,7 @@ import java.util.Map;
 import java.util.Objects;
 
 public final class DaoRegistry implements AutoCloseable {
-    private final TransactionDB db; // optional, but handy
+    private final TransactionDB db;
     private final Map<String, ColumnFamilyHandle> cfByName;
     private final boolean closeDbOnClose;
 
@@ -41,7 +41,8 @@ public final class DaoRegistry implements AutoCloseable {
     public <T, K> ResolvedEntityDef<T, K> entity(EntityDef<T, K> def) {
         Objects.requireNonNull(def, "def");
         Map<String, ColumnFamilyHandle> idx = new HashMap<>();
-        for (IndexDef<T> i : def.indexes()) {
+
+        for (IndexDef<T, ?> i : def.indexes()) {   // ✅ fixed
             idx.put(i.name(), cf(i.name()));
         }
         return new ResolvedEntityDef<>(def, idx);
@@ -56,7 +57,7 @@ public final class DaoRegistry implements AutoCloseable {
         Objects.requireNonNull(indexNameToCfName, "indexNameToCfName");
 
         Map<String, ColumnFamilyHandle> idx = new HashMap<>();
-        for (IndexDef<T> i : def.indexes()) {
+        for (IndexDef<T, ?> i : def.indexes()) {   // ✅ fixed
             String idxName = i.name();
             String cfName = indexNameToCfName.getOrDefault(idxName, idxName);
             idx.put(idxName, cf(cfName));
@@ -66,8 +67,6 @@ public final class DaoRegistry implements AutoCloseable {
 
     @Override
     public void close() {
-        // ColumnFamilyHandle lifecycle is typically owned by the RocksDbHandle/DB owner.
-        // We only optionally close DB.
         if (closeDbOnClose) {
             db.close();
         }
