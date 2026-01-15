@@ -7,40 +7,54 @@
         <groupId>org.github.dbjo</groupId>
         <version>1.0.0-SNAPSHOT</version>
     </parent>
-    <artifactId>dbjo-codegen-plugin</artifactId>
+
+    <artifactId>dbjo-hsql-plugin</artifactId>
     <packaging>maven-plugin</packaging>
-    <name>dbjo-codegen-plugin</name>
+    <name>dbjo-hsql-plugin</name>
+
+    <properties>
+        <maven.compiler.release>21</maven.compiler.release>
+        <maven.plugin.tools.version>3.15.1</maven.plugin.tools.version>
+        <hsqldb.version>2.7.4</hsqldb.version>
+    </properties>
+
     <dependencies>
-        <!-- Maven plugin APIs -->
+        <!-- Maven Plugin API -->
         <dependency>
             <groupId>org.apache.maven</groupId>
             <artifactId>maven-plugin-api</artifactId>
-            <scope>provided</scope>
         </dependency>
-        <dependency>
-            <groupId>org.apache.maven</groupId>
-            <artifactId>maven-core</artifactId>
-            <scope>provided</scope>
-        </dependency>
+
+        <!-- Mojo annotations -->
         <dependency>
             <groupId>org.apache.maven.plugin-tools</groupId>
             <artifactId>maven-plugin-annotations</artifactId>
             <scope>provided</scope>
         </dependency>
+
+        <!-- Needed for @Parameter injection and utils -->
         <dependency>
-            <groupId>org.github.dbjo</groupId>
-            <artifactId>dbjo-reveng</artifactId>
-            <version>${project.version}</version>
+            <groupId>org.apache.maven</groupId>
+            <artifactId>maven-core</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- HSQLDB server + JDBC -->
+        <dependency>
+            <groupId>org.hsqldb</groupId>
+            <artifactId>hsqldb</artifactId>
+            <version>${hsqldb.version}</version>
         </dependency>
     </dependencies>
+
     <build>
         <plugins>
-            <!-- Generate plugin descriptor from @Mojo annotations -->
+            <!-- Generate META-INF/maven/plugin.xml -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-plugin-plugin</artifactId>
                 <configuration>
-                    <goalPrefix>dbjo</goalPrefix>
+                    <goalPrefix>dbjo-hsql</goalPrefix>
                 </configuration>
                 <executions>
                     <execution>
@@ -60,8 +74,11 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.14.0</version>
+                <configuration>
+                    <release>${maven.compiler.release}</release>
+                </configuration>
             </plugin>
         </plugins>
     </build>
 </project>
-
