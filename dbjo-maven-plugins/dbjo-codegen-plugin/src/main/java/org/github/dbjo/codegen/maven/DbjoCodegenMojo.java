@@ -72,7 +72,7 @@ public final class DbjoCodegenMojo extends AbstractMojo {
      * Your generator should honor --protoOutJava=...
      */
     @Parameter(property = "dbjo.codegen.protoOutJava",
-            defaultValue = "${project.build.directory}/generated-sources/dbjo-proto-java")
+            defaultValue = "${project.build.directory}/generated-sources/dbjo")
     private File protoOutJava;
 
     /**

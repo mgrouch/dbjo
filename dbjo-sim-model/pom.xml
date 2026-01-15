@@ -8,6 +8,18 @@
         <version>1.0.0-SNAPSHOT</version>
     </parent>
     <artifactId>dbjo-sim-model</artifactId>
+    <dependencies>
+        <dependency>
+            <groupId>org.github.dbjo</groupId>
+            <artifactId>dbjo-meta</artifactId>
+            <version>${project.parent.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.github.dbjo</groupId>
+            <artifactId>dbjo-rdb</artifactId>
+            <version>${project.parent.version}</version>
+        </dependency>
+    </dependencies>
     <build>
         <plugins>
             <plugin>
@@ -57,7 +69,7 @@
 
                             <!-- output roots -->
                             <codegenOutJava>${project.build.directory}/generated-sources/dbjo</codegenOutJava>
-                            <protoOutJava>${project.build.directory}/generated-sources/dbjo-proto-java</protoOutJava>
+                            <protoOutJava>${project.build.directory}/generated-sources/dbjo</protoOutJava>
 
                             <!-- add generated directories to compile roots -->
                             <addCompileRoots>true</addCompileRoots>
