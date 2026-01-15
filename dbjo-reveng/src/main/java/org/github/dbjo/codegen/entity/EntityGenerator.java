@@ -162,7 +162,7 @@ public final class EntityGenerator {
         List<MetaProp> props = new ArrayList<>();
         for (Col c : tm.cols()) {
             String propName = Naming.sanitizeJavaIdentifier(Naming.toFieldName(c.colName()));
-            JavaType jt = mapSqlTypeToJava(c.sqlType(), null);
+            JavaType jt = mapSqlTypeToJava(c.sqlType(), imports);
             boolean isPk = tm.pkColsUpper().contains(c.colName().toUpperCase(Locale.ROOT));
 
             String constName = Naming.toUpperSnake(propName);
