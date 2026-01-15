@@ -156,7 +156,7 @@ public final class RocksSchemaGenerator {
         sb.append("                        new ").append(mapperClass).append("()\n");
         sb.append("                );\n\n");
 
-        sb.append("        return new EntityDef<>(\n");
+        sb.append("        return EntityDef.of(\n");
         sb.append("                ").append(cfConst).append(",\n");
         sb.append("                ").append(cfParam).append(",\n");
         sb.append("                ").append(keyCodecExpr).append(",\n");
