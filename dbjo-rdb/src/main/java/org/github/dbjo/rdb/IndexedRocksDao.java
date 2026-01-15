@@ -8,7 +8,9 @@ import java.util.*;
 public abstract class IndexedRocksDao<T, K> extends AbstractRocksDao<T, K> {
 
     private static final byte[] EMPTY = new byte[0];
-    private final List<IndexDef<T>> indexes;
+
+    // ✅ now IndexDef has 2 type params
+    private final List<IndexDef<T, ?>> indexes;
 
     protected IndexedRocksDao(
             RocksSessions sessions,
@@ -16,7 +18,7 @@ public abstract class IndexedRocksDao<T, K> extends AbstractRocksDao<T, K> {
             KeyCodec<K> keyCodec,
             Codec<T> valueCodec,
             Map<String, ColumnFamilyHandle> indexCfs,
-            List<IndexDef<T>> indexes
+            List<? extends IndexDef<T, ?>> indexes
     ) {
         super(sessions, primaryCf, keyCodec, valueCodec, indexCfs);
         this.indexes = List.copyOf(indexes);
@@ -42,20 +44,19 @@ public abstract class IndexedRocksDao<T, K> extends AbstractRocksDao<T, K> {
 
         final byte[] pk = keyCodec.encodeKey(key);
 
-        for (IndexDef<T> idx : indexes) {
+        // ✅ IndexDef<T, ?>
+        for (IndexDef<T, ?> idx : indexes) {
             ColumnFamilyHandle cf = indexCfs.get(idx.name());
             if (cf == null) throw new IllegalStateException("Missing index CF for " + idx.name());
 
             Set<ByteArrayKey> oldKeys = toSet(idx.valueKeysOrEmpty(oldValueOrNull));
             Set<ByteArrayKey> newKeys = toSet(idx.valueKeysOrEmpty(newValue));
 
-            // delete removed
             for (ByteArrayKey v : oldKeys) {
                 if (!newKeys.contains(v)) {
                     batch.delete(cf, IndexKeys.unique(v.bytes(), pk));
                 }
             }
-            // insert added
             for (ByteArrayKey v : newKeys) {
                 if (!oldKeys.contains(v)) {
                     batch.put(cf, IndexKeys.unique(v.bytes(), pk), EMPTY);
@@ -70,7 +71,7 @@ public abstract class IndexedRocksDao<T, K> extends AbstractRocksDao<T, K> {
 
         final byte[] pk = keyCodec.encodeKey(key);
 
-        for (IndexDef<T> idx : indexes) {
+        for (IndexDef<T, ?> idx : indexes) {
             ColumnFamilyHandle cf = indexCfs.get(idx.name());
             if (cf == null) throw new IllegalStateException("Missing index CF for " + idx.name());
 
