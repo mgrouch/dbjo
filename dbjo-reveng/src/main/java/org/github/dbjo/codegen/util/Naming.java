@@ -31,14 +31,38 @@ public final class Naming {
 
     public static String toLowerSnake(String s) {
         if (s == null || s.isEmpty()) return s;
-        String camel = toCamelCase(s, true);
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < camel.length(); i++) {
-            char ch = camel.charAt(i);
-            if (Character.isUpperCase(ch) && i > 0) sb.append('_');
+
+        // normalize separators
+        String norm = s.replaceAll("[^A-Za-z0-9]+", "_");
+
+        StringBuilder sb = new StringBuilder(norm.length() + 8);
+        char prev = 0;
+
+        for (int i = 0; i < norm.length(); i++) {
+            char ch = norm.charAt(i);
+
+            if (ch == '_') {
+                if (sb.length() > 0 && sb.charAt(sb.length() - 1) != '_') sb.append('_');
+                prev = ch;
+                continue;
+            }
+
+            boolean isUpper = Character.isUpperCase(ch);
+            boolean prevIsLowerOrDigit = i > 0 && (Character.isLowerCase(prev) || Character.isDigit(prev));
+            boolean prevIsUpper = i > 0 && Character.isUpperCase(prev);
+            boolean nextIsLower = (i + 1 < norm.length()) && Character.isLowerCase(norm.charAt(i + 1));
+
+            // handle camelCase and acronym boundaries: "CreatedAt" -> "created_at", "HTTPServer" -> "http_server"
+            if (i > 0 && isUpper && (prevIsLowerOrDigit || (prevIsUpper && nextIsLower))) {
+                if (sb.length() > 0 && sb.charAt(sb.length() - 1) != '_') sb.append('_');
+            }
+
             sb.append(Character.toLowerCase(ch));
+            prev = ch;
         }
-        return sb.toString().replaceAll("[^a-z0-9_]+", "_");
+
+        String out = sb.toString().replaceAll("^_+|_+$", "").replaceAll("__+", "_");
+        return out.isEmpty() ? "field" : out;
     }
 
     public static String toUpperSnake(String camel) {
