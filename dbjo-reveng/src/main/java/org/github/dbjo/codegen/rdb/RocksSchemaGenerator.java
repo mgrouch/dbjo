@@ -170,7 +170,7 @@ public final class RocksSchemaGenerator {
             for (int i = 0; i < genIdx.size(); i++) {
                 GenIndex g = genIdx.get(i);
 
-                String factory = g.dbIdx.unique() ? "unique" : "nonUnique"; // assumes IndexDef.nonUnique exists
+                String factory = g.dbIdx.unique() ? "unique" : "multi";
 
                 String extractor;
                 if (g.allStringSingles && g.getters.size() == 1) {
