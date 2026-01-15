@@ -19,16 +19,78 @@
             <artifactId>dbjo-rdb</artifactId>
             <version>${project.parent.version}</version>
         </dependency>
+        <dependency>
+            <groupId>org.github.dbjo</groupId>
+            <artifactId>dbjo-sim-db</artifactId>
+            <version>${project.parent.version}</version>
+        </dependency>
     </dependencies>
     <build>
         <plugins>
+
+            <!-- 1) Start HSQLDB before codegen -->
+            <plugin>
+                <groupId>org.github.dbjo</groupId>
+                <artifactId>dbjo-hsql-plugin</artifactId>
+                <version>${project.version}</version>
+                <dependencies>
+                    <dependency>
+                        <groupId>org.github.dbjo</groupId>
+                        <artifactId>dbjo-sim-db</artifactId>
+                        <version>${project.parent.version}</version>
+                    </dependency>
+                </dependencies>
+                <executions>
+                    <execution>
+                        <id>hsqldb-start</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>start</goal>
+                        </goals>
+                        <configuration>
+                            <dbName>dbjo</dbName>
+                            <dbPath>mem:dbjo</dbPath>
+                            <port>9001</port>
+                            <user>SA</user>
+                            <pass></pass>
+
+                            <!-- IMPORTANT: do NOT block the Maven build -->
+                            <block>false</block>
+
+                            <!-- Optional: init schema before codegen uses metadata -->
+                            <!-- Use classpath or file path. If your schema.sql is in src/main/resources, classpath works. -->
+                            <initScript>classpath:schema.sql</initScript>
+
+                            <!-- Optional: wait for server readiness -->
+                            <waitMs>15000</waitMs>
+                        </configuration>
+                    </execution>
+
+                    <!-- 3) Stop HSQLDB after codegen -->
+                    <execution>
+                        <id>hsqldb-stop</id>
+                        <!-- process-sources happens after generate-sources -->
+                        <phase>process-sources</phase>
+                        <goals>
+                            <goal>stop</goal>
+                        </goals>
+                        <configuration>
+                            <dbName>dbjo</dbName>
+                            <port>9001</port>
+                            <user>SA</user>
+                            <pass></pass>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- 2) Codegen plugin -->
             <plugin>
                 <groupId>org.github.dbjo</groupId>
                 <artifactId>dbjo-codegen-plugin</artifactId>
-                <!-- IMPORTANT: use the same version as in the reactor -->
                 <version>${project.version}</version>
 
-                <!-- Put the JDBC driver here so the plugin can load it -->
+                <!-- JDBC driver on plugin classpath -->
                 <dependencies>
                     <dependency>
                         <groupId>org.hsqldb</groupId>
@@ -46,37 +108,26 @@
                         </goals>
 
                         <configuration>
-                            <!-- optional: if present, Mojo will infer protoc=33.2 from 4.33.2 -->
                             <protobufJavaVersion>${protobuf.version}</protobufJavaVersion>
-
-                            <!-- optional override -->
-                            <!-- <protocVersion>33.2</protocVersion> -->
 
                             <downloadProtoc>true</downloadProtoc>
                             <protocInstallDir>${project.build.directory}/tools/protoc</protocInstallDir>
 
-                            <!-- generator mode -->
                             <run>all</run>
 
-                            <!-- JDBC -->
                             <driver>org.hsqldb.jdbc.JDBCDriver</driver>
                             <url>jdbc:hsqldb:hsql://localhost:9001/dbjo</url>
                             <user>SA</user>
                             <pass></pass>
 
-                            <!-- overwrite existing generated files -->
                             <overwrite>true</overwrite>
 
-                            <!-- output roots -->
                             <codegenOutJava>${project.build.directory}/generated-sources/dbjo</codegenOutJava>
                             <protoOutJava>${project.build.directory}/generated-sources/dbjo</protoOutJava>
 
-                            <!-- add generated directories to compile roots -->
                             <addCompileRoots>true</addCompileRoots>
 
-                            <!-- passthrough args to your generator -->
                             <args>
-                                <!-- adapt to YOUR packages -->
                                 <arg>--beanPkg=org.github.dbjo.sim.model.generated.entity</arg>
                                 <arg>--protoJavaPkg=org.github.dbjo.sim.model.generated.proto</arg>
                                 <arg>--protoMapperPkg=org.github.dbjo.sim.model.generated.protomap</arg>
@@ -85,17 +136,15 @@
                                 <arg>--schemaPkg=org.github.dbjo.sim.model</arg>
 
                                 <arg>--dbMetaPkg=org.github.dbjo.sim.model.generated.dbmeta</arg>
-
-                                <!-- optional filters -->
-                                <!-- <arg>- -schemaInclude=PUBLIC</arg> -->
-                                <!-- <arg>- -tableInclude=USER.*</arg> -->
                             </args>
                         </configuration>
                     </execution>
                 </executions>
             </plugin>
+
         </plugins>
     </build>
+
     <properties>
         <protobuf.version>3.25.3</protobuf.version>
         <protoc.version>3.25.3</protoc.version>
