@@ -3,13 +3,13 @@ package org.github.dbjo.rdb;
 import java.util.*;
 import java.util.function.Function;
 
-public final class IndexDef<T> {
+public final class IndexDef<T, V> {
     private final String name;
     private final Function<T, Iterable<byte[]>> valueKeys; // raw encoded value keys
 
     private IndexDef(String name, Function<T, Iterable<byte[]>> valueKeys) {
-        this.name = Objects.requireNonNull(name);
-        this.valueKeys = Objects.requireNonNull(valueKeys);
+        this.name = Objects.requireNonNull(name, "name");
+        this.valueKeys = Objects.requireNonNull(valueKeys, "valueKeys");
     }
 
     public String name() { return name; }
@@ -21,7 +21,13 @@ public final class IndexDef<T> {
     }
 
     /** One value (nullable -> “sparse index”). */
-    public static <T, V> IndexDef<T> unique(String name, IndexKeyCodec<V> codec, Function<T, V> extractor) {
+    public static <T, V> IndexDef<T, V> unique(
+            String name,
+            IndexKeyCodec<V> codec,
+            Function<T, V> extractor
+    ) {
+        Objects.requireNonNull(codec, "codec");
+        Objects.requireNonNull(extractor, "extractor");
         return new IndexDef<>(name, t -> {
             V v = extractor.apply(t);
             if (v == null) return List.of();
@@ -30,7 +36,13 @@ public final class IndexDef<T> {
     }
 
     /** Many values (nullable iterable -> empty). */
-    public static <T, V> IndexDef<T> multi(String name, IndexKeyCodec<V> codec, Function<T, ? extends Iterable<V>> extractor) {
+    public static <T, V> IndexDef<T, V> multi(
+            String name,
+            IndexKeyCodec<V> codec,
+            Function<T, ? extends Iterable<V>> extractor
+    ) {
+        Objects.requireNonNull(codec, "codec");
+        Objects.requireNonNull(extractor, "extractor");
         return new IndexDef<>(name, t -> {
             Iterable<V> vs = extractor.apply(t);
             if (vs == null) return List.of();

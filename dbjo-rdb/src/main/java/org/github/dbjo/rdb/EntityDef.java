@@ -10,13 +10,14 @@ public record EntityDef<T, K>(
         ColumnFamilyHandle primaryCf,
         KeyCodec<K> keyCodec,
         Codec<T> valueCodec,
-        List<IndexDef<T>> indexes
+        List<? extends IndexDef<T, ?>> indexes
 ) {
     public EntityDef {
-        Objects.requireNonNull(name);
-        Objects.requireNonNull(primaryCf);
-        Objects.requireNonNull(keyCodec);
-        Objects.requireNonNull(valueCodec);
+        Objects.requireNonNull(name, "name");
+        Objects.requireNonNull(primaryCf, "primaryCf");
+        Objects.requireNonNull(keyCodec, "keyCodec");
+        Objects.requireNonNull(valueCodec, "valueCodec");
+        Objects.requireNonNull(indexes, "indexes");
         indexes = List.copyOf(indexes);
     }
 }
