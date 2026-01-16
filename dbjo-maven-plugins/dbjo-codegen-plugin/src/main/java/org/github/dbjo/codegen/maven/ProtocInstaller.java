@@ -23,7 +23,7 @@ import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
 public final class ProtocInstaller {
 
     /**
-     * protocExe   = installDir/bin/protoc(.exe)
+     * protocExe   = installDir/bin/protoc(.exe) OR installDir/protoc(.exe)
      * includeDir  = installDir/include
      * version     = protoc version
      * platform    = maven classifier (windows-x86_64, linux-x86_64, osx-aarch_64, ...)
@@ -41,9 +41,9 @@ public final class ProtocInstaller {
      * This will download from your Artifactory if it's configured as a mirror/repo in Maven.
      *
      * Behavior:
-     *  - If installDir/bin/protoc(.exe) already exists and is usable, we DO NOT download protoc again.
-     *  - If includeDir is missing, we will still (re)extract WKTs from protobuf-java.
-     *  - Marker file is advisory only (used for quick match) and is refreshed when we reuse an existing exe.
+     *  - If protoc exists already in installDir/bin or installDir root, we DO NOT download protoc again.
+     *  - If includeDir missing/outdated we (re)extract WKTs from protobuf-java.
+     *  - Marker file is advisory only; we refresh it when reusing an existing exe.
      */
     public static ProtocPaths ensureInstalledFromMaven(
             Log log,
@@ -66,52 +66,56 @@ public final class ProtocInstaller {
 
         String classifier = detectMavenClassifier();
 
-        Path bin = installDir.resolve("bin");
-        Path exe = bin.resolve(isWindows() ? "protoc.exe" : "protoc");
-        Path include = installDir.resolve("include");
-        Path marker = installDir.resolve(".dbjo-protoc.marker");
+        Path binDir = installDir.resolve("bin");
+        Path exeInBin  = binDir.resolve(isWindows() ? "protoc.exe" : "protoc");
+        Path exeFlat   = installDir.resolve(isWindows() ? "protoc.exe" : "protoc");
 
-        // ---------------------------------------------------------------------
-        // Fast path #0: if protoc exe exists and is usable, reuse it.
-        // Marker match is NOT required (user may preinstall / overwrite).
-        // If include dir is missing we still install includes (protobuf-java).
-        // ---------------------------------------------------------------------
+        Path include = installDir.resolve("include");
+        Path marker  = installDir.resolve(".dbjo-protoc.marker");
+
+        // Decide which existing exe to use (prefer bin/, fallback to flat)
+        Path existingExe = Files.isRegularFile(exeInBin) ? exeInBin
+                : (Files.isRegularFile(exeFlat) ? exeFlat : null);
+
         boolean exeUsable = false;
-        if (Files.isRegularFile(exe)) {
+        if (existingExe != null) {
             try {
-                ensureExecutable(exe); // chmod on *nix as needed; no-op on Windows
-                exeUsable = isWindows() || Files.isExecutable(exe);
+                ensureExecutable(existingExe);
+                exeUsable = isWindows() || Files.isExecutable(existingExe);
+                if (!exeUsable) {
+                    log.warn("Existing protoc found but not executable: " + existingExe);
+                }
             } catch (Exception e) {
                 exeUsable = false;
-                log.warn("Existing protoc not usable (" + exe + "): " + e.getMessage());
+                log.warn("Existing protoc not usable (" + existingExe + "): " + e.getMessage());
             }
         }
 
+        // Fast path: exe usable + includes exist
         if (exeUsable && Files.isDirectory(include)) {
-            log.info("Using existing protoc: " + exe);
+            log.info("Using existing protoc: " + existingExe);
             // refresh marker best-effort
             try { writeMarker(marker, protocVersion, classifier, protobufJavaVersion); } catch (Exception ignored) {}
-            return new ProtocPaths(exe, include, protocVersion, classifier);
+            return new ProtocPaths(existingExe, include, protocVersion, classifier);
         }
 
-        // ---------------------------------------------------------------------
-        // Fast path #1: strict match (exe + include + marker matches)
-        // ---------------------------------------------------------------------
-        if (Files.isRegularFile(exe) && Files.isDirectory(include)
+        // Strict fast path: marker match (still accept either exe layout)
+        if (exeUsable && Files.isDirectory(include)
                 && markerMatches(marker, protocVersion, classifier, protobufJavaVersion)) {
-            log.info("protoc already installed (marker match): " + exe);
-            return new ProtocPaths(exe, include, protocVersion, classifier);
+            log.info("protoc already installed (marker match): " + existingExe);
+            return new ProtocPaths(existingExe, include, protocVersion, classifier);
         }
 
-        // If offline: we can still proceed if protoc exe exists but include is missing
-        // only if include already exists; otherwise we need protobuf-java jar.
+        // Offline handling
         if (offline) {
             if (exeUsable && Files.isDirectory(include)) {
-                return new ProtocPaths(exe, include, protocVersion, classifier);
+                return new ProtocPaths(existingExe, include, protocVersion, classifier);
             }
             throw new MojoExecutionException(
                     "Maven is offline and protoc is missing/incomplete.\n" +
-                            "Expected protoc exe: " + exe + "\n" +
+                            "Checked for protoc at:\n" +
+                            " - " + exeInBin + "\n" +
+                            " - " + exeFlat + "\n" +
                             "Expected include dir: " + include + "\n" +
                             "Either run once online or preinstall protoc+includes and set -Dprotoc / -Dprotoc.include."
             );
@@ -120,42 +124,43 @@ public final class ProtocInstaller {
         try {
             Files.createDirectories(installDir);
 
-            // We always refresh includes (safe and cheap), but do NOT delete bin/exe if it is usable.
+            // Always refresh includes (safe and avoids stale/missing WKTs)
             deleteIfExists(include);
             Files.createDirectories(include);
 
-            // 1) Ensure protoc exe (download only if missing/unusable)
+            // If exe missing/unusable, install it into bin/ (canonical location)
+            Path exeToUse;
             if (!exeUsable) {
-                // clean bin only when we need to install protoc
-                deleteIfExists(bin);
-                Files.createDirectories(bin);
+                deleteIfExists(binDir);
+                Files.createDirectories(binDir);
 
                 Artifact protocArt = new org.eclipse.aether.artifact.DefaultArtifact(
                         "com.google.protobuf:protoc:" + protocVersion + ":exe:" + classifier
                 );
                 Path protocFile = resolveArtifactFile(log, repoSystem, repoSession, remoteRepos, protocArt);
 
-                Files.copy(protocFile, exe, REPLACE_EXISTING);
-                ensureExecutable(exe);
+                Files.copy(protocFile, exeInBin, REPLACE_EXISTING);
+                ensureExecutable(exeInBin);
 
-                log.info("Installed protoc exe: " + exe);
+                exeToUse = exeInBin;
+                log.info("Installed protoc exe: " + exeToUse);
             } else {
-                log.info("Reusing protoc exe: " + exe);
+                exeToUse = existingExe;
+                log.info("Reusing existing protoc exe: " + exeToUse);
             }
 
-            // 2) Install includes from protobuf-java (WKTs etc.)
+            // Install includes from protobuf-java jar
             Artifact pbJavaArt = new org.eclipse.aether.artifact.DefaultArtifact(
                     "com.google.protobuf:protobuf-java:" + protobufJavaVersion
             );
             Path pbJavaJar = resolveArtifactFile(log, repoSystem, repoSession, remoteRepos, pbJavaArt);
-
             extractProtosFromJar(pbJavaJar, include);
 
             writeMarker(marker, protocVersion, classifier, protobufJavaVersion);
 
-            log.info("protoc ready: " + exe);
+            log.info("protoc ready: " + exeToUse);
             log.info("protoc includes: " + include);
-            return new ProtocPaths(exe, include, protocVersion, classifier);
+            return new ProtocPaths(exeToUse, include, protocVersion, classifier);
 
         } catch (Exception e) {
             throw new MojoExecutionException("Failed installing protoc into: " + installDir, e);
