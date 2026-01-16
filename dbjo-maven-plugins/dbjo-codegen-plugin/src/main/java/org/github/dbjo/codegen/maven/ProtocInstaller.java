@@ -2,14 +2,18 @@ package org.github.dbjo.codegen.maven;
 
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugin.logging.Log;
+import org.eclipse.aether.RepositorySystem;
+import org.eclipse.aether.RepositorySystemSession;
+import org.eclipse.aether.artifact.Artifact;
+import org.eclipse.aether.repository.RemoteRepository;
+import org.eclipse.aether.resolution.ArtifactRequest;
+import org.eclipse.aether.resolution.ArtifactResult;
 
-import java.io.*;
-import java.net.URI;
-import java.net.http.*;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.nio.file.attribute.PosixFilePermission;
-import java.time.Duration;
 import java.util.*;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -18,44 +22,54 @@ import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
 
 public final class ProtocInstaller {
 
+    /**
+     * protocExe   = installDir/bin/protoc(.exe)
+     * includeDir  = installDir/include
+     * version     = protoc version
+     * platform    = maven classifier (windows-x86_64, linux-x86_64, osx-aarch_64, ...)
+     */
     public record ProtocPaths(Path protocExe, Path includeDir, String version, String platform) {}
 
     private ProtocInstaller() {}
 
     /**
-     * Ensures protoc is installed under installDir and returns resolved executable + include paths.
+     * Ensures protoc is installed under installDir by resolving Maven artifacts:
      *
-     * Layout after unzip:
-     *   installDir/
-     *     bin/protoc(.exe)
-     *     include/google/protobuf/*.proto
+     *  - com.google.protobuf:protoc:${protocVersion}:exe:${classifier}
+     *  - com.google.protobuf:protobuf-java:${protobufJavaVersion}  (extract google/protobuf/*.proto)
+     *
+     * This will download from your Artifactory if it's configured as a mirror/repo in Maven.
      */
-    public static ProtocPaths ensureInstalled(
+    public static ProtocPaths ensureInstalledFromMaven(
             Log log,
             Path installDir,
             String protocVersion,
-            String baseDownloadUrl,   // e.g. https://github.com/protocolbuffers/protobuf/releases/download
+            String protobufJavaVersion,
+            RepositorySystem repoSystem,
+            RepositorySystemSession repoSession,
+            List<RemoteRepository> remoteRepos,
             boolean offline
     ) throws MojoExecutionException {
 
         Objects.requireNonNull(log, "log");
         Objects.requireNonNull(installDir, "installDir");
         Objects.requireNonNull(protocVersion, "protocVersion");
-        Objects.requireNonNull(baseDownloadUrl, "baseDownloadUrl");
+        Objects.requireNonNull(protobufJavaVersion, "protobufJavaVersion");
+        Objects.requireNonNull(repoSystem, "repoSystem");
+        Objects.requireNonNull(repoSession, "repoSession");
+        Objects.requireNonNull(remoteRepos, "remoteRepos");
 
-        String platform = detectPlatform();
-        String fileName = "protoc-" + protocVersion + "-" + platform + ".zip";
-        URI url = URI.create(trimTrailingSlash(baseDownloadUrl) + "/v" + protocVersion + "/" + fileName);
+        String classifier = detectMavenClassifier();
 
         Path bin = installDir.resolve("bin");
         Path exe = bin.resolve(isWindows() ? "protoc.exe" : "protoc");
         Path include = installDir.resolve("include");
         Path marker = installDir.resolve(".dbjo-protoc.marker");
 
-        // fast path
-        if (Files.isRegularFile(exe) && Files.isDirectory(include) && markerMatches(marker, protocVersion, platform)) {
+        // Fast path: already installed + marker matches
+        if (Files.isRegularFile(exe) && Files.isDirectory(include) && markerMatches(marker, protocVersion, classifier, protobufJavaVersion)) {
             log.info("protoc already installed: " + exe);
-            return new ProtocPaths(exe, include, protocVersion, platform);
+            return new ProtocPaths(exe, include, protocVersion, classifier);
         }
 
         if (offline) {
@@ -69,38 +83,36 @@ public final class ProtocInstaller {
         try {
             Files.createDirectories(installDir);
 
-            Path tmpZip = installDir.resolve(fileName);
-            log.info("Downloading protoc: " + url);
-            download(url, tmpZip);
-
-            // clean old (but don't delete installDir itself)
+            // Clean old install layout (but keep installDir)
             deleteIfExists(installDir.resolve("bin"));
             deleteIfExists(installDir.resolve("include"));
 
-            log.info("Unzipping: " + tmpZip + " -> " + installDir);
-            unzip(tmpZip, installDir);
+            // 1) Resolve protoc exe from Maven (Artifactory)
+            Artifact protocArt = new org.eclipse.aether.artifact.DefaultArtifact(
+                    "com.google.protobuf:protoc:" + protocVersion + ":exe:" + classifier
+            );
+            Path protocFile = resolveArtifactFile(log, repoSystem, repoSession, remoteRepos, protocArt);
 
-            if (!Files.isRegularFile(exe)) {
-                throw new MojoExecutionException(
-                        "protoc zip extracted but executable not found: " + exe + "\n" +
-                                "Downloaded from: " + url
-                );
-            }
-            if (!Files.isDirectory(include)) {
-                throw new MojoExecutionException(
-                        "protoc zip extracted but include dir not found: " + include + "\n" +
-                                "Downloaded from: " + url
-                );
-            }
-
+            Files.createDirectories(bin);
+            Files.copy(protocFile, exe, REPLACE_EXISTING);
             ensureExecutable(exe);
 
-            writeMarker(marker, protocVersion, platform);
+            // 2) Resolve protobuf-java jar and extract google/protobuf/*.proto into include/
+            Artifact pbJavaArt = new org.eclipse.aether.artifact.DefaultArtifact(
+                    "com.google.protobuf:protobuf-java:" + protobufJavaVersion
+            );
+            Path pbJavaJar = resolveArtifactFile(log, repoSystem, repoSession, remoteRepos, pbJavaArt);
+
+            Files.createDirectories(include);
+            extractProtosFromJar(pbJavaJar, include);
+
+            writeMarker(marker, protocVersion, classifier, protobufJavaVersion);
 
             log.info("Installed protoc: " + exe);
-            return new ProtocPaths(exe, include, protocVersion, platform);
+            log.info("Installed protoc includes: " + include);
+            return new ProtocPaths(exe, include, protocVersion, classifier);
 
-        } catch (IOException | InterruptedException e) {
+        } catch (Exception e) {
             throw new MojoExecutionException("Failed installing protoc into: " + installDir, e);
         }
     }
@@ -117,9 +129,8 @@ public final class ProtocInstaller {
         String[] parts = v.split("\\.");
         if (parts.length < 3) return null;
 
-        // parts[0]=major, parts[1]=minor, parts[2]=patch...
         String minor = parts[1];
-        String patch = parts[2].replaceAll("[^0-9].*$", ""); // strip qualifiers if any
+        String patch = parts[2].replaceAll("[^0-9].*$", "");
         if (minor.isBlank() || patch.isBlank()) return null;
 
         return minor + "." + patch;
@@ -127,53 +138,65 @@ public final class ProtocInstaller {
 
     // ----------------- internals -----------------
 
-    private static void download(URI url, Path out) throws IOException, InterruptedException, MojoExecutionException {
-        HttpClient client = HttpClient.newBuilder()
-                .followRedirects(HttpClient.Redirect.NORMAL)
-                .connectTimeout(Duration.ofSeconds(20))
-                .build();
+    private static Path resolveArtifactFile(
+            Log log,
+            RepositorySystem repoSystem,
+            RepositorySystemSession repoSession,
+            List<RemoteRepository> remoteRepos,
+            Artifact artifact
+    ) throws MojoExecutionException {
 
-        HttpRequest req = HttpRequest.newBuilder(url)
-                .timeout(Duration.ofMinutes(3))
-                .GET()
-                .build();
+        try {
+            ArtifactRequest req = new ArtifactRequest();
+            req.setArtifact(artifact);
+            req.setRepositories(remoteRepos);
 
-        HttpResponse<InputStream> resp = client.send(req, HttpResponse.BodyHandlers.ofInputStream());
-        int code = resp.statusCode();
-        if (code < 200 || code >= 300) {
-            throw new MojoExecutionException("Download failed: HTTP " + code + " for " + url);
-        }
+            log.info("Resolving artifact: " + artifact);
+            ArtifactResult res = repoSystem.resolveArtifact(repoSession, req);
 
-        Files.createDirectories(out.getParent());
-        try (InputStream in = resp.body();
-             OutputStream os = Files.newOutputStream(out, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
-            in.transferTo(os);
+            if (res == null || res.getArtifact() == null || res.getArtifact().getFile() == null) {
+                throw new MojoExecutionException("Failed to resolve artifact: " + artifact);
+            }
+
+            return res.getArtifact().getFile().toPath();
+
+        } catch (Exception e) {
+            throw new MojoExecutionException("Artifact resolve failed: " + artifact, e);
         }
     }
 
-    private static void unzip(Path zipFile, Path destDir) throws IOException {
-        try (ZipInputStream zis = new ZipInputStream(Files.newInputStream(zipFile))) {
+    private static void extractProtosFromJar(Path jarFile, Path includeDir) throws IOException {
+        // Extract only google/protobuf/*.proto, preserving path under includeDir
+        try (ZipInputStream zis = new ZipInputStream(Files.newInputStream(jarFile))) {
             ZipEntry e;
             while ((e = zis.getNextEntry()) != null) {
-                Path outPath = destDir.resolve(e.getName()).normalize();
-                if (!outPath.startsWith(destDir)) {
-                    throw new IOException("Zip traversal attempt: " + e.getName());
-                }
+                String name = e.getName();
                 if (e.isDirectory()) {
-                    Files.createDirectories(outPath);
-                } else {
-                    Files.createDirectories(outPath.getParent());
-                    try (OutputStream os = Files.newOutputStream(outPath, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
-                        zis.transferTo(os);
-                    }
+                    zis.closeEntry();
+                    continue;
                 }
+                if (!name.startsWith("google/protobuf/") || !name.endsWith(".proto")) {
+                    zis.closeEntry();
+                    continue;
+                }
+
+                Path outPath = includeDir.resolve(name).normalize();
+                if (!outPath.startsWith(includeDir)) {
+                    throw new IOException("Zip traversal attempt: " + name);
+                }
+
+                Files.createDirectories(outPath.getParent());
+                try (OutputStream os = Files.newOutputStream(outPath, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
+                    zis.transferTo(os);
+                }
+
                 zis.closeEntry();
             }
         }
     }
 
     private static void ensureExecutable(Path file) throws IOException {
-        if (isWindows()) return; // irrelevant
+        if (isWindows()) return;
         if (Files.isExecutable(file)) return;
 
         boolean ok = file.toFile().setExecutable(true);
@@ -193,18 +216,18 @@ public final class ProtocInstaller {
         }
     }
 
-    private static boolean markerMatches(Path marker, String v, String platform) {
+    private static boolean markerMatches(Path marker, String protocV, String classifier, String pbJavaV) {
         if (!Files.isRegularFile(marker)) return false;
         try {
             String s = Files.readString(marker, StandardCharsets.UTF_8).trim();
-            return s.equals(v + "|" + platform);
+            return s.equals(protocV + "|" + classifier + "|" + pbJavaV);
         } catch (IOException e) {
             return false;
         }
     }
 
-    private static void writeMarker(Path marker, String v, String platform) throws IOException {
-        Files.writeString(marker, v + "|" + platform, StandardCharsets.UTF_8,
+    private static void writeMarker(Path marker, String protocV, String classifier, String pbJavaV) throws IOException {
+        Files.writeString(marker, protocV + "|" + classifier + "|" + pbJavaV, StandardCharsets.UTF_8,
                 StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
     }
 
@@ -221,7 +244,13 @@ public final class ProtocInstaller {
         }
     }
 
-    private static String detectPlatform() throws MojoExecutionException {
+    /**
+     * Maven protoc classifiers (NOT the GitHub zip names):
+     *  - windows-x86_64
+     *  - linux-x86_64 / linux-aarch_64
+     *  - osx-x86_64 / osx-aarch_64
+     */
+    private static String detectMavenClassifier() throws MojoExecutionException {
         String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
         String arch = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);
 
@@ -230,7 +259,7 @@ public final class ProtocInstaller {
 
         if (os.contains("win")) {
             if (!x64) throw new MojoExecutionException("Unsupported Windows arch: " + arch + " (only x86_64 supported)");
-            return "win64";
+            return "windows-x86_64";
         }
         if (os.contains("mac") || os.contains("darwin")) {
             if (arm64) return "osx-aarch_64";
@@ -246,9 +275,5 @@ public final class ProtocInstaller {
 
     private static boolean isWindows() {
         return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
-    }
-
-    private static String trimTrailingSlash(String s) {
-        return s.endsWith("/") ? s.substring(0, s.length() - 1) : s;
     }
 }
