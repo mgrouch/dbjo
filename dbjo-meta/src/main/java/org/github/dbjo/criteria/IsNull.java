@@ -1,0 +1,11 @@
+package org.github.dbjo.criteria;
+
+import java.io.Serializable;
+import java.util.Objects;
+import org.github.dbjo.meta.entity.PropertyMeta;
+
+public record IsNull<B extends Serializable, V extends Serializable>(
+        PropertyMeta<B, V> prop
+) implements Condition<B> {
+    public IsNull { Objects.requireNonNull(prop, "prop"); }
+}
