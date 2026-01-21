@@ -1,7 +1,6 @@
 package org.github.dbjo.criteria.cache;
 
 import java.util.List;
-import java.util.Objects;
 import org.github.dbjo.criteria.spec.*;
 
 public final class SpecStringifier {
@@ -31,7 +30,7 @@ public final class SpecStringifier {
         if (c instanceof AndSpec e) return "AND" + listKey(e.items());
         if (c instanceof OrSpec e)  return "OR" + listKey(e.items());
 
-        return c.getClass().getSimpleName() + ":" + Objects.toString(c);
+        return c.getClass().getSimpleName() + ":" + c;
     }
 
     public static String stableKey(QuerySpec q) {
@@ -41,8 +40,8 @@ public final class SpecStringifier {
         if (q.scan() != null) {
             var r = q.scan().range();
             sb.append("S=").append(q.scan().property()).append(":")
-                    .append(Objects.toString(r.lower())).append(":").append(r.lowerBound()).append(":")
-                    .append(Objects.toString(r.upper())).append(":").append(r.upperBound()).append(";");
+                    .append(r.lower()).append(":").append(r.lowerBound()).append(":")
+                    .append(r.upper()).append(":").append(r.upperBound()).append(";");
         } else {
             sb.append("S=NONE;");
         }
@@ -63,6 +62,6 @@ public final class SpecStringifier {
     public static String valueKey(Object v) {
         if (v == null) return "NULL";
         // For JSON transport you’d normalize Timestamp/Instant/enums here.
-        return v.getClass().getName() + ":" + v.toString();
+        return v.getClass().getName() + ":" + v;
     }
 }

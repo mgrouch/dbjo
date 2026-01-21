@@ -29,10 +29,10 @@ public final class QueryBinder {
         if (spec.scan() != null) {
             var p = registry.<B>property(spec.entityId(), spec.scan().property());
             Range<Serializable> r = bindRange(p, spec.scan().range());
-            scan = new Scan<>((PropertyMeta<B, Serializable>) p, r);
+            scan = new Scan<>(p, r);
         }
 
-        var qb = Query.<B>from(meta).where(where);
+        var qb = Query.from(meta).where(where);
         if (scan != null) {
             // note: type erasure for scan is fine here; validation happens in bindRange
             qb.scan((PropertyMeta<B, Serializable>) scan.prop(), (Range<Serializable>) scan.range());
@@ -69,12 +69,12 @@ public final class QueryBinder {
         if (c instanceof EqSpec e) {
             var p = registry.<B>property(entityId, e.property());
             var v = castValue(p, e.value());
-            return Conditions.eq((PropertyMeta<B, Serializable>) p, v);
+            return Conditions.eq(p, v);
         }
         if (c instanceof NeSpec e) {
             var p = registry.<B>property(entityId, e.property());
             var v = castValue(p, e.value());
-            return Conditions.ne((PropertyMeta<B, Serializable>) p, v);
+            return Conditions.ne(p, v);
         }
         if (c instanceof InSpec e) {
             var p = registry.<B>property(entityId, e.property());
@@ -82,27 +82,27 @@ public final class QueryBinder {
             if (e.values() != null) {
                 for (Object o : e.values()) list.add(castValue(p, o));
             }
-            return Conditions.in((PropertyMeta<B, Serializable>) p, list);
+            return Conditions.in(p, list);
         }
         if (c instanceof IsNullSpec e) {
             var p = registry.<B>property(entityId, e.property());
-            return Conditions.isNull((PropertyMeta<B, Serializable>) p);
+            return Conditions.isNull(p);
         }
         if (c instanceof IsNotNullSpec e) {
             var p = registry.<B>property(entityId, e.property());
-            return Conditions.isNotNull((PropertyMeta<B, Serializable>) p);
+            return Conditions.isNotNull(p);
         }
         if (c instanceof BetweenSpec e) {
             var p = registry.<B>property(entityId, e.property());
             var lo = castValue(p, e.lo());
             var hi = castValue(p, e.hi());
-            return Conditions.between((PropertyMeta<B, Serializable>) p, lo, hi);
+            return Conditions.between(p, lo, hi);
         }
         if (c instanceof CmpSpec e) {
             var p = registry.<B>property(entityId, e.property());
             var v = castValue(p, e.value());
             var op = CmpOp.valueOf(e.op());
-            return Conditions.cmp((PropertyMeta<B, Serializable>) p, op, v);
+            return Conditions.cmp(p, op, v);
         }
         if (c instanceof NotSpec e) {
             Condition<B> inner = bindCond(entityId, e.inner());

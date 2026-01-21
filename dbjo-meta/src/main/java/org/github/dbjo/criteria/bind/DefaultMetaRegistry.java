@@ -20,7 +20,7 @@ public final class DefaultMetaRegistry implements MetaRegistry {
 
         Map<String, PropertyMeta<?, Serializable>> m = new HashMap<>();
         for (PropertyMeta<B, Serializable> pm : meta.allPropertyMetas()) {
-            m.put(pm.getPropertyName(), (PropertyMeta<?, Serializable>) pm);
+            m.put(pm.getPropertyName(), pm);
         }
         props.put(entityId, m);
         return this;

@@ -53,21 +53,19 @@ public final class ConditionEvaluator {
         throw new IllegalArgumentException("Unsupported condition node: " + c.getClass().getName());
     }
 
-    @SuppressWarnings({"rawtypes", "unchecked"})
+    @SuppressWarnings({"unchecked"})
     private static boolean cmpBetween(PropertyMeta<?, ?> prop, Object val, Object lo, Object hi) {
-        if (!(val instanceof Comparable)) {
+        if (!(val instanceof Comparable c)) {
             throw new IllegalArgumentException("Not comparable at runtime: " + prop.getPropertyName());
         }
-        Comparable c = (Comparable) val;
         return c.compareTo(lo) >= 0 && c.compareTo(hi) <= 0;
     }
 
-    @SuppressWarnings({"rawtypes", "unchecked"})
+    @SuppressWarnings({"unchecked"})
     private static boolean cmpOp(PropertyMeta<?, ?> prop, Object val, CmpOp op, Object rhs) {
-        if (!(val instanceof Comparable)) {
+        if (!(val instanceof Comparable c)) {
             throw new IllegalArgumentException("Not comparable at runtime: " + prop.getPropertyName());
         }
-        Comparable c = (Comparable) val;
         int d = c.compareTo(rhs);
         return switch (op) {
             case LT -> d < 0;
