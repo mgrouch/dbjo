@@ -105,7 +105,8 @@ public final class QueryBinder {
             return Conditions.cmp((PropertyMeta<B, Serializable>) p, op, v);
         }
         if (c instanceof NotSpec e) {
-            return bindCond(entityId, e.inner()).not();
+            Condition<B> inner = bindCond(entityId, e.inner());
+            return inner.not();
         }
         if (c instanceof AndSpec e) {
             List<CondSpec> items = (e.items() == null) ? List.of() : e.items();
