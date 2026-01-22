@@ -14,11 +14,19 @@ import java.sql.DatabaseMetaData;
 import java.sql.Types;
 import java.util.*;
 
+/**
+ * Generates per table:
+ *   <Entity>DbMeta implementing org.github.dbjo.meta.jdbc.DbMeta<T>
+ *
+ * IMPORTANT:
+ *  - Uses shared helpers from org.github.dbjo.meta.jdbc.Jdbc (no per-class bind/rs* helpers).
+ *  - Keeps SQL strings + parameter arrays/types + row mapper.
+ */
 public final class DbMetaGenerator {
     private final Config cfg;
 
     public DbMetaGenerator(Config cfg) {
-        this.cfg = cfg;
+        this.cfg = Objects.requireNonNull(cfg, "cfg");
     }
 
     public int generateAll(List<TableModel> tables) throws IOException {
@@ -47,7 +55,7 @@ public final class DbMetaGenerator {
         String fqn = (schema == null || schema.isBlank()) ? table : (schema + "." + table);
 
         // Column sets
-        List<Col> cols = tm.cols();
+        List<Col> cols = tm.cols() == null ? List.of() : tm.cols();
 
         // PK columns in stable order (as columns appear)
         List<Col> pkCols = new ArrayList<>();
@@ -74,29 +82,29 @@ public final class DbMetaGenerator {
         }
 
         // SQL strings
-        String insertSql = buildInsertSql(fqn, insCols);
-        String updateSql = buildUpdateByIdSql(fqn, updCols, pkCols);
+        String insertSql    = buildInsertSql(fqn, insCols);
+        String updateSql    = buildUpdateByIdSql(fqn, updCols, pkCols);
         String selectAllSql = buildSelectAllSql(fqn, cols);
 
-        // imports
+        // imports for generated class
         Set<String> imports = new TreeSet<>();
         imports.add("java.sql.ResultSet");
         imports.add("java.sql.SQLException");
         imports.add("java.sql.SQLType");
         imports.add("java.sql.JDBCType");
 
+        // shared runtime api
+        imports.add("org.github.dbjo.meta.jdbc.DbMeta");
+        imports.add("org.github.dbjo.meta.jdbc.Jdbc");
+
         // Import entity bean
         if (!cfg.beanPkg().equals(cfg.dbMetaPkg())) {
             imports.add(cfg.beanPkg() + "." + beanClass);
         }
 
-        // If any java type requires extra imports (BigDecimal, Date, Time, Timestamp, etc.)
+        // If any java type requires extra imports (BigDecimal, Date, Time, Timestamp, UUID, etc.)
         for (Col c : cols) {
-            TypeMappings.JavaType jt = TypeMappings.mapSqlTypeToJava(c.sqlType(), imports);
-            // mapSqlTypeToJava already adds imports if you pass a mutable set,
-            // but your TypeMappings currently adds only for BigDecimal/Date/Time/Timestamp. Good.
-            // We also rely on it here to accumulate imports.
-            if (jt == null) { /* no-op */ }
+            TypeMappings.mapSqlTypeToJava(c.sqlType(), imports);
         }
 
         StringBuilder sb = new StringBuilder(12_000);
@@ -109,9 +117,11 @@ public final class DbMetaGenerator {
         sb.append(" *\n");
         sb.append(" * Provides SQL strings + parameter lists/types + row mapper.\n");
         sb.append(" */\n");
-        sb.append("public final class ").append(metaClass).append(" {\n\n");
+        sb.append("public final class ").append(metaClass)
+                .append(" implements DbMeta<").append(beanClass).append("> {\n\n");
 
-        sb.append("    public static final String SCHEMA = ").append(schema == null ? "null" : "\"" + escape(schema) + "\"").append(";\n");
+        sb.append("    public static final String SCHEMA = ")
+                .append(schema == null ? "null" : "\"" + escape(schema) + "\"").append(";\n");
         sb.append("    public static final String TABLE  = \"").append(escape(table)).append("\";\n");
         sb.append("    public static final String FQN    = \"").append(escape(fqn)).append("\";\n\n");
 
@@ -122,7 +132,13 @@ public final class DbMetaGenerator {
         sb.append("    public static final ").append(metaClass).append(" INSTANCE = new ").append(metaClass).append("();\n\n");
         sb.append("    private ").append(metaClass).append("() {}\n\n");
 
+        // DbMeta SQL accessors
+        sb.append("    @Override public String insertSql() { return INSERT_SQL; }\n");
+        sb.append("    @Override public String updateByIdSql() { return UPDATE_BY_ID_SQL; }\n");
+        sb.append("    @Override public String selectAllSql() { return SELECT_ALL_SQL; }\n\n");
+
         // Row mapper: by column index in same order as SELECT_ALL_SQL list
+        sb.append("    @Override\n");
         sb.append("    public ").append(beanClass).append(" fromRow(ResultSet rs) throws SQLException {\n");
         sb.append("        ").append(beanClass).append(" e = new ").append(beanClass).append("();\n");
         sb.append("        int i = 1;\n");
@@ -143,7 +159,8 @@ public final class DbMetaGenerator {
         sb.append("    }\n\n");
 
         // INSERT params + types
-        sb.append("    public Object[] getInsertParameters(").append(beanClass).append(" e) {\n");
+        sb.append("    @Override\n");
+        sb.append("    public Object[] insertParams(").append(beanClass).append(" e) {\n");
         sb.append("        return new Object[] {");
         for (int idx = 0; idx < insCols.size(); idx++) {
             Col c = insCols.get(idx);
@@ -155,7 +172,8 @@ public final class DbMetaGenerator {
         sb.append("};\n");
         sb.append("    }\n\n");
 
-        sb.append("    public SQLType[] getInsertParameterTypes() {\n");
+        sb.append("    @Override\n");
+        sb.append("    public SQLType[] insertParamTypes() {\n");
         sb.append("        return new SQLType[] {");
         for (int idx = 0; idx < insCols.size(); idx++) {
             Col c = insCols.get(idx);
@@ -166,7 +184,8 @@ public final class DbMetaGenerator {
         sb.append("    }\n\n");
 
         // UPDATE params + types
-        sb.append("    public Object[] getUpdateByIdParameters(").append(beanClass).append(" e) {\n");
+        sb.append("    @Override\n");
+        sb.append("    public Object[] updateByIdParams(").append(beanClass).append(" e) {\n");
         sb.append("        return new Object[] {");
 
         boolean first = true;
@@ -188,7 +207,8 @@ public final class DbMetaGenerator {
         sb.append("};\n");
         sb.append("    }\n\n");
 
-        sb.append("    public SQLType[] getUpdateByIdParameterTypes() {\n");
+        sb.append("    @Override\n");
+        sb.append("    public SQLType[] updateByIdParamTypes() {\n");
         sb.append("        return new SQLType[] {");
 
         first = true;
@@ -205,45 +225,6 @@ public final class DbMetaGenerator {
 
         sb.append("};\n");
         sb.append("    }\n\n");
-
-        // Small helper: bind parameters (optional but very handy)
-        sb.append("    public static void bind(java.sql.PreparedStatement ps, Object[] params, SQLType[] types) throws SQLException {\n");
-        sb.append("        for (int i = 0; i < params.length; i++) {\n");
-        sb.append("            Object v = params[i];\n");
-        sb.append("            if (v == null) {\n");
-        sb.append("                int t = types[i].getVendorTypeNumber();\n");
-        sb.append("                ps.setNull(i + 1, t);\n");
-        sb.append("            } else {\n");
-        sb.append("                ps.setObject(i + 1, v);\n");
-        sb.append("            }\n");
-        sb.append("        }\n");
-        sb.append("    }\n\n");
-
-        // Nullable numeric readers (keeps mapper code clean)
-        sb.append("    private static Short rsShort(ResultSet rs, int i) throws SQLException {\n");
-        sb.append("        short v = rs.getShort(i);\n");
-        sb.append("        return rs.wasNull() ? null : v;\n");
-        sb.append("    }\n");
-        sb.append("    private static Integer rsInt(ResultSet rs, int i) throws SQLException {\n");
-        sb.append("        int v = rs.getInt(i);\n");
-        sb.append("        return rs.wasNull() ? null : v;\n");
-        sb.append("    }\n");
-        sb.append("    private static Long rsLong(ResultSet rs, int i) throws SQLException {\n");
-        sb.append("        long v = rs.getLong(i);\n");
-        sb.append("        return rs.wasNull() ? null : v;\n");
-        sb.append("    }\n");
-        sb.append("    private static Float rsFloat(ResultSet rs, int i) throws SQLException {\n");
-        sb.append("        float v = rs.getFloat(i);\n");
-        sb.append("        return rs.wasNull() ? null : v;\n");
-        sb.append("    }\n");
-        sb.append("    private static Double rsDouble(ResultSet rs, int i) throws SQLException {\n");
-        sb.append("        double v = rs.getDouble(i);\n");
-        sb.append("        return rs.wasNull() ? null : v;\n");
-        sb.append("    }\n");
-        sb.append("    private static Boolean rsBool(ResultSet rs, int i) throws SQLException {\n");
-        sb.append("        boolean v = rs.getBoolean(i);\n");
-        sb.append("        return rs.wasNull() ? null : v;\n");
-        sb.append("    }\n");
 
         sb.append("}\n");
         return sb.toString();
@@ -270,7 +251,9 @@ public final class DbMetaGenerator {
         sb.append("UPDATE ").append(fqn).append(" SET ");
         if (setCols.isEmpty()) {
             // Avoid invalid SQL; you can decide whether to throw instead.
-            sb.append(pkCols.isEmpty() ? "/* no columns */ 1=1" : (pkCols.get(0).colName() + "=" + pkCols.get(0).colName()));
+            sb.append(pkCols.isEmpty()
+                    ? "/* no columns */ 1=1"
+                    : (pkCols.get(0).colName() + "=" + pkCols.get(0).colName()));
         } else {
             for (int i = 0; i < setCols.size(); i++) {
                 if (i > 0) sb.append(", ");
@@ -328,22 +311,25 @@ public final class DbMetaGenerator {
         };
     }
 
-    private static String rsReadExpr(String javaType, boolean nullable, String rs, String idxVar) {
-        // entity fields are wrappers, so nullable handling matters for primitives-getters
+    /**
+     * Expression to read a column at index {@code idxVar} from {@code rsVar}.
+     * Uses shared helper Jdbc.rsX(...) for nullable primitive-wrapper reads.
+     */
+    private static String rsReadExpr(String javaType, boolean nullable, String rsVar, String idxVar) {
         return switch (javaType) {
-            case "Short"   -> nullable ? "rsShort(" + rs + ", " + idxVar + ")" : "rs.getShort(" + idxVar + ")";
-            case "Integer" -> nullable ? "rsInt(" + rs + ", " + idxVar + ")" : "rs.getInt(" + idxVar + ")";
-            case "Long"    -> nullable ? "rsLong(" + rs + ", " + idxVar + ")" : "rs.getLong(" + idxVar + ")";
-            case "Float"   -> nullable ? "rsFloat(" + rs + ", " + idxVar + ")" : "rs.getFloat(" + idxVar + ")";
-            case "Double"  -> nullable ? "rsDouble(" + rs + ", " + idxVar + ")" : "rs.getDouble(" + idxVar + ")";
-            case "Boolean" -> nullable ? "rsBool(" + rs + ", " + idxVar + ")" : "rs.getBoolean(" + idxVar + ")";
-            case "String"  -> "rs.getString(" + idxVar + ")";
-            case "byte[]"  -> "rs.getBytes(" + idxVar + ")";
-            case "BigDecimal" -> "rs.getBigDecimal(" + idxVar + ")";
-            case "Date"    -> "rs.getDate(" + idxVar + ")";
-            case "Time"    -> "rs.getTime(" + idxVar + ")";
-            case "Timestamp" -> "rs.getTimestamp(" + idxVar + ")";
-            default -> "rs.getObject(" + idxVar + ")"; // fallback
+            case "Short"   -> nullable ? "Jdbc.rsShort(" + rsVar + ", " + idxVar + ")" : rsVar + ".getShort(" + idxVar + ")";
+            case "Integer" -> nullable ? "Jdbc.rsInt(" + rsVar + ", " + idxVar + ")" : rsVar + ".getInt(" + idxVar + ")";
+            case "Long"    -> nullable ? "Jdbc.rsLong(" + rsVar + ", " + idxVar + ")" : rsVar + ".getLong(" + idxVar + ")";
+            case "Float"   -> nullable ? "Jdbc.rsFloat(" + rsVar + ", " + idxVar + ")" : rsVar + ".getFloat(" + idxVar + ")";
+            case "Double"  -> nullable ? "Jdbc.rsDouble(" + rsVar + ", " + idxVar + ")" : rsVar + ".getDouble(" + idxVar + ")";
+            case "Boolean" -> nullable ? "Jdbc.rsBool(" + rsVar + ", " + idxVar + ")" : rsVar + ".getBoolean(" + idxVar + ")";
+            case "String"  -> rsVar + ".getString(" + idxVar + ")";
+            case "byte[]"  -> rsVar + ".getBytes(" + idxVar + ")";
+            case "BigDecimal" -> rsVar + ".getBigDecimal(" + idxVar + ")";
+            case "Date"    -> rsVar + ".getDate(" + idxVar + ")";
+            case "Time"    -> rsVar + ".getTime(" + idxVar + ")";
+            case "Timestamp" -> rsVar + ".getTimestamp(" + idxVar + ")";
+            default -> rsVar + ".getObject(" + idxVar + ")";
         };
     }
 }
