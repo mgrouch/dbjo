@@ -98,10 +98,10 @@ public record Config(
     private static final String DEFAULT_SQL_DB_MAPPER_PKG = "org.github.dbjo.generated.db.meta";
 
     // NEW defaults for Q generator
-    public static final String DEFAULT_QUERY_PKG = "org.github.dbjo.generated.model.q";
+    public static final String DEFAULT_QUERY_PKG = "org.github.dbjo.generated.criteria";
     public static final String DEFAULT_QUERY_CLASS_SUFFIX = "Q";
-    public static final String DEFAULT_TERMS_FQN = "org.github.dbjo.meta.term.Terms";
-    public static final String DEFAULT_PROPERTY_TERM_FQN = "org.github.dbjo.meta.term.PropertyTerm";
+    public static final String DEFAULT_TERMS_FQN = "org.github.dbjo.criteria.Terms";
+    public static final String DEFAULT_PROPERTY_TERM_FQN = "org.github.dbjo.criteria.PropertyTerm";
 
     public enum RunMode {
         ALL, PROTO, ENTITY, DAO, MAPPER, QUERY, RDB;

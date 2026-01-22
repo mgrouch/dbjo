@@ -27,8 +27,8 @@ import java.util.*;
  *   -Ddbjo.propertyTermFqn       (default: "org.github.dbjo.meta.query.PropertyTerm")
  */
 public final class QueryTermsGenerator {
-    private static final String DEFAULT_TERMS_FQN = "org.github.dbjo.meta.query.Terms";
-    private static final String DEFAULT_PROPERTY_TERM_FQN = "org.github.dbjo.meta.query.PropertyTerm";
+    private static final String DEFAULT_TERMS_FQN = "org.github.dbjo.criteria.Terms";
+    private static final String DEFAULT_PROPERTY_TERM_FQN = "org.github.dbjo.criteria.PropertyTerm";
 
     private final Config cfg;
 
