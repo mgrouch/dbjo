@@ -6,8 +6,10 @@ import org.github.dbjo.codegen.entity.EntityGenerator;
 import org.github.dbjo.codegen.model.TableModel;
 import org.github.dbjo.codegen.proto.ProtoGenerator;
 import org.github.dbjo.codegen.proto.ProtocInvoker;
-import org.github.dbjo.codegen.rdb.RocksDaoGenerator;
+import org.github.dbjo.codegen.query.QueryTermsGenerator;
 import org.github.dbjo.codegen.rdb.ProtoMapperGenerator;
+import org.github.dbjo.codegen.rdb.RocksDaoGenerator;
+import org.github.dbjo.codegen.rdb.RocksSchemaGenerator;
 
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
@@ -52,6 +54,7 @@ public final class DbjoCodegen {
             System.out.println("Tables: " + tables.size());
             System.out.println();
 
+            // 1) PROTO
             if (cfg.runMode().runProto()) {
                 ProtoGenerator pg = new ProtoGenerator(cfg);
                 var protos = pg.generateAll(tables);
@@ -64,19 +67,28 @@ public final class DbjoCodegen {
                 System.out.println();
             }
 
+            // 2) ENTITY + META (<Entity>Meta)
             if (cfg.runMode().runEntity()) {
                 int n = new EntityGenerator(cfg).generateAll(tables);
                 System.out.println("Generated entity/meta for " + n + " table(s) into: " + cfg.outBase().toAbsolutePath());
                 System.out.println();
             }
 
+            // 3) QUERY TERMS (<Entity>Q) — requires <Entity>Meta, so run after entity/meta
+            if (cfg.runMode().runQuery()) {
+                int n = new QueryTermsGenerator(cfg).generateAll(tables);
+                System.out.println("Generated Query terms for " + n + " table(s) into: " + cfg.outBase().toAbsolutePath());
+                System.out.println();
+            }
+
+            // 4) ROCKS SCHEMAS (needed by DAO)
             if (cfg.runMode().runDao() || cfg.runMode().runMapper()) {
-                // ensure schema exists first if you're generating rdb artifacts
-                int ns = new org.github.dbjo.codegen.rdb.RocksSchemaGenerator(cfg).generateAll(tables);
+                int ns = new RocksSchemaGenerator(cfg).generateAll(tables);
                 System.out.println("Generated RocksDB Schema(s): " + ns);
                 System.out.println();
             }
 
+            // 5) ROCKS DAOs
             if (cfg.runMode().runDao()) {
                 int n = new RocksDaoGenerator(cfg).generateAll(tables);
                 System.out.println("Generated RocksDB DAO(s): " + n);
@@ -84,8 +96,10 @@ public final class DbjoCodegen {
 
                 int d = new DbMetaGenerator(cfg).generateAll(tables);
                 System.out.println("Generated DbMeta: " + d);
+                System.out.println();
             }
 
+            // 6) PROTO MAPPERS
             if (cfg.runMode().runMapper()) {
                 int n = new ProtoMapperGenerator(cfg).generateAll(tables);
                 System.out.println("Generated Proto mapper(s): " + n);
