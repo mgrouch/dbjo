@@ -84,8 +84,8 @@ public record Config(
     public static final String DEFAULT_QUERY_SUFFIX = "Q";
 
     // Adjust these to your actual query API package/classes:
-    public static final String DEFAULT_TERMS_FQN = "org.github.dbjo.query.Terms";
-    public static final String DEFAULT_PROPERTY_TERM_FQN = "org.github.dbjo.query.PropertyTerm";
+    public static final String DEFAULT_TERMS_FQN = "org.github.dbjo.criteria.Terms";
+    public static final String DEFAULT_PROPERTY_TERM_FQN = "org.github.dbjo.criteria.PropertyTerm";
 
     public static final String DEFAULT_PROTO_JAVA_PKG  = "org.github.dbjo.generated.proto";
     public static final String DEFAULT_PROTO_PKG_BASE  = "dbjo";

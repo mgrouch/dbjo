@@ -12,23 +12,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 
-/**
- * Generates per table:
- *   <Entity>Q with PropertyTerm constants referring to <Entity>Meta.<PROP>
- *
- * Example:
- *   public static final PropertyTerm<Client, Long> ID = Terms.prop(ClientMeta.ID);
- *
- * Defaults (override via -D...):
- *   -Ddbjo.queryPkg              (default: cfg.metaPkg())
- *   -Ddbjo.querySuffix           (default: "Q")
- *   -Ddbjo.metaSuffix            (default: "Meta")
- *   -Ddbjo.termsFqn              (default: "org.github.dbjo.meta.query.Terms")
- *   -Ddbjo.propertyTermFqn       (default: "org.github.dbjo.meta.query.PropertyTerm")
- */
 public final class QueryTermsGenerator {
+
     private static final String DEFAULT_TERMS_FQN = "org.github.dbjo.criteria.Terms";
     private static final String DEFAULT_PROPERTY_TERM_FQN = "org.github.dbjo.criteria.PropertyTerm";
+    private static final String DEFAULT_QUERY_SUFFIX = "Q";
+    private static final String DEFAULT_META_SUFFIX = "Meta";
 
     private final Config cfg;
 
@@ -45,7 +34,7 @@ public final class QueryTermsGenerator {
         for (TableModel tm : tables) {
             String beanClass = Naming.toClassName(tm.table().table());
             String qClass = beanClass + effectiveQuerySuffix();
-            String metaClass = beanClass + effectiveMetaSuffix(); // e.g. ClientMeta
+            String metaClass = beanClass + effectiveMetaSuffix();
 
             String src = renderQ(queryPkg, tm, beanClass, qClass, metaClass);
 
@@ -60,13 +49,9 @@ public final class QueryTermsGenerator {
     private String renderQ(String queryPkg, TableModel tm, String beanClass, String qClass, String metaClass) {
         Set<String> imports = new TreeSet<>();
 
-        String termsFqn = System.getProperty("dbjo.termsFqn", DEFAULT_TERMS_FQN).trim();
-        String propTermFqn = System.getProperty("dbjo.propertyTermFqn", DEFAULT_PROPERTY_TERM_FQN).trim();
+        imports.add(effectiveTermsFqn());
+        imports.add(effectivePropertyTermFqn());
 
-        imports.add(termsFqn);
-        imports.add(propTermFqn);
-
-        // Import bean/meta if not in same package as generated Q
         if (!cfg.beanPkg().equals(queryPkg)) {
             imports.add(cfg.beanPkg() + "." + beanClass);
         }
@@ -74,7 +59,6 @@ public final class QueryTermsGenerator {
             imports.add(cfg.metaPkg() + "." + metaClass);
         }
 
-        // Add Java type imports needed in generics (Timestamp/BigDecimal/etc.)
         for (Col c : tm.cols()) {
             var jt = TypeMappings.mapSqlTypeToJava(c.sqlType(), null);
             addTypeImport(imports, jt.javaType());
@@ -91,8 +75,9 @@ public final class QueryTermsGenerator {
         for (Col c : tm.cols()) {
             String prop = Naming.sanitizeJavaIdentifier(Naming.toFieldName(c.colName()));
 
-            // Use UPPER_SNAKE for BOTH Q constants and Meta constants
-            String constName = Naming.toUpperSnake(prop); // createdAt -> CREATED_AT
+            // IMPORTANT: must match Meta generator naming
+            // If your Meta generator produces PRICECENTS/CREATEDAT, use Naming.toUpperConst(prop) instead.
+            String constName = Naming.toUpperSnake(prop);
 
             var jt = TypeMappings.mapSqlTypeToJava(c.sqlType(), null);
             String javaType = jt.javaType();
@@ -109,22 +94,67 @@ public final class QueryTermsGenerator {
         return sb.toString();
     }
 
+    private String effectiveQueryPkg() {
+        // If Config has queryPkg, use it; otherwise derive from metaPkg.
+        String qp = safeGet(cfg, "queryPkg");
+        if (qp != null && !qp.isBlank()) return qp.trim();
+
+        // Derive: replace last segment "meta" -> "query", else append ".query"
+        String mp = cfg.metaPkg();
+        if (mp == null || mp.isBlank()) return "query";
+
+        int lastDot = mp.lastIndexOf('.');
+        String lastSeg = lastDot >= 0 ? mp.substring(lastDot + 1) : mp;
+
+        if ("meta".equals(lastSeg)) {
+            return (lastDot >= 0 ? mp.substring(0, lastDot + 1) : "") + "query";
+        }
+        return mp + ".query";
+    }
+
+    private String effectiveQuerySuffix() {
+        String s = safeGet(cfg, "querySuffix");
+        return (s != null && !s.isBlank()) ? s.trim() : DEFAULT_QUERY_SUFFIX;
+    }
+
+    private String effectiveMetaSuffix() {
+        String s = safeGet(cfg, "metaSuffix");
+        return (s != null && !s.isBlank()) ? s.trim() : DEFAULT_META_SUFFIX;
+    }
+
+    private String effectiveTermsFqn() {
+        String s = safeGet(cfg, "termsFqn");
+        return (s != null && !s.isBlank()) ? s.trim() : DEFAULT_TERMS_FQN;
+    }
+
+    private String effectivePropertyTermFqn() {
+        String s = safeGet(cfg, "propertyTermFqn");
+        return (s != null && !s.isBlank()) ? s.trim() : DEFAULT_PROPERTY_TERM_FQN;
+    }
+
+    /**
+     * Backwards compatible: if your Config record doesn't yet have these accessors,
+     * this will just return null and we’ll use defaults/derived values.
+     */
+    private static String safeGet(Config cfg, String accessor) {
+        try {
+            var m = cfg.getClass().getMethod(accessor);
+            Object v = m.invoke(cfg);
+            return (v instanceof String s) ? s : null;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
     private static void addTypeImport(Set<String> imports, String javaType) {
-        // Only types that are not in java.lang and not primitives/arrays need imports.
         if (javaType == null || javaType.isBlank()) return;
-
-        // Arrays and primitives: no import
         if (javaType.endsWith("[]")) return;
+
         switch (javaType) {
-            case "boolean", "byte", "short", "int", "long", "float", "double", "char" -> { return; }
+            case "boolean","byte","short","int","long","float","double","char" -> { return; }
+            case "String","Boolean","Byte","Short","Integer","Long","Float","Double","Character" -> { return; }
         }
 
-        // java.lang: no import
-        switch (javaType) {
-            case "String", "Boolean", "Byte", "Short", "Integer", "Long", "Float", "Double", "Character" -> { return; }
-        }
-
-        // Common JDBC / numeric types you already hit
         switch (javaType) {
             case "BigDecimal" -> imports.add("java.math.BigDecimal");
             case "UUID" -> imports.add("java.util.UUID");
@@ -132,28 +162,8 @@ public final class QueryTermsGenerator {
             case "Time" -> imports.add("java.sql.Time");
             case "Timestamp" -> imports.add("java.sql.Timestamp");
             default -> {
-                // If TypeMappings returns fully-qualified types sometimes, allow those too:
-                if (javaType.contains(".")) {
-                    imports.add(javaType);
-                }
+                if (javaType.contains(".")) imports.add(javaType);
             }
         }
-    }
-
-    private String effectiveQueryPkg() {
-        String p = System.getProperty("dbjo.queryPkg");
-        if (p != null && !p.isBlank()) return p.trim();
-        // sensible default: keep Q alongside Meta so you usually avoid extra imports
-        return cfg.metaPkg();
-    }
-
-    private static String effectiveQuerySuffix() {
-        String s = System.getProperty("dbjo.querySuffix");
-        return (s != null && !s.isBlank()) ? s.trim() : "Q";
-    }
-
-    private static String effectiveMetaSuffix() {
-        String s = System.getProperty("dbjo.metaSuffix");
-        return (s != null && !s.isBlank()) ? s.trim() : "Meta";
     }
 }
