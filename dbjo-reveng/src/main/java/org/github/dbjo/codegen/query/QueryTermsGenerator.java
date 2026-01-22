@@ -91,21 +91,17 @@ public final class QueryTermsGenerator {
         for (Col c : tm.cols()) {
             String prop = Naming.sanitizeJavaIdentifier(Naming.toFieldName(c.colName()));
 
-            // Q constant name: nicer UPPER_SNAKE
-            String qConstName = Naming.toUpperSnake(prop);   // priceCents -> PRICE_CENTS
-
-            // Meta constant name: MUST match what Entity/Meta generator produced
-            // (your current meta generator seems to produce PRICECENTS)
-            String metaConstName = Naming.toUpperConst(prop);
+            // Use UPPER_SNAKE for BOTH Q constants and Meta constants
+            String constName = Naming.toUpperSnake(prop); // createdAt -> CREATED_AT
 
             var jt = TypeMappings.mapSqlTypeToJava(c.sqlType(), null);
             String javaType = jt.javaType();
 
             sb.append("  public static final PropertyTerm<")
                     .append(beanClass).append(", ").append(javaType).append("> ")
-                    .append(qConstName)
+                    .append(constName)
                     .append(" = Terms.prop(")
-                    .append(metaClass).append(".").append(metaConstName)
+                    .append(metaClass).append(".").append(constName)
                     .append(");\n");
         }
 
