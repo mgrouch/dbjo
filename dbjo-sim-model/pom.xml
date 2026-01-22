@@ -134,6 +134,8 @@
                                 <arg>--daoPkg=org.github.dbjo.generated.model.rdb.dao</arg>
                                 <arg>--schemaPkg=org.github.dbjo.generated.model.rdb.schema</arg>
                                 <arg>--dbMetaPkg=org.github.dbjo.generated.model.dbmeta</arg>
+                                <arg>--queryPkg=org.github.dbjo.generated.model.query</arg>
+                                <arg>--querySuffix=Q</arg>
                             </args>
                         </configuration>
                     </execution>

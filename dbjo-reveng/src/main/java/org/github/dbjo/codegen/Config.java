@@ -43,8 +43,14 @@ public record Config(
         String beanPkg,
         String metaPkg,
         String baseMetaPkg,
-        String metaClassSuffix,   // NEW: default "Meta"
+        String metaSuffix,          // <-- NEW (e.g. "Meta")
         Path codegenOutJava,
+
+        // query terms
+        String queryPkg,            // <-- NEW (where <Entity>Q goes)
+        String querySuffix,         // <-- NEW (e.g. "Q")
+        String termsFqn,            // <-- NEW (FQN of Terms class)
+        String propertyTermFqn,     // <-- NEW (FQN of PropertyTerm)
 
         // RocksDB DAO generator
         String daoPkg,
@@ -52,20 +58,14 @@ public record Config(
         String daoClassSuffix,
         String schemaClassSuffix,
         String cfConstSuffix,
-        String daoBaseClass,   // e.g. IndexedRocksDao
+        String daoBaseClass,
 
         // Protobuf mapper generator
         String protoMapperPkg,
         String protoMapperSuffix,
 
         // SQL DB mappings
-        String dbMetaPkg,
-
-        // NEW: Query Terms generator (<Entity>Q)
-        String queryPkg,
-        String queryClassSuffix,   // default "Q"
-        String termsFqn,           // default org.github.dbjo.meta.term.Terms
-        String propertyTermFqn     // default org.github.dbjo.meta.term.PropertyTerm
+        String dbMetaPkg
 ) {
     // ---------------- defaults ----------------
     public static final String DEFAULT_URL    = "jdbc:hsqldb:hsql://localhost:9001/dbjo";
@@ -78,7 +78,14 @@ public record Config(
     public static final String DEFAULT_BEAN_PKG = "org.github.dbjo.generated.model.entity";
     public static final String DEFAULT_META_PKG = "org.github.dbjo.generated.model.meta";
     public static final String DEFAULT_BASE_META_PKG = "org.github.dbjo.meta.entity";
-    public static final String DEFAULT_META_CLASS_SUFFIX = "Meta"; // NEW
+    public static final String DEFAULT_META_SUFFIX = "Meta";
+
+    public static final String DEFAULT_QUERY_PKG = "org.github.dbjo.generated.model.query";
+    public static final String DEFAULT_QUERY_SUFFIX = "Q";
+
+    // Adjust these to your actual query API package/classes:
+    public static final String DEFAULT_TERMS_FQN = "org.github.dbjo.query.Terms";
+    public static final String DEFAULT_PROPERTY_TERM_FQN = "org.github.dbjo.query.PropertyTerm";
 
     public static final String DEFAULT_PROTO_JAVA_PKG  = "org.github.dbjo.generated.proto";
     public static final String DEFAULT_PROTO_PKG_BASE  = "dbjo";
@@ -97,20 +104,14 @@ public record Config(
 
     private static final String DEFAULT_SQL_DB_MAPPER_PKG = "org.github.dbjo.generated.db.meta";
 
-    // NEW defaults for Q generator
-    public static final String DEFAULT_QUERY_PKG = "org.github.dbjo.generated.criteria";
-    public static final String DEFAULT_QUERY_CLASS_SUFFIX = "Q";
-    public static final String DEFAULT_TERMS_FQN = "org.github.dbjo.criteria.Terms";
-    public static final String DEFAULT_PROPERTY_TERM_FQN = "org.github.dbjo.criteria.PropertyTerm";
-
     public enum RunMode {
-        ALL, PROTO, ENTITY, DAO, MAPPER, QUERY, RDB;
+        ALL, PROTO, ENTITY, DAO, MAPPER, RDB, QUERY;
 
         public boolean runProto()   { return this == ALL || this == PROTO; }
         public boolean runEntity()  { return this == ALL || this == ENTITY; }
         public boolean runDao()     { return this == ALL || this == DAO || this == RDB; }
         public boolean runMapper()  { return this == ALL || this == MAPPER || this == RDB; }
-        public boolean runQuery()   { return this == ALL || this == QUERY; }
+        public boolean runQuery()   { return this == ALL || this == QUERY || this == ENTITY; } // often tied to meta
 
         public static RunMode parse(String s) {
             if (s == null) return ALL;
@@ -120,9 +121,9 @@ public record Config(
                 case "entity", "entities" -> ENTITY;
                 case "dao", "daos" -> DAO;
                 case "mapper", "mappers" -> MAPPER;
-                case "query", "q", "terms" -> QUERY;
                 case "rdb", "rocks", "rocksdb" -> RDB;
-                default -> throw new IllegalArgumentException("Unknown --run=" + s + " (use all|proto|entity|dao|mapper|query|rdb)");
+                case "query", "q" -> QUERY;
+                default -> throw new IllegalArgumentException("Unknown --run=" + s + " (use all|proto|entity|dao|mapper|rdb|query)");
             };
         }
     }
@@ -156,12 +157,17 @@ public record Config(
         Path protocPath = resolveProtocPath(am);
         Path protocInclude = resolveProtocIncludeDir(am);
 
-        Path codegenOutJava  = Paths.get(am.get("codegenOutJava",  outBase.resolve("codegen-java").toString()));
+        Path codegenOutJava  = Paths.get(am.get("codegenOutJava", outBase.resolve("codegen-java").toString()));
 
         String beanPkg = am.get("beanPkg", DEFAULT_BEAN_PKG);
         String metaPkg = am.get("metaPkg", DEFAULT_META_PKG);
         String baseMetaPkg = am.get("baseMetaPkg", DEFAULT_BASE_META_PKG);
-        String metaClassSuffix = am.get("metaClassSuffix", DEFAULT_META_CLASS_SUFFIX); // NEW
+        String metaSuffix = am.get("metaSuffix", DEFAULT_META_SUFFIX);
+
+        String queryPkg = am.get("queryPkg", DEFAULT_QUERY_PKG);
+        String querySuffix = am.get("querySuffix", DEFAULT_QUERY_SUFFIX);
+        String termsFqn = am.get("termsFqn", DEFAULT_TERMS_FQN);
+        String propertyTermFqn = am.get("propertyTermFqn", DEFAULT_PROPERTY_TERM_FQN);
 
         String daoPkg = am.get("daoPkg", DEFAULT_DAO_PKG);
         String schemaPkg = am.get("schemaPkg", DEFAULT_SCHEMA_PKG);
@@ -175,12 +181,6 @@ public record Config(
 
         String dbMetaPkg = am.get("dbMetaPkg", DEFAULT_SQL_DB_MAPPER_PKG);
 
-        // NEW: Q/Terms generator settings
-        String queryPkg = am.get("queryPkg", DEFAULT_QUERY_PKG);
-        String queryClassSuffix = am.get("queryClassSuffix", DEFAULT_QUERY_CLASS_SUFFIX);
-        String termsFqn = am.get("termsFqn", DEFAULT_TERMS_FQN);
-        String propertyTermFqn = am.get("propertyTermFqn", DEFAULT_PROPERTY_TERM_FQN);
-
         return new Config(
                 driver, url, user, pass,
                 outBase, overwrite,
@@ -190,11 +190,10 @@ public record Config(
                 protoJavaPkg, protoPkgBase, protoOuterSuffix,
                 protoPerTable, protoRunProtoc, protoExperimentalOptional,
                 protocPath, protocInclude,
-                beanPkg, metaPkg, baseMetaPkg, metaClassSuffix, codegenOutJava,
+                beanPkg, metaPkg, baseMetaPkg, metaSuffix, codegenOutJava,
+                queryPkg, querySuffix, termsFqn, propertyTermFqn,
                 daoPkg, schemaPkg, daoClassSuffix, schemaClassSuffix, cfConstSuffix, daoBaseClass,
-                protoMapperPkg, protoMapperSuffix,
-                dbMetaPkg,
-                queryPkg, queryClassSuffix, termsFqn, propertyTermFqn
+                protoMapperPkg, protoMapperSuffix, dbMetaPkg
         );
     }
 
