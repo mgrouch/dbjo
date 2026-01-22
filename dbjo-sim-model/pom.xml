@@ -136,7 +136,8 @@
                                 <arg>--dbMetaPkg=org.github.dbjo.generated.model.dbmeta</arg>
                                 <arg>--queryPkg=org.github.dbjo.generated.model.query</arg>
                                 <arg>--querySuffix=Q</arg>
-                            </args>
+                                <arg>--registryPkg=org.github.dbjo.sim.model.generated.meta.registry</arg>
+                                <arg>--registryClass=BizDataMetaRegistry</arg>                            </args>
                         </configuration>
                     </execution>
                 </executions>

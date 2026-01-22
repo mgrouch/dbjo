@@ -10,6 +10,7 @@ import org.github.dbjo.codegen.query.QueryTermsGenerator;
 import org.github.dbjo.codegen.rdb.ProtoMapperGenerator;
 import org.github.dbjo.codegen.rdb.RocksDaoGenerator;
 import org.github.dbjo.codegen.rdb.RocksSchemaGenerator;
+import org.github.dbjo.codegen.registry.MetaRegistryGenerator;
 
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
@@ -71,6 +72,10 @@ public final class DbjoCodegen {
             if (cfg.runMode().runEntity()) {
                 int n = new EntityGenerator(cfg).generateAll(tables);
                 System.out.println("Generated entity/meta for " + n + " table(s) into: " + cfg.outBase().toAbsolutePath());
+                System.out.println();
+
+                int r = new MetaRegistryGenerator(cfg).generate(tables);
+                System.out.println("Generated meta registry file(s): " + r);
                 System.out.println();
             }
 
