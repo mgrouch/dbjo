@@ -139,7 +139,7 @@
                                 <arg>--registryPkg=org.github.dbjo.sim.model.generated.meta.registry</arg>
                                 <arg>--registryClass=BizDataMetaRegistry</arg>
                                 <arg>--enumEnabled=true</arg>
-                                <arg>--enumPkg=org.github.dbjo.generated.model.enum</arg>
+                                <arg>--enumPkg=org.github.dbjo.generated.model.enums</arg>
                                 <arg>--enumIncludeViews=false</arg>
                                 <arg>--enumOrderBySortOrderIfPresent=true</arg>
                             </args>
