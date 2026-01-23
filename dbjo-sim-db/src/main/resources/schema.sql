@@ -1,6 +1,19 @@
 
 -- Enums
 
+CREATE TABLE global_region_enum (
+  code VARCHAR(8) PRIMARY KEY,     -- EMEA / APAC / AMER
+  name VARCHAR(64) NOT NULL,
+  sort_order SMALLINT NOT NULL,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+CREATE UNIQUE INDEX ux_global_region_enum_name ON global_region_enum(name);
+
+INSERT INTO global_region_enum (code, name, sort_order, is_active) VALUES ('EMEA', 'Europe, Middle East & Africa', 1, TRUE);
+INSERT INTO global_region_enum (code, name, sort_order, is_active) VALUES ('APAC', 'Asia-Pacific',                 2, TRUE);
+INSERT INTO global_region_enum (code, name, sort_order, is_active) VALUES ('AMER', 'Americas',                     3, TRUE);
+
 CREATE TABLE country_enum (
   code2 CHAR(2) PRIMARY KEY,     -- ISO 3166-1 alpha-2
   code3 CHAR(3) NOT NULL,        -- ISO 3166-1 alpha-3
