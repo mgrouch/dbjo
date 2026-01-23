@@ -188,8 +188,8 @@ public record Config(
         String dbMetaPkg = am.get("dbMetaPkg", DEFAULT_SQL_DB_MAPPER_PKG);
 
         String enumPkgDefault = beanPkg.endsWith(".entity")
-                ? beanPkg.substring(0, beanPkg.length() - ".entity".length()) + ".enum"
-                : (beanPkg + ".enum");
+                ? beanPkg.substring(0, beanPkg.length() - ".entity".length()) + ".enums"
+                : (beanPkg + ".enums");
 
         String enumPkg = am.get("enumPkg", enumPkgDefault);
         boolean enumEnabled = am.getBool("enumEnabled", true);
