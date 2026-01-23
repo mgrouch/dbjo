@@ -8,7 +8,7 @@ CREATE TABLE country_enum (
   name VARCHAR(128) NOT NULL,
   official_name VARCHAR(256) NULL,
   common_name VARCHAR(256) NULL,
-  is_active BOOLEAN NOT NULL DEFAULT TRUE
+  is_active BOOLEAN NOT NULL
 );
 
 CREATE UNIQUE INDEX ux_country_enum_code3 ON country_enum(code3);
@@ -273,8 +273,6 @@ CREATE TABLE ccy_enum (
   is_active BOOLEAN NOT NULL,
   withdrawal_date VARCHAR(32) NULL
 );
-
-CREATE UNIQUE INDEX ux_ccy_enum_numeric_code ON ccy_enum(numeric_code);
 
 INSERT INTO ccy_enum (code, numeric_code, name, minor_units, is_active, withdrawal_date) VALUES ('ADP', '020', 'Andorran Peseta', NULL, FALSE, '2003-07');
 INSERT INTO ccy_enum (code, numeric_code, name, minor_units, is_active, withdrawal_date) VALUES ('AED', '784', 'UAE Dirham', 2, TRUE, NULL);
