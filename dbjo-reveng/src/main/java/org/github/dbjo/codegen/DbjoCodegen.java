@@ -93,6 +93,13 @@ public final class DbjoCodegen {
                 System.out.println();
             }
 
+            if (cfg.enumEnabled() && (cfg.runMode().runEntity() || cfg.runMode().runDao() || cfg.runMode().runMapper())) {
+                int en = new org.github.dbjo.codegen.db.DbEnumCodeGenerator(cfg).generateAll(conn);
+                System.out.println("Generated enum(s): " + en + " into: " +
+                        cfg.codegenOutJava().resolve(cfg.enumPkg().replace('.', '/')).toAbsolutePath());
+                System.out.println();
+            }
+
             // 5) ROCKS DAOs
             if (cfg.runMode().runDao()) {
                 int n = new RocksDaoGenerator(cfg).generateAll(tables);

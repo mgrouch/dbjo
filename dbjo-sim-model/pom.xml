@@ -137,7 +137,12 @@
                                 <arg>--queryPkg=org.github.dbjo.generated.model.query</arg>
                                 <arg>--querySuffix=Q</arg>
                                 <arg>--registryPkg=org.github.dbjo.sim.model.generated.meta.registry</arg>
-                                <arg>--registryClass=BizDataMetaRegistry</arg>                            </args>
+                                <arg>--registryClass=BizDataMetaRegistry</arg>
+                                <arg>--enumEnabled=true</arg>
+                                <arg>--enumPkg=org.github.dbjo.generated.model.enum</arg>
+                                <arg>--enumIncludeViews=false</arg>
+                                <arg>--enumOrderBySortOrderIfPresent=true</arg>
+                            </args>
                         </configuration>
                     </execution>
                 </executions>

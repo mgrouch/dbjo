@@ -65,7 +65,13 @@ public record Config(
         String protoMapperSuffix,
 
         // SQL DB mappings
-        String dbMetaPkg
+        String dbMetaPkg,
+
+        // DB enums
+        String enumPkg,
+        boolean enumEnabled,
+        boolean enumIncludeViews,
+        boolean enumOrderBySortOrderIfPresent
 ) {
     // ---------------- defaults ----------------
     public static final String DEFAULT_URL    = "jdbc:hsqldb:hsql://localhost:9001/dbjo";
@@ -181,6 +187,15 @@ public record Config(
 
         String dbMetaPkg = am.get("dbMetaPkg", DEFAULT_SQL_DB_MAPPER_PKG);
 
+        String enumPkgDefault = beanPkg.endsWith(".entity")
+                ? beanPkg.substring(0, beanPkg.length() - ".entity".length()) + ".enum"
+                : (beanPkg + ".enum");
+
+        String enumPkg = am.get("enumPkg", enumPkgDefault);
+        boolean enumEnabled = am.getBool("enumEnabled", true);
+        boolean enumIncludeViews = am.getBool("enumIncludeViews", false);
+        boolean enumOrderBySortOrderIfPresent = am.getBool("enumOrderBySortOrderIfPresent", true);
+
         return new Config(
                 driver, url, user, pass,
                 outBase, overwrite,
@@ -193,7 +208,8 @@ public record Config(
                 beanPkg, metaPkg, baseMetaPkg, metaSuffix, codegenOutJava,
                 queryPkg, querySuffix, termsFqn, propertyTermFqn,
                 daoPkg, schemaPkg, daoClassSuffix, schemaClassSuffix, cfConstSuffix, daoBaseClass,
-                protoMapperPkg, protoMapperSuffix, dbMetaPkg
+                protoMapperPkg, protoMapperSuffix, dbMetaPkg,
+                enumPkg, enumEnabled, enumIncludeViews, enumOrderBySortOrderIfPresent
         );
     }
 
