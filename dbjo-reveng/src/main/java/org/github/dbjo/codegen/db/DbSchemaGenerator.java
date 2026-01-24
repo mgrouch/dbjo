@@ -31,13 +31,14 @@ public final class DbSchemaGenerator {
         this.outJavaDir = Objects.requireNonNull(outJavaDir, "outJavaDir");
         this.schemaPkg = Objects.requireNonNull(schemaPkg, "schemaPkg");
         this.overwrite = overwrite;
-        validatePackageName(schemaPkg);
+        validatePackageName(schemaPkg, "schemaPkg");
     }
 
     public int generateAll(List<TableModel> tables) throws IOException {
         Objects.requireNonNull(tables, "tables");
 
-        String tablesPkg = schemaPkg + ".tables";
+        final String tablesPkg = schemaPkg + ".tables";
+        validatePackageName(tablesPkg, "tablesPkg");
 
         Path schemaOutDir = outJavaDir.resolve(schemaPkg.replace('.', '/'));
         Path tablesOutDir = outJavaDir.resolve(tablesPkg.replace('.', '/'));
@@ -47,8 +48,10 @@ public final class DbSchemaGenerator {
         // deterministic order
         List<TableModel> sorted = new ArrayList<>(tables);
         sorted.sort(Comparator
-                .comparing((TableModel tm) -> nz(tm.table() == null ? null : tm.table().schema()).toLowerCase(Locale.ROOT))
-                .thenComparing(tm -> nz(tm.table() == null ? null : tm.table().table()).toLowerCase(Locale.ROOT)));
+                .comparing((TableModel tm) -> nz(tm == null || tm.table() == null ? null : tm.table().schema())
+                        .toLowerCase(Locale.ROOT))
+                .thenComparing(tm -> nz(tm == null || tm.table() == null ? null : tm.table().table())
+                        .toLowerCase(Locale.ROOT)));
 
         // Generate per-table classes
         List<String> tableClassFqns = new ArrayList<>();
@@ -98,6 +101,10 @@ public final class DbSchemaGenerator {
         List<String> pkSorted = new ArrayList<>(pk);
         pkSorted.sort(String.CASE_INSENSITIVE_ORDER);
 
+        // Stable index order (by name)
+        List<IndexModel> idxSorted = new ArrayList<>(idx);
+        idxSorted.sort(Comparator.comparing(IndexModel::indexName, String.CASE_INSENSITIVE_ORDER));
+
         StringBuilder sb = new StringBuilder(24_000);
         sb.append("package ").append(pkg).append(";\n\n");
         sb.append("import java.util.*;\n");
@@ -127,24 +134,30 @@ public final class DbSchemaGenerator {
         sb.append("    );\n\n");
 
         // PK
-        sb.append("    public static final Set<String> PK_COLS_UPPER = Set.of(");
-        for (int i = 0; i < pkSorted.size(); i++) {
-            if (i > 0) sb.append(", ");
-            sb.append("\"").append(escape(pkSorted.get(i))).append("\"");
+        sb.append("    public static final Set<String> PK_COLS_UPPER = ");
+        if (pkSorted.isEmpty()) {
+            sb.append("Set.of();\n\n");
+        } else {
+            sb.append("Set.of(");
+            for (int i = 0; i < pkSorted.size(); i++) {
+                if (i > 0) sb.append(", ");
+                sb.append("\"").append(escapeJava(pkSorted.get(i))).append("\"");
+            }
+            sb.append(");\n\n");
         }
-        sb.append(");\n\n");
 
         // INDEXES
-        sb.append("    public static final List<IndexModel> INDEXES = List.of(\n");
-        if (idx.isEmpty()) {
-            sb.append("            // none\n");
+        sb.append("    public static final List<IndexModel> INDEXES = ");
+        if (idxSorted.isEmpty()) {
+            sb.append("List.of();\n\n");
         } else {
-            for (int i = 0; i < idx.size(); i++) {
-                sb.append("            ").append(renderIndex(idx.get(i)));
-                sb.append(i == idx.size() - 1 ? "\n" : ",\n");
+            sb.append("List.of(\n");
+            for (int i = 0; i < idxSorted.size(); i++) {
+                sb.append("            ").append(renderIndex(idxSorted.get(i)));
+                sb.append(i == idxSorted.size() - 1 ? "\n" : ",\n");
             }
+            sb.append("    );\n\n");
         }
-        sb.append("    );\n\n");
 
         // MODEL
         sb.append("    public static final TableModel MODEL = new TableModel(\n");
@@ -230,7 +243,6 @@ public final class DbSchemaGenerator {
     }
 
     private static String renderIndex(IndexModel ix) {
-        // IndexModel(String indexName, boolean unique, List<String> columnNames)
         StringBuilder sb = new StringBuilder();
         sb.append("new IndexModel(")
                 .append(strOrNull(ix.indexName()))
@@ -243,7 +255,7 @@ public final class DbSchemaGenerator {
         if (cols != null) {
             for (int i = 0; i < cols.size(); i++) {
                 if (i > 0) sb.append(", ");
-                sb.append("\"").append(escape(cols.get(i))).append("\"");
+                sb.append("\"").append(escapeJava(cols.get(i))).append("\"");
             }
         }
         sb.append("))");
@@ -264,39 +276,63 @@ public final class DbSchemaGenerator {
         String cls = Naming.toClassName(raw);
         if (cls == null || cls.isBlank()) cls = "X";
         if (!Character.isJavaIdentifierStart(cls.charAt(0))) cls = "_" + cls;
-        if (Naming.JAVA_KEYWORDS.contains(cls.toLowerCase(Locale.ROOT))) cls = cls + "X";
+
+        // sanitize remaining chars just in case Naming.toClassName ever changes behavior
+        StringBuilder b = new StringBuilder(cls.length());
+        for (int i = 0; i < cls.length(); i++) {
+            char ch = cls.charAt(i);
+            b.append(Character.isJavaIdentifierPart(ch) ? ch : '_');
+        }
+        cls = b.toString();
+
+        if (JAVA_KEYWORDS.contains(cls.toLowerCase(Locale.ROOT))) cls = cls + "X";
         return cls;
     }
 
     private static String strOrNull(String s) {
-        return (s == null) ? "null" : "\"" + escape(s) + "\"";
+        return (s == null) ? "null" : "\"" + escapeJava(s) + "\"";
     }
 
-    private static String escape(String s) {
+    private static String escapeJava(String s) {
         if (s == null) return "";
-        return s.replace("\\", "\\\\").replace("\"", "\\\"");
+        return s
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\r", "\\r")
+                .replace("\n", "\\n")
+                .replace("\t", "\\t");
     }
 
     private static String nz(String s) {
         return s == null ? "" : s;
     }
 
-    private static void validatePackageName(String pkg) {
-        if (pkg == null || pkg.isBlank()) throw new IllegalArgumentException("schemaPkg is blank");
+    private static void validatePackageName(String pkg, String fieldName) {
+        if (pkg == null || pkg.isBlank()) throw new IllegalArgumentException(fieldName + " is blank");
         String[] parts = pkg.split("\\.");
         for (String p : parts) {
-            if (p.isEmpty()) throw new IllegalArgumentException("Invalid package: " + pkg);
+            if (p.isEmpty()) throw new IllegalArgumentException("Invalid " + fieldName + ": " + pkg);
+            String pl = p.toLowerCase(Locale.ROOT);
+            if (JAVA_KEYWORDS.contains(pl)) {
+                throw new IllegalArgumentException("Invalid " + fieldName + " '" + pkg + "': segment '" + p + "' is a Java keyword");
+            }
             if (!Character.isJavaIdentifierStart(p.charAt(0))) {
-                throw new IllegalArgumentException("Invalid package segment '" + p + "' in " + pkg);
+                throw new IllegalArgumentException("Invalid " + fieldName + " '" + pkg + "': segment '" + p + "' is not a valid identifier");
             }
             for (int i = 1; i < p.length(); i++) {
                 if (!Character.isJavaIdentifierPart(p.charAt(i))) {
-                    throw new IllegalArgumentException("Invalid package segment '" + p + "' in " + pkg);
+                    throw new IllegalArgumentException("Invalid " + fieldName + " '" + pkg + "': segment '" + p + "' is not a valid identifier");
                 }
-            }
-            if (Naming.JAVA_KEYWORDS.contains(p)) {
-                throw new IllegalArgumentException("Invalid package: segment is Java keyword: " + p);
             }
         }
     }
+
+    private static final Set<String> JAVA_KEYWORDS = Set.of(
+            "abstract","assert","boolean","break","byte","case","catch","char","class","const",
+            "continue","default","do","double","else","enum","extends","final","finally","float",
+            "for","goto","if","implements","import","instanceof","int","interface","long","native",
+            "new","package","private","protected","public","return","short","static","strictfp",
+            "super","switch","synchronized","this","throw","throws","transient","try","void",
+            "volatile","while","true","false","null","var","record","sealed","permits","non-sealed","yield"
+    );
 }

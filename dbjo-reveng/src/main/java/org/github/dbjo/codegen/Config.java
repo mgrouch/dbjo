@@ -6,76 +6,20 @@ import java.util.Locale;
 import java.util.regex.Pattern;
 
 public record Config(
-        // DB
-        String driver,
-        String url,
-        String user,
-        String pass,
-
-        // output
-        Path outBase,
-        boolean overwrite,
-
-        // filters
-        Pattern schemaInclude,
-        Pattern schemaExclude,
-        Pattern tableInclude,
-        Pattern tableExclude,
-
-        // run mode
+        Db db,
+        Output output,
+        Filters filters,
         RunMode runMode,
-
-        // proto
-        Path protoOutProto,
-        Path protoOutJava,
-        String protoJavaPkg,
-        String protoPkgBase,
-        String protoOuterSuffix,
-        boolean protoPerTable,
-        boolean protoRunProtoc,
-        boolean protoExperimentalOptional,
-
-        // protoc paths
-        Path protocPath,
-        Path protocInclude,
-
-        // entity/meta
-        String beanPkg,
-        String metaPkg,
-        String baseMetaPkg,
-        String metaSuffix,
-        Path codegenOutJava,
-
-        // query terms
-        String queryPkg,
-        String querySuffix,
-        String termsFqn,
-        String propertyTermFqn,
-
-        // enum generation
-        boolean enumEnabled,
-        String enumPkg,
-        boolean enumIncludeViews,
-        boolean enumOrderBySortOrderIfPresent,
-
-        // enum overrides
-        Path enumOverridesFile,
-        boolean enumStrictUnique,
-
-        // RocksDB DAO generator
-        String daoPkg,
-        String schemaPkg,
-        String daoClassSuffix,
-        String schemaClassSuffix,
-        String cfConstSuffix,
-        String daoBaseClass,
-
-        // Protobuf mapper generator
-        String protoMapperPkg,
-        String protoMapperSuffix,
-
-        // SQL DB mappings
-        String dbMetaPkg
+        Proto proto,
+        Protoc protoc,
+        Entity entity,
+        Query query,
+        Enums enums,
+        EnumOverrides enumOverrides,
+        Rocks rocks,
+        ProtoMapper protoMapper,
+        JdbcMeta jdbcMeta,
+        DbSchema dbSchema
 ) {
     // ---------------- defaults ----------------
     public static final String DEFAULT_URL    = "jdbc:hsqldb:hsql://localhost:9001/dbjo";
@@ -116,16 +60,80 @@ public record Config(
 
     public static final String DEFAULT_SQL_DB_MAPPER_PKG = "org.github.dbjo.generated.model.dbmeta";
 
-    public enum RunMode {
-        ALL, PROTO, ENUMS, ENTITY, QUERY, DAO, MAPPER, RDB, DBMETA;
+    // NEW: DB schema meta generator package (NOT Rocks schema)
+    public static final String DEFAULT_DB_SCHEMA_PKG = "org.github.dbjo.generated.model.dbschema";
 
-        public boolean runProto()  { return this == ALL || this == PROTO; }
-        public boolean runEnums()  { return this == ALL || this == ENUMS; }
-        public boolean runEntity() { return this == ALL || this == ENTITY || this == RDB; }
-        public boolean runQuery()  { return this == ALL || this == QUERY || this == ENTITY || this == RDB; }
-        public boolean runDao()    { return this == ALL || this == DAO || this == RDB; }
-        public boolean runMapper() { return this == ALL || this == MAPPER || this == RDB; }
-        public boolean runDbMeta() { return this == ALL || this == DBMETA; }
+    // ---------------- sections ----------------
+
+    public record Db(String driver, String url, String user, String pass) {}
+
+    public record Output(Path outBase, boolean overwrite, Path codegenOutJava) {}
+
+    public record Filters(Pattern schemaInclude, Pattern schemaExclude, Pattern tableInclude, Pattern tableExclude) {}
+
+    public record Proto(
+            Path protoOutProto,
+            Path protoOutJava,
+            String protoJavaPkg,
+            String protoPkgBase,
+            String protoOuterSuffix,
+            boolean protoPerTable,
+            boolean protoRunProtoc,
+            boolean protoExperimentalOptional
+    ) {}
+
+    public record Protoc(Path protocPath, Path protocInclude) {}
+
+    public record Entity(
+            String beanPkg,
+            String metaPkg,
+            String baseMetaPkg,
+            String metaSuffix
+    ) {}
+
+    public record Query(
+            String queryPkg,
+            String querySuffix,
+            String termsFqn,
+            String propertyTermFqn
+    ) {}
+
+    public record Enums(
+            boolean enumEnabled,
+            String enumPkg,
+            boolean enumIncludeViews,
+            boolean enumOrderBySortOrderIfPresent
+    ) {}
+
+    public record EnumOverrides(Path enumOverridesFile, boolean enumStrictUnique) {}
+
+    public record Rocks(
+            String daoPkg,
+            String schemaPkg,
+            String daoClassSuffix,
+            String schemaClassSuffix,
+            String cfConstSuffix,
+            String daoBaseClass
+    ) {}
+
+    public record ProtoMapper(String protoMapperPkg, String protoMapperSuffix) {}
+
+    public record JdbcMeta(String dbMetaPkg) {}
+
+    public record DbSchema(String dbSchemaPkg) {}
+
+    // ---------------- run mode ----------------
+    public enum RunMode {
+        ALL, PROTO, ENUMS, ENTITY, QUERY, DAO, MAPPER, RDB, DBMETA, SCHEMA;
+
+        public boolean runProto()   { return this == ALL || this == PROTO; }
+        public boolean runEnums()   { return this == ALL || this == ENUMS; }
+        public boolean runEntity()  { return this == ALL || this == ENTITY || this == RDB; }
+        public boolean runQuery()   { return this == ALL || this == QUERY || this == ENTITY || this == RDB; }
+        public boolean runDao()     { return this == ALL || this == DAO || this == RDB; }
+        public boolean runMapper()  { return this == ALL || this == MAPPER || this == RDB; }
+        public boolean runDbMeta()  { return this == ALL || this == DBMETA; }
+        public boolean runSchema()  { return this == ALL || this == SCHEMA; }
 
         public static RunMode parse(String s) {
             if (s == null) return ALL;
@@ -139,28 +147,110 @@ public record Config(
                 case "mapper", "mappers" -> MAPPER;
                 case "rdb", "rocks", "rocksdb" -> RDB;
                 case "dbmeta", "jdbc" -> DBMETA;
+                case "schema", "dbschema" -> SCHEMA;
                 default -> throw new IllegalArgumentException("Unknown --run=" + s +
-                        " (use all|proto|enums|entity|query|dao|mapper|rdb|dbmeta)");
+                        " (use all|proto|enums|entity|query|dao|mapper|rdb|dbmeta|schema)");
             };
         }
     }
 
+    // ---------------- flat compatibility accessors ----------------
+    // Keep your codebase working while you migrate to cfg.db()/cfg.enums()/etc.
+
+    // DB
+    public String driver() { return db.driver(); }
+    public String url()    { return db.url(); }
+    public String user()   { return db.user(); }
+    public String pass()   { return db.pass(); }
+
+    // output
+    public Path outBase()       { return output.outBase(); }
+    public boolean overwrite()  { return output.overwrite(); }
+    public Path codegenOutJava(){ return output.codegenOutJava(); }
+
+    // filters
+    public Pattern schemaInclude(){ return filters.schemaInclude(); }
+    public Pattern schemaExclude(){ return filters.schemaExclude(); }
+    public Pattern tableInclude() { return filters.tableInclude(); }
+    public Pattern tableExclude() { return filters.tableExclude(); }
+
+    // proto
+    public Path protoOutProto() { return proto.protoOutProto(); }
+    public Path protoOutJava()  { return proto.protoOutJava(); }
+    public String protoJavaPkg(){ return proto.protoJavaPkg(); }
+    public String protoPkgBase(){ return proto.protoPkgBase(); }
+    public String protoOuterSuffix(){ return proto.protoOuterSuffix(); }
+    public boolean protoPerTable(){ return proto.protoPerTable(); }
+    public boolean protoRunProtoc(){ return proto.protoRunProtoc(); }
+    public boolean protoExperimentalOptional(){ return proto.protoExperimentalOptional(); }
+
+    // protoc
+    public Path protocPath(){ return protoc.protocPath(); }
+    public Path protocInclude(){ return protoc.protocInclude(); }
+
+    // entity/meta
+    public String beanPkg(){ return entity.beanPkg(); }
+    public String metaPkg(){ return entity.metaPkg(); }
+    public String baseMetaPkg(){ return entity.baseMetaPkg(); }
+    public String metaSuffix(){ return entity.metaSuffix(); }
+
+    // query
+    public String queryPkg(){ return query.queryPkg(); }
+    public String querySuffix(){ return query.querySuffix(); }
+    public String termsFqn(){ return query.termsFqn(); }
+    public String propertyTermFqn(){ return query.propertyTermFqn(); }
+
+    // enums
+    public boolean enumEnabled(){ return enums.enumEnabled(); }
+    public String enumPkg(){ return enums.enumPkg(); }
+    public boolean enumIncludeViews(){ return enums.enumIncludeViews(); }
+    public boolean enumOrderBySortOrderIfPresent(){ return enums.enumOrderBySortOrderIfPresent(); }
+
+    // enum overrides
+    public Path enumOverridesFile(){ return enumOverrides.enumOverridesFile(); }
+    public boolean enumStrictUnique(){ return enumOverrides.enumStrictUnique(); }
+
+    // rocks dao/schema
+    public String daoPkg(){ return rocks.daoPkg(); }
+    public String schemaPkg(){ return rocks.schemaPkg(); } // Rocks schema pkg only
+    public String daoClassSuffix(){ return rocks.daoClassSuffix(); }
+    public String schemaClassSuffix(){ return rocks.schemaClassSuffix(); }
+    public String cfConstSuffix(){ return rocks.cfConstSuffix(); }
+    public String daoBaseClass(){ return rocks.daoBaseClass(); }
+
+    // proto mapper
+    public String protoMapperPkg(){ return protoMapper.protoMapperPkg(); }
+    public String protoMapperSuffix(){ return protoMapper.protoMapperSuffix(); }
+
+    // jdbc meta
+    public String dbMetaPkg(){ return jdbcMeta.dbMetaPkg(); }
+
+    // NEW: db schema meta pkg
+    public String dbSchemaPkg(){ return dbSchema.dbSchemaPkg(); }
+
+    // ---------------- factory ----------------
     public static Config from(ArgMap am) {
+        // DB
         String driver = am.get("driver", System.getProperty("db.driver", DEFAULT_DRIVER));
         String url    = am.get("url",    System.getProperty("db.url",    DEFAULT_URL));
         String user   = am.get("user",   System.getProperty("db.user",   DEFAULT_USER));
         String pass   = am.get("pass",   System.getProperty("db.pass",   DEFAULT_PASS));
 
+        // Output
         Path outBase = Paths.get(am.get("outBase", DEFAULT_OUT_BASE.toString()));
         boolean overwrite = am.getBool("overwrite", false);
+        Path codegenOutJava = Paths.get(am.get("codegenOutJava", outBase.resolve("codegen-java").toString()));
 
+        // Filters
         Pattern schemaInc = am.getRegex("schemaInclude", null);
         Pattern schemaExc = am.getRegex("schemaExclude", null);
         Pattern tableInc  = am.getRegex("tableInclude", null);
         Pattern tableExc  = am.getRegex("tableExclude", null);
 
+        // Run mode
         RunMode runMode = RunMode.parse(am.get("run", "all"));
 
+        // Proto output dirs
         Path protoOutProto = Paths.get(am.get("protoOutProto", outBase.resolve("proto").toString()));
         Path protoOutJava  = Paths.get(am.get("protoOutJava",  outBase.resolve("proto-java").toString()));
 
@@ -174,14 +264,13 @@ public record Config(
         Path protocPath = resolveProtocPath(am);
         Path protocInclude = resolveProtocIncludeDir(am);
 
-        Path codegenOutJava  = Paths.get(am.get("codegenOutJava", outBase.resolve("codegen-java").toString()));
-
+        // Entity/meta
         String beanPkg = am.get("beanPkg", DEFAULT_BEAN_PKG);
         String metaPkg = am.get("metaPkg", DEFAULT_META_PKG);
         String baseMetaPkg = am.get("baseMetaPkg", DEFAULT_BASE_META_PKG);
         String metaSuffix = am.get("metaSuffix", DEFAULT_META_SUFFIX);
 
-        // query pkg default: metaPkg -> replace ".meta" with ".query" if present, else append ".query"
+        // Query
         String queryPkgDefault = metaPkg.contains(".meta")
                 ? metaPkg.replace(".meta", ".query")
                 : metaPkg + ".query";
@@ -190,18 +279,24 @@ public record Config(
         String termsFqn = am.get("termsFqn", System.getProperty("dbjo.termsFqn", DEFAULT_TERMS_FQN));
         String propertyTermFqn = am.get("propertyTermFqn", System.getProperty("dbjo.propertyTermFqn", DEFAULT_PROPERTY_TERM_FQN));
 
-        boolean enumEnabled = am.getBool("enumEnabled", Boolean.parseBoolean(System.getProperty("dbjo.enumEnabled", String.valueOf(DEFAULT_ENUM_ENABLED))));
+        // Enums
+        boolean enumEnabled = am.getBool("enumEnabled",
+                Boolean.parseBoolean(System.getProperty("dbjo.enumEnabled", String.valueOf(DEFAULT_ENUM_ENABLED))));
         String enumPkg = am.get("enumPkg", System.getProperty("dbjo.enumPkg", DEFAULT_ENUM_PKG));
-        boolean enumIncludeViews = am.getBool("enumIncludeViews", Boolean.parseBoolean(System.getProperty("dbjo.enumIncludeViews", String.valueOf(DEFAULT_ENUM_INCLUDE_VIEWS))));
+        boolean enumIncludeViews = am.getBool("enumIncludeViews",
+                Boolean.parseBoolean(System.getProperty("dbjo.enumIncludeViews", String.valueOf(DEFAULT_ENUM_INCLUDE_VIEWS))));
         boolean enumOrderBySortOrder = am.getBool("enumOrderBySortOrderIfPresent",
                 Boolean.parseBoolean(System.getProperty("dbjo.enumOrderBySortOrderIfPresent", String.valueOf(DEFAULT_ENUM_ORDER_BY_SORT_ORDER))));
 
+        // Enum overrides
         String enumOverridesPath = am.get("enumOverridesFile", System.getProperty("dbjo.enumOverridesFile", ""));
         Path enumOverridesFile = (enumOverridesPath == null || enumOverridesPath.isBlank()) ? null : Paths.get(enumOverridesPath.trim());
 
-        boolean enumStrictUnique = am.getBool("strictUnique",
-                Boolean.parseBoolean(System.getProperty("dbjo.strictUnique", "false")));
+        // keep compatibility: user may pass --strictUnique or --enumStrictUnique
+        boolean enumStrictUnique = am.getBool("enumStrictUnique",
+                am.getBool("strictUnique", Boolean.parseBoolean(System.getProperty("dbjo.strictUnique", "false"))));
 
+        // Rocks
         String daoPkg = am.get("daoPkg", DEFAULT_DAO_PKG);
         String schemaPkg = am.get("schemaPkg", DEFAULT_SCHEMA_PKG);
         String daoClassSuffix = am.get("daoClassSuffix", DEFAULT_DAO_CLASS_SUFFIX);
@@ -209,36 +304,32 @@ public record Config(
         String cfConstSuffix = am.get("cfConstSuffix", DEFAULT_CF_CONST_SUFFIX);
         String daoBaseClass = am.get("daoBaseClass", DEFAULT_DAO_BASE_CLASS);
 
+        // Proto mapper
         String protoMapperPkg = am.get("protoMapperPkg", DEFAULT_PROTO_MAPPER_PKG);
         String protoMapperSuffix = am.get("protoMapperSuffix", DEFAULT_PROTO_MAPPER_SUFFIX);
 
+        // SQL/JDBC meta
         String dbMetaPkg = am.get("dbMetaPkg", DEFAULT_SQL_DB_MAPPER_PKG);
 
+        // NEW: DB schema meta package
+        String dbSchemaPkg = am.get("dbSchemaPkg", System.getProperty("dbjo.dbSchemaPkg", DEFAULT_DB_SCHEMA_PKG));
+
         return new Config(
-                driver, url, user, pass,
-                outBase, overwrite,
-                schemaInc, schemaExc, tableInc, tableExc,
+                new Db(driver, url, user, pass),
+                new Output(outBase, overwrite, codegenOutJava),
+                new Filters(schemaInc, schemaExc, tableInc, tableExc),
                 runMode,
-
-                protoOutProto, protoOutJava,
-                protoJavaPkg, protoPkgBase, protoOuterSuffix,
-                protoPerTable, protoRunProtoc, protoExperimentalOptional,
-
-                protocPath, protocInclude,
-
-                beanPkg, metaPkg, baseMetaPkg, metaSuffix, codegenOutJava,
-
-                queryPkg, querySuffix, termsFqn, propertyTermFqn,
-
-                enumEnabled, enumPkg, enumIncludeViews, enumOrderBySortOrder,
-
-                enumOverridesFile, enumStrictUnique,
-
-                daoPkg, schemaPkg, daoClassSuffix, schemaClassSuffix, cfConstSuffix, daoBaseClass,
-
-                protoMapperPkg, protoMapperSuffix,
-
-                dbMetaPkg
+                new Proto(protoOutProto, protoOutJava, protoJavaPkg, protoPkgBase, protoOuterSuffix,
+                        protoPerTable, protoRunProtoc, protoExperimentalOptional),
+                new Protoc(protocPath, protocInclude),
+                new Entity(beanPkg, metaPkg, baseMetaPkg, metaSuffix),
+                new Query(queryPkg, querySuffix, termsFqn, propertyTermFqn),
+                new Enums(enumEnabled, enumPkg, enumIncludeViews, enumOrderBySortOrder),
+                new EnumOverrides(enumOverridesFile, enumStrictUnique),
+                new Rocks(daoPkg, schemaPkg, daoClassSuffix, schemaClassSuffix, cfConstSuffix, daoBaseClass),
+                new ProtoMapper(protoMapperPkg, protoMapperSuffix),
+                new JdbcMeta(dbMetaPkg),
+                new DbSchema(dbSchemaPkg)
         );
     }
 
