@@ -120,7 +120,7 @@
                             <user>SA</user>
                             <pass></pass>
 
-                            <enumOverridesFile>${project.basedir}/dbjo-enum-overrides.properties</enumOverridesFile>
+                            <enumOverridesFile>${project.basedir}/src/main/resources/dbjo-enum-overrides.properties</enumOverridesFile>
                             <strictUnique>true</strictUnique>
 
                             <overwrite>true</overwrite>
