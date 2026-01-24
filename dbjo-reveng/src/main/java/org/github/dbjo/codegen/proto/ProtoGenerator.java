@@ -64,7 +64,7 @@ public final class ProtoGenerator {
 
         List<ProtoField> fields = new ArrayList<>();
         for (Col c : tm.cols()) {
-            boolean nullable = c.nullable() != DatabaseMetaData.columnNoNulls;
+            boolean nullable = c.nullable();
             boolean isPk = tm.pkColsUpper().contains(c.colName().toUpperCase(Locale.ROOT));
 
             ProtoType pt = mapSqlTypeToProto(c.sqlType());
@@ -103,7 +103,7 @@ public final class ProtoGenerator {
         for (ProtoField f : fields) {
             sb.append("  // DB: ").append(f.col.typeName());
             if (f.isPk) sb.append(" (PK)");
-            if ("YES".equalsIgnoreCase(f.col.isAutoIncrement())) sb.append(" (AI)");
+            if (f.col.autoIncrement()) sb.append(" (AI)");
             if (f.enumBinding != null) {
                 sb.append("\n  // Enum: ").append(f.enumBinding.enumJavaSimple())
                         .append(" (lookup=").append(f.enumBinding.lookupNullableMethod())

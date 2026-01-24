@@ -88,7 +88,7 @@ public final class ProtoMapperGenerator {
             String prop = Naming.sanitizeJavaIdentifier(Naming.toFieldName(c.colName()));
             String cap = Naming.capitalize(prop);
 
-            boolean nullable = c.nullable() != DatabaseMetaData.columnNoNulls;
+            boolean nullable = c.nullable();
 
             var jt = TypeMappings.mapSqlTypeToJava(c.sqlType(), null);
             var pt = TypeMappings.mapSqlTypeToProto(c.sqlType());

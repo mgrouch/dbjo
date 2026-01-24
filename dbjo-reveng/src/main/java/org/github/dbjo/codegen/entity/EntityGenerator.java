@@ -74,7 +74,7 @@ public final class EntityGenerator {
         for (Field f : fields) {
             sb.append("  /** DB: ").append(f.col.typeName());
             if (f.isPk) sb.append(" (PK)");
-            if ("YES".equalsIgnoreCase(f.col.isAutoIncrement())) sb.append(" (AI)");
+            if (f.col.autoIncrement()) sb.append(" (AI)");
             sb.append(" */\n");
             sb.append("  private ").append(f.javaType).append(" ").append(f.name).append(";\n\n");
         }
@@ -183,7 +183,7 @@ public final class EntityGenerator {
         for (MetaProp p : props) {
             sb.append("  /** DB: ").append(p.col.typeName());
             if (p.isPk) sb.append(" (PK)");
-            if ("YES".equalsIgnoreCase(p.col.isAutoIncrement())) sb.append(" (AI)");
+            if (p.col.autoIncrement()) sb.append(" (AI)");
             sb.append(" */\n");
             sb.append("  public static final PropertyMeta<").append(beanClass).append(", ").append(p.javaType).append("> ")
                     .append(p.constName).append(" = new PropertyMeta<>(")
