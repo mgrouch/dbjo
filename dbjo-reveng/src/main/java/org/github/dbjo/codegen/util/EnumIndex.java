@@ -211,21 +211,14 @@ public final class EnumIndex {
         return this;
     }
 
-    /** Add/replace one override programmatically. */
-    public EnumIndex putOverride(OverrideSpec spec) {
+    /**
+     * Add/replace one override programmatically.
+     */
+    public void putOverride(OverrideSpec spec) {
         Objects.requireNonNull(spec, "spec");
         String k = columnKey(spec.tableSchema(), spec.tableName(), spec.columnName());
         overrides.put(k, spec);
         bindingCache.clear();
-        return this;
-    }
-
-    /**
-     * Generator-facing resolver (recommended): explicit override only.
-     * Returns null if not overridden.
-     */
-    public Binding find(String tableSchema, String tableName, String columnName, int columnSqlType) {
-        return find(tableSchema, tableName, columnName, columnSqlType, false);
     }
 
     /**
@@ -470,14 +463,13 @@ public final class EnumIndex {
 
     public static String stripEnumSuffix(String tableName) {
         if (tableName == null) return "";
-        String n = tableName;
-        String low = n.toLowerCase(Locale.ROOT);
+        String low = tableName.toLowerCase(Locale.ROOT);
 
-        if (low.endsWith("_enum")) return n.substring(0, n.length() - 5);
-        if (n.endsWith("_ENUM")) return n.substring(0, n.length() - 5);
-        if (n.endsWith("Enum")) return n.substring(0, n.length() - 4);
+        if (low.endsWith("_enum")) return tableName.substring(0, tableName.length() - 5);
+        if (tableName.endsWith("_ENUM")) return tableName.substring(0, tableName.length() - 5);
+        if (tableName.endsWith("Enum")) return tableName.substring(0, tableName.length() - 4);
 
-        return n;
+        return tableName;
     }
 
     private static String enumPropertyNameForColumn(String col) {
