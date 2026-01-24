@@ -98,21 +98,10 @@ public final class DbIntrospector {
         return cols;
     }
 
-    private static Set<String> getPrimaryKeyColumns(DatabaseMetaData meta, String schema, String table) throws SQLException {
-        Set<String> pk = new HashSet<>();
-        try (ResultSet rs = meta.getPrimaryKeys(null, schema, table)) {
-            while (rs.next()) {
-                String col = rs.getString("COLUMN_NAME");
-                if (col != null) pk.add(col.toUpperCase(Locale.ROOT));
-            }
-        }
-        return pk;
-    }
-
     private static List<IndexModel> listIndexes(DatabaseMetaData meta, String schema, String table) throws SQLException {
-        // indexName -> (unique?, ordinal->colName)
-        class Agg {
-            boolean unique = false;
+        // indexName -> aggregate
+        final class Agg {
+            Boolean unique = null; // set on first row
             final Map<Integer, String> colsByOrd = new TreeMap<>();
         }
 
@@ -128,26 +117,54 @@ public final class DbIntrospector {
                 int ord = rs.getInt("ORDINAL_POSITION");
 
                 if (idxName == null || idxName.isBlank()) continue;
-                if (colName == null || colName.isBlank()) continue;
+                if (colName == null || colName.isBlank()) continue; // expression / function index -> no column name
                 if (ord <= 0) ord = 1;
 
-                boolean nonUnique = rs.getBoolean("NON_UNIQUE");
+                // NON_UNIQUE can be NULL on some drivers; treat NULL as "non-unique" (safer)
+                boolean nonUnique;
+                try {
+                    nonUnique = rs.getBoolean("NON_UNIQUE");
+                    if (rs.wasNull()) nonUnique = true;
+                } catch (SQLException ex) {
+                    // fallback if driver is weird
+                    nonUnique = true;
+                }
                 boolean unique = !nonUnique;
 
                 Agg agg = map.computeIfAbsent(idxName, k -> new Agg());
-                agg.unique = agg.unique || unique; // if any row says unique, treat as unique
+
+                if (agg.unique == null) {
+                    agg.unique = unique; // first row decides
+                } else if (agg.unique && !unique) {
+                    // disagreement -> force non-unique (safe default)
+                    agg.unique = false;
+                }
+
                 agg.colsByOrd.put(ord, colName);
             }
         }
 
         List<IndexModel> out = new ArrayList<>(map.size());
         for (var e : map.entrySet()) {
-            List<String> cols = new ArrayList<>(e.getValue().colsByOrd.values());
-            out.add(new IndexModel(e.getKey(), e.getValue().unique, cols));
+            Agg a = e.getValue();
+            boolean unique = Boolean.TRUE.equals(a.unique);
+            List<String> cols = new ArrayList<>(a.colsByOrd.values());
+            out.add(new IndexModel(e.getKey(), unique, cols));
         }
 
         out.sort(Comparator.comparing(IndexModel::indexName, String.CASE_INSENSITIVE_ORDER));
         return out;
+    }
+
+    private static Set<String> getPrimaryKeyColumns(DatabaseMetaData meta, String schema, String table) throws SQLException {
+        Set<String> pk = new HashSet<>();
+        try (ResultSet rs = meta.getPrimaryKeys(null, schema, table)) {
+            while (rs.next()) {
+                String col = rs.getString("COLUMN_NAME");
+                if (col != null) pk.add(col.toUpperCase(Locale.ROOT));
+            }
+        }
+        return pk;
     }
 
     private static boolean isSystemSchema(String schema) {
