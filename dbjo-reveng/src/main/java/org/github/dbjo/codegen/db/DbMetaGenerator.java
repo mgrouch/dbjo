@@ -61,11 +61,11 @@ public final class DbMetaGenerator {
         }
 
         List<Col> insCols = new ArrayList<>();
-        for (Col c : cols) if (!"YES".equalsIgnoreCase(c.isAutoIncrement())) insCols.add(c);
+        for (Col c : cols) if (!c.autoIncrement()) insCols.add(c);
 
         List<Col> updCols = new ArrayList<>();
         for (Col c : cols) {
-            if ("YES".equalsIgnoreCase(c.isAutoIncrement())) continue;
+            if (c.autoIncrement()) continue;
             if (c.colName() != null && pkUpper.contains(c.colName().toUpperCase(Locale.ROOT))) continue;
             updCols.add(c);
         }
@@ -135,7 +135,7 @@ public final class DbMetaGenerator {
             String prop = Naming.sanitizeJavaIdentifier(Naming.toFieldName(c.colName()));
             String cap  = Naming.capitalize(prop);
 
-            boolean nullable = c.nullable() != DatabaseMetaData.columnNoNulls;
+            boolean nullable = c.nullable();
 
             EnumOverrideIndex.Binding eb = (enumOverrides == null) ? null : enumOverrides.find(schema, table, c.colName());
             if (eb != null) {

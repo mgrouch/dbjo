@@ -37,7 +37,7 @@ public final class DbSchemaGenerator {
     public int generateAll(List<TableModel> tables) throws IOException {
         Objects.requireNonNull(tables, "tables");
 
-        final String tablesPkg = schemaPkg + ".tables";
+        String tablesPkg = schemaPkg + ".tables";
         validatePackageName(tablesPkg, "tablesPkg");
 
         Path schemaOutDir = outJavaDir.resolve(schemaPkg.replace('.', '/'));
@@ -45,7 +45,7 @@ public final class DbSchemaGenerator {
         Files.createDirectories(schemaOutDir);
         Files.createDirectories(tablesOutDir);
 
-        // deterministic order
+        // deterministic ordering
         List<TableModel> sorted = new ArrayList<>(tables);
         sorted.sort(Comparator
                 .comparing((TableModel tm) -> nz(tm == null || tm.table() == null ? null : tm.table().schema())
@@ -53,7 +53,7 @@ public final class DbSchemaGenerator {
                 .thenComparing(tm -> nz(tm == null || tm.table() == null ? null : tm.table().table())
                         .toLowerCase(Locale.ROOT)));
 
-        // Generate per-table classes
+        // per-table classes
         List<String> tableClassFqns = new ArrayList<>();
         for (TableModel tm : sorted) {
             if (tm == null || tm.table() == null) continue;
@@ -71,13 +71,13 @@ public final class DbSchemaGenerator {
             FilesUtil.writeString(outFile, src, overwrite);
         }
 
-        // Generate registry
+        // registry
         String schemaCls = "DbSchema";
         String schemaSrc = renderSchemaRegistry(schemaPkg, schemaCls, tableClassFqns);
         Path schemaFile = schemaOutDir.resolve(schemaCls + ".java");
         FilesUtil.writeString(schemaFile, schemaSrc, overwrite);
 
-        return tableClassFqns.size() + 1; // + registry
+        return tableClassFqns.size() + 1;
     }
 
     // ------------------------------------------------------------
@@ -93,15 +93,12 @@ public final class DbSchemaGenerator {
         Set<String> pk = (tm.pkColsUpper() == null) ? Set.of() : tm.pkColsUpper();
         List<IndexModel> idx = (tm.indexes() == null) ? List.of() : tm.indexes();
 
-        // Ensure stable output for cols (by pos)
         List<Col> colsSorted = new ArrayList<>(cols);
         colsSorted.sort(Comparator.comparingInt(Col::pos));
 
-        // Stable PK order in emitted Set: lexical
         List<String> pkSorted = new ArrayList<>(pk);
         pkSorted.sort(String.CASE_INSENSITIVE_ORDER);
 
-        // Stable index order (by name)
         List<IndexModel> idxSorted = new ArrayList<>(idx);
         idxSorted.sort(Comparator.comparing(IndexModel::indexName, String.CASE_INSENSITIVE_ORDER));
 
@@ -120,11 +117,9 @@ public final class DbSchemaGenerator {
 
         sb.append("    private ").append(cls).append("() {}\n\n");
 
-        // REF
         sb.append("    public static final TableRef REF = new TableRef(")
                 .append(strOrNull(schema)).append(", ").append(strOrNull(table)).append(");\n\n");
 
-        // COLS
         sb.append("    public static final List<Col> COLS = List.of(\n");
         for (int i = 0; i < colsSorted.size(); i++) {
             Col c = colsSorted.get(i);
@@ -133,7 +128,6 @@ public final class DbSchemaGenerator {
         }
         sb.append("    );\n\n");
 
-        // PK
         sb.append("    public static final Set<String> PK_COLS_UPPER = ");
         if (pkSorted.isEmpty()) {
             sb.append("Set.of();\n\n");
@@ -146,7 +140,6 @@ public final class DbSchemaGenerator {
             sb.append(");\n\n");
         }
 
-        // INDEXES
         sb.append("    public static final List<IndexModel> INDEXES = ");
         if (idxSorted.isEmpty()) {
             sb.append("List.of();\n\n");
@@ -159,7 +152,6 @@ public final class DbSchemaGenerator {
             sb.append("    );\n\n");
         }
 
-        // MODEL
         sb.append("    public static final TableModel MODEL = new TableModel(\n");
         sb.append("            REF,\n");
         sb.append("            COLS,\n");
@@ -187,7 +179,6 @@ public final class DbSchemaGenerator {
         sb.append("public final class ").append(cls).append(" {\n\n");
 
         sb.append("    public static final ").append(cls).append(" INSTANCE = new ").append(cls).append("();\n\n");
-
         sb.append("    public final List<TableModel> tables;\n");
         sb.append("    private final Map<String, TableModel> byKey;\n\n");
 
@@ -223,21 +214,29 @@ public final class DbSchemaGenerator {
         sb.append("    }\n\n");
 
         sb.append("    private static String nz(String s) { return (s == null) ? \"\" : s; }\n");
-
         sb.append("}\n");
         return sb.toString();
     }
 
     private static String renderCol(Col c) {
+        // sqlType is numeric int (java.sql.Types)
+        String sqlTypeExpr = String.valueOf(c.sqlType());
+
+        String nullabilityExpr = (c.nullability() == null)
+                ? "Nullability.UNKNOWN"
+                : "Nullability." + c.nullability().name();
+
+        String autoIncExpr = c.autoIncrement() ? "true" : "false";
+
         return "new Col("
                 + c.pos() + ", "
                 + strOrNull(c.colName()) + ", "
-                + c.sqlType() + ", "
+                + sqlTypeExpr + ", "
                 + strOrNull(c.typeName()) + ", "
                 + c.size() + ", "
                 + c.scale() + ", "
-                + c.nullable() + ", "
-                + strOrNull(c.isAutoIncrement()) + ", "
+                + nullabilityExpr + ", "
+                + autoIncExpr + ", "
                 + strOrNull(c.defaultValue())
                 + ")";
     }
@@ -277,7 +276,6 @@ public final class DbSchemaGenerator {
         if (cls == null || cls.isBlank()) cls = "X";
         if (!Character.isJavaIdentifierStart(cls.charAt(0))) cls = "_" + cls;
 
-        // sanitize remaining chars just in case Naming.toClassName ever changes behavior
         StringBuilder b = new StringBuilder(cls.length());
         for (int i = 0; i < cls.length(); i++) {
             char ch = cls.charAt(i);
@@ -285,7 +283,7 @@ public final class DbSchemaGenerator {
         }
         cls = b.toString();
 
-        if (JAVA_KEYWORDS.contains(cls.toLowerCase(Locale.ROOT))) cls = cls + "X";
+        if (Naming.JAVA_KEYWORDS.contains(cls.toLowerCase(Locale.ROOT))) cls = cls + "X";
         return cls;
     }
 
@@ -312,8 +310,9 @@ public final class DbSchemaGenerator {
         String[] parts = pkg.split("\\.");
         for (String p : parts) {
             if (p.isEmpty()) throw new IllegalArgumentException("Invalid " + fieldName + ": " + pkg);
+
             String pl = p.toLowerCase(Locale.ROOT);
-            if (JAVA_KEYWORDS.contains(pl)) {
+            if (Naming.JAVA_KEYWORDS.contains(pl)) {
                 throw new IllegalArgumentException("Invalid " + fieldName + " '" + pkg + "': segment '" + p + "' is a Java keyword");
             }
             if (!Character.isJavaIdentifierStart(p.charAt(0))) {
@@ -326,13 +325,4 @@ public final class DbSchemaGenerator {
             }
         }
     }
-
-    private static final Set<String> JAVA_KEYWORDS = Set.of(
-            "abstract","assert","boolean","break","byte","case","catch","char","class","const",
-            "continue","default","do","double","else","enum","extends","final","finally","float",
-            "for","goto","if","implements","import","instanceof","int","interface","long","native",
-            "new","package","private","protected","public","return","short","static","strictfp",
-            "super","switch","synchronized","this","throw","throws","transient","try","void",
-            "volatile","while","true","false","null","var","record","sealed","permits","non-sealed","yield"
-    );
 }

@@ -3,6 +3,7 @@ package org.github.dbjo.codegen.db;
 import org.github.dbjo.codegen.Config;
 import org.github.dbjo.meta.db.Col;
 import org.github.dbjo.meta.db.IndexModel;
+import org.github.dbjo.meta.db.Nullability;
 import org.github.dbjo.meta.db.TableModel;
 import org.github.dbjo.meta.db.TableRef;
 
@@ -81,15 +82,23 @@ public final class DbIntrospector {
         List<Col> cols = new ArrayList<>();
         try (ResultSet crs = meta.getColumns(null, schema, table, "%")) {
             while (crs.next()) {
+                int sqlType = crs.getInt("DATA_TYPE"); // keep numeric (java.sql.Types)
+
+                int nullableCode = crs.getInt("NULLABLE");
+                Nullability nullability = Nullability.fromJdbcCode(nullableCode);
+
+                String ai = safeGet(crs, "IS_AUTOINCREMENT");
+                boolean autoInc = "YES".equalsIgnoreCase(ai);
+
                 cols.add(new Col(
                         crs.getInt("ORDINAL_POSITION"),
                         crs.getString("COLUMN_NAME"),
-                        crs.getInt("DATA_TYPE"),
+                        sqlType,
                         crs.getString("TYPE_NAME"),
                         crs.getInt("COLUMN_SIZE"),
                         crs.getInt("DECIMAL_DIGITS"),
-                        crs.getInt("NULLABLE"),
-                        safeGet(crs, "IS_AUTOINCREMENT"),
+                        nullability,
+                        autoInc,
                         safeGet(crs, "COLUMN_DEF")
                 ));
             }
@@ -98,10 +107,21 @@ public final class DbIntrospector {
         return cols;
     }
 
+    private static Set<String> getPrimaryKeyColumns(DatabaseMetaData meta, String schema, String table) throws SQLException {
+        Set<String> pk = new HashSet<>();
+        try (ResultSet rs = meta.getPrimaryKeys(null, schema, table)) {
+            while (rs.next()) {
+                String col = rs.getString("COLUMN_NAME");
+                if (col != null) pk.add(col.toUpperCase(Locale.ROOT));
+            }
+        }
+        return pk;
+    }
+
     private static List<IndexModel> listIndexes(DatabaseMetaData meta, String schema, String table) throws SQLException {
-        // indexName -> aggregate
-        final class Agg {
-            Boolean unique = null; // set on first row
+        // indexName -> (unique?, ordinal->colName)
+        class Agg {
+            boolean unique = false;
             final Map<Integer, String> colsByOrd = new TreeMap<>();
         }
 
@@ -117,54 +137,26 @@ public final class DbIntrospector {
                 int ord = rs.getInt("ORDINAL_POSITION");
 
                 if (idxName == null || idxName.isBlank()) continue;
-                if (colName == null || colName.isBlank()) continue; // expression / function index -> no column name
+                if (colName == null || colName.isBlank()) continue;
                 if (ord <= 0) ord = 1;
 
-                // NON_UNIQUE can be NULL on some drivers; treat NULL as "non-unique" (safer)
-                boolean nonUnique;
-                try {
-                    nonUnique = rs.getBoolean("NON_UNIQUE");
-                    if (rs.wasNull()) nonUnique = true;
-                } catch (SQLException ex) {
-                    // fallback if driver is weird
-                    nonUnique = true;
-                }
+                boolean nonUnique = rs.getBoolean("NON_UNIQUE");
                 boolean unique = !nonUnique;
 
                 Agg agg = map.computeIfAbsent(idxName, k -> new Agg());
-
-                if (agg.unique == null) {
-                    agg.unique = unique; // first row decides
-                } else if (agg.unique && !unique) {
-                    // disagreement -> force non-unique (safe default)
-                    agg.unique = false;
-                }
-
+                agg.unique = agg.unique || unique; // if any row says unique, treat as unique
                 agg.colsByOrd.put(ord, colName);
             }
         }
 
         List<IndexModel> out = new ArrayList<>(map.size());
         for (var e : map.entrySet()) {
-            Agg a = e.getValue();
-            boolean unique = Boolean.TRUE.equals(a.unique);
-            List<String> cols = new ArrayList<>(a.colsByOrd.values());
-            out.add(new IndexModel(e.getKey(), unique, cols));
+            List<String> cols = new ArrayList<>(e.getValue().colsByOrd.values());
+            out.add(new IndexModel(e.getKey(), e.getValue().unique, cols));
         }
 
         out.sort(Comparator.comparing(IndexModel::indexName, String.CASE_INSENSITIVE_ORDER));
         return out;
-    }
-
-    private static Set<String> getPrimaryKeyColumns(DatabaseMetaData meta, String schema, String table) throws SQLException {
-        Set<String> pk = new HashSet<>();
-        try (ResultSet rs = meta.getPrimaryKeys(null, schema, table)) {
-            while (rs.next()) {
-                String col = rs.getString("COLUMN_NAME");
-                if (col != null) pk.add(col.toUpperCase(Locale.ROOT));
-            }
-        }
-        return pk;
     }
 
     private static boolean isSystemSchema(String schema) {
