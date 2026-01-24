@@ -91,6 +91,7 @@ public final class DbjoCodegenMojo extends AbstractMojo {
      *   <arg>--beanPkg=org.github.dbjo.rdb.demo.generated.entity</arg>
      *   <arg>--dbMetaPkg=org.github.dbjo.rdb.demo.generated.dbmeta</arg>
      * </args>
+     * @noinspection MismatchedQueryAndUpdateOfCollection
      */
     @Parameter
     private List<String> args;
