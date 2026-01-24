@@ -4,6 +4,7 @@ import org.github.dbjo.codegen.Config;
 import org.github.dbjo.codegen.model.Col;
 import org.github.dbjo.codegen.model.TableModel;
 import org.github.dbjo.codegen.types.TypeMappings;
+import org.github.dbjo.codegen.util.EnumIndex;
 import org.github.dbjo.codegen.util.FilesUtil;
 import org.github.dbjo.codegen.util.Naming;
 
@@ -15,9 +16,15 @@ import java.util.*;
 
 public final class ProtoMapperGenerator {
     private final Config cfg;
+    private final EnumIndex enumIndex; // may be null
 
     public ProtoMapperGenerator(Config cfg) {
-        this.cfg = cfg;
+        this(cfg, null);
+    }
+
+    public ProtoMapperGenerator(Config cfg, EnumIndex enumIndex) {
+        this.cfg = Objects.requireNonNull(cfg, "cfg");
+        this.enumIndex = enumIndex;
     }
 
     public int generateAll(List<TableModel> tables) throws IOException {
@@ -51,6 +58,9 @@ public final class ProtoMapperGenerator {
     ) {
         boolean importBean = beanPkg != null && !beanPkg.equals(mapperPkg);
 
+        String schema = nz(tm.table().schema());
+        String table  = nz(tm.table().table());
+
         Set<String> imports = new TreeSet<>();
         imports.add("org.github.dbjo.rdb.ProtobufPojoCodec");
         if (importBean) imports.add(beanPkg + "." + beanClass);
@@ -62,8 +72,16 @@ public final class ProtoMapperGenerator {
         boolean needSqlTimestamp = false;
         boolean needProtoTimestamp = false;
 
-        record FieldInfo(String prop, String cap, TypeMappings.JavaType jt, TypeMappings.ProtoType pt,
-                         boolean nullable, boolean hasPresence) {}
+        record FieldInfo(
+                String prop,
+                String cap,
+                TypeMappings.JavaType jt,
+                TypeMappings.ProtoType pt,
+                boolean nullable,
+                boolean hasPresence,
+                boolean isEnum,
+                EnumIndex.Binding enumBinding
+        ) {}
         List<FieldInfo> fields = new ArrayList<>();
 
         for (Col c : tm.cols()) {
@@ -75,21 +93,31 @@ public final class ProtoMapperGenerator {
             var jt = TypeMappings.mapSqlTypeToJava(c.sqlType(), null);
             var pt = TypeMappings.mapSqlTypeToProto(c.sqlType());
 
-            boolean protoOptional = nullable && pt.allowOptional(); // scalars/bytes/string
-            boolean hasPresence = pt.isMessage() || protoOptional;  // message fields OR optional scalars
+            boolean protoOptional = cfg.protoExperimentalOptional() && nullable && pt.allowOptional(); // aligned with ProtoGenerator
+            boolean hasPresence = pt.isMessage() || protoOptional;
 
-            fields.add(new FieldInfo(prop, cap, jt, pt, nullable, hasPresence));
+            EnumIndex.Binding eb = (enumIndex == null) ? null : enumIndex.find(schema, table, c.colName());
+            boolean isEnum = eb != null;
 
-            if ("BigDecimal".equals(jt.javaType())) needBigDecimal = true;
-            if ("byte[]".equals(jt.javaType())) needByteString = true;
-            if ("Date".equals(jt.javaType())) needSqlDate = true;
-            if ("Time".equals(jt.javaType())) needSqlTime = true;
+            fields.add(new FieldInfo(prop, cap, jt, pt, nullable, hasPresence, isEnum, eb));
 
-            if ("Timestamp".equals(jt.javaType())) {
-                needSqlTimestamp = true;
-                needProtoTimestamp = true;
+            // imports needed by helper conversions for NON-enum java types
+            if (!isEnum) {
+                if ("BigDecimal".equals(jt.javaType())) needBigDecimal = true;
+                if ("byte[]".equals(jt.javaType())) needByteString = true;
+                if ("Date".equals(jt.javaType())) needSqlDate = true;
+                if ("Time".equals(jt.javaType())) needSqlTime = true;
+                if ("Timestamp".equals(jt.javaType())) {
+                    needSqlTimestamp = true;
+                    needProtoTimestamp = true;
+                }
             }
+
             if ("google.protobuf.Timestamp".equals(pt.protoType())) needProtoTimestamp = true;
+
+            if (isEnum) {
+                imports.add(eb.enumJavaFqn());
+            }
         }
 
         if (needBigDecimal) imports.add("java.math.BigDecimal");
@@ -99,7 +127,7 @@ public final class ProtoMapperGenerator {
         if (needByteString) imports.add("com.google.protobuf.ByteString");
         // IMPORTANT: do NOT import com.google.protobuf.Timestamp (name-clash with java.sql.Timestamp)
 
-        StringBuilder sb = new StringBuilder(6000);
+        StringBuilder sb = new StringBuilder(9000);
         sb.append("package ").append(mapperPkg).append(";\n\n");
         for (String imp : imports) sb.append("import ").append(imp).append(";\n");
         sb.append("\n");
@@ -115,8 +143,14 @@ public final class ProtoMapperGenerator {
 
         for (FieldInfo f : fields) {
             String getter = "pojo.get" + f.cap + "()";
-            String setCall = "b.set" + f.cap + "(" + toProtoExpr(f.jt.javaType(), getter) + ");";
-            sb.append("        if (").append(getter).append(" != null) ").append(setCall).append("\n");
+            if (f.isEnum) {
+                // enum -> key
+                String keyExpr = getter + "." + f.enumBinding.keyGetterMethod() + "()";
+                sb.append("        if (").append(getter).append(" != null) b.set").append(f.cap).append("(").append(keyExpr).append(");\n");
+            } else {
+                String setCall = "b.set" + f.cap + "(" + toProtoExpr(f.jt.javaType(), getter) + ");";
+                sb.append("        if (").append(getter).append(" != null) ").append(setCall).append("\n");
+            }
         }
 
         sb.append("\n        return b.build();\n");
@@ -130,8 +164,34 @@ public final class ProtoMapperGenerator {
         for (FieldInfo f : fields) {
             String setter = "u.set" + f.cap;
             String protoGet = "p.get" + f.cap + "()";
-            String rhs = fromProtoExpr(f.jt.javaType(), f.pt.protoType(), protoGet);
 
+            if (f.isEnum) {
+                String lookupNullable = f.enumBinding.enumJavaSimple() + "." + f.enumBinding.lookupNullableMethod();
+                String lookupNonNull = f.enumBinding.enumJavaSimple() + "." + nonNullLookupMethod(f.enumBinding.lookupNullableMethod());
+
+                if (f.nullable) {
+                    if (f.hasPresence) {
+                        sb.append("        ").append(setter).append("(p.has").append(f.cap).append("() ? ")
+                                .append(lookupNullable).append("(").append(protoGet).append(") : null);\n");
+                    } else {
+                        String hasValueExpr = protoHasValueExpr(f.pt.protoType(), protoGet);
+                        if (hasValueExpr != null) {
+                            sb.append("        ").append(setter).append("(").append(hasValueExpr)
+                                    .append(" ? ").append(lookupNullable).append("(").append(protoGet).append(") : null);\n");
+                        } else {
+                            // cannot represent null reliably -> best effort
+                            sb.append("        ").append(setter).append("(").append(lookupNullable).append("(").append(protoGet).append("));\n");
+                        }
+                    }
+                } else {
+                    sb.append("        ").append(setter).append("(").append(lookupNonNull).append("(").append(protoGet).append("));\n");
+                }
+
+                continue;
+            }
+
+            // non-enum: existing mapping
+            String rhs = fromProtoExpr(f.jt.javaType(), protoGet);
             if (f.nullable && f.hasPresence) {
                 sb.append("        ").append(setter).append("(p.has").append(f.cap).append("() ? ").append(rhs).append(" : null);\n");
             } else {
@@ -172,7 +232,7 @@ public final class ProtoMapperGenerator {
         };
     }
 
-    private static String fromProtoExpr(String javaType, String protoType, String protoGetExpr) {
+    private static String fromProtoExpr(String javaType, String protoGetExpr) {
         return switch (javaType) {
             case "Short" -> "(short) " + protoGetExpr;
             case "byte[]" -> protoGetExpr + ".toByteArray()";
@@ -183,4 +243,30 @@ public final class ProtoMapperGenerator {
             default -> protoGetExpr;
         };
     }
+
+    private static String nonNullLookupMethod(String nullableMethod) {
+        if (nullableMethod == null) return "of";
+        if (nullableMethod.endsWith("Nullable")) {
+            return nullableMethod.substring(0, nullableMethod.length() - "Nullable".length());
+        }
+        // fallback: assume already non-null lookup
+        return nullableMethod;
+    }
+
+    /**
+     * When proto field has no presence (not optional, not message), we can sometimes infer "unset" from default.
+     * Returns an expression like "!p.getX().isEmpty()" or "p.getX() != 0", else null if not safely representable.
+     */
+    private static String protoHasValueExpr(String protoType, String protoGetExpr) {
+        if (protoType == null) return null;
+        return switch (protoType) {
+            case "string" -> "!" + protoGetExpr + ".isEmpty()";
+            case "bytes" -> protoGetExpr + ".size() != 0";
+            case "int32", "int64", "uint32", "uint64", "sint32", "sint64",
+                    "fixed32", "fixed64", "sfixed32", "sfixed64" -> protoGetExpr + " != 0";
+            default -> null; // bool/float/double can't represent null reliably without optional
+        };
+    }
+
+    private static String nz(String s) { return s == null ? "" : s; }
 }

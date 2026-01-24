@@ -3,6 +3,7 @@ package org.github.dbjo.codegen.proto;
 import org.github.dbjo.codegen.Config;
 import org.github.dbjo.codegen.model.Col;
 import org.github.dbjo.codegen.model.TableModel;
+import org.github.dbjo.codegen.util.EnumIndex;
 import org.github.dbjo.codegen.util.FilesUtil;
 import org.github.dbjo.codegen.util.Naming;
 
@@ -15,9 +16,15 @@ import java.util.*;
 
 public final class ProtoGenerator {
     private final Config cfg;
+    private final EnumIndex enumIndex; // may be null
 
     public ProtoGenerator(Config cfg) {
-        this.cfg = cfg;
+        this(cfg, null);
+    }
+
+    public ProtoGenerator(Config cfg, EnumIndex enumIndex) {
+        this.cfg = Objects.requireNonNull(cfg, "cfg");
+        this.enumIndex = enumIndex; // optional
     }
 
     public List<Path> generateAll(List<TableModel> tables) throws IOException {
@@ -31,7 +38,12 @@ public final class ProtoGenerator {
         List<Path> out = new ArrayList<>();
         for (TableModel tm : tables) {
             String msgName = Naming.toClassName(tm.table().table());
-            String fileName = Naming.toLowerSnake(tm.table().schema()) + "_" + Naming.toLowerSnake(tm.table().table()) + ".proto";
+
+            String schema = nz(tm.table().schema());
+            String schemaPart = schema.isBlank() ? "default" : schema;
+
+            String fileName =
+                    Naming.toLowerSnake(schemaPart) + "_" + Naming.toLowerSnake(tm.table().table()) + ".proto";
             Path protoFile = cfg.protoOutProto().resolve(fileName);
 
             String src = renderProtoFile(tm, msgName);
@@ -47,6 +59,9 @@ public final class ProtoGenerator {
     private String renderProtoFile(TableModel tm, String messageName) {
         boolean needTimestamp = false;
 
+        String schema = nz(tm.table().schema());
+        String table = nz(tm.table().table());
+
         List<ProtoField> fields = new ArrayList<>();
         for (Col c : tm.cols()) {
             boolean nullable = c.nullable() != DatabaseMetaData.columnNoNulls;
@@ -55,15 +70,22 @@ public final class ProtoGenerator {
             ProtoType pt = mapSqlTypeToProto(c.sqlType());
             if (pt.needsTimestamp) needTimestamp = true;
 
-            String fieldName = Naming.toLowerSnake(Naming.sanitizeProtoIdentifier(Naming.toFieldName(c.colName())));
+            String fieldName = Naming.toLowerSnake(
+                    Naming.sanitizeProtoIdentifier(Naming.toFieldName(c.colName()))
+            );
             int fieldNumber = Math.max(1, c.pos());
 
-            boolean isOptional = nullable && pt.allowOptional; // no optional for message types (Timestamp)
+            // IMPORTANT: only emit proto3 optional if cfg says so.
+            boolean protoOptionalEnabled = cfg.protoExperimentalOptional();
+            boolean isOptional = protoOptionalEnabled && nullable && pt.allowOptional;
 
-            fields.add(new ProtoField(fieldName, pt.protoType, isOptional, fieldNumber, c, isPk));
+            EnumIndex.Binding eb = (enumIndex == null) ? null : enumIndex.find(schema, table, c.colName());
+
+            fields.add(new ProtoField(fieldName, pt.protoType, isOptional, fieldNumber, c, isPk, eb));
         }
 
-        String protoPkg = cfg.protoPkgBase() + "." + Naming.toLowerSnake(tm.table().schema());
+        String schemaPart = schema.isBlank() ? "default" : schema;
+        String protoPkg = cfg.protoPkgBase() + "." + Naming.toLowerSnake(schemaPart);
 
         StringBuilder sb = new StringBuilder(12_000);
         sb.append("syntax = \"proto3\";\n\n");
@@ -75,13 +97,18 @@ public final class ProtoGenerator {
 
         if (needTimestamp) sb.append("import \"google/protobuf/timestamp.proto\";\n\n");
 
-        sb.append("// DB: ").append(tm.table().schema()).append(".").append(tm.table().table()).append("\n");
+        sb.append("// DB: ").append(schemaPart).append(".").append(table).append("\n");
         sb.append("message ").append(messageName).append(" {\n");
 
         for (ProtoField f : fields) {
             sb.append("  // DB: ").append(f.col.typeName());
             if (f.isPk) sb.append(" (PK)");
             if ("YES".equalsIgnoreCase(f.col.isAutoIncrement())) sb.append(" (AI)");
+            if (f.enumBinding != null) {
+                sb.append("\n  // Enum: ").append(f.enumBinding.enumJavaSimple())
+                        .append(" (lookup=").append(f.enumBinding.lookupNullableMethod())
+                        .append(", keyGetter=").append(f.enumBinding.keyGetterMethod()).append(")");
+            }
             sb.append("\n");
 
             sb.append("  ");
@@ -102,12 +129,9 @@ public final class ProtoGenerator {
             case Types.FLOAT, Types.REAL -> ProtoType.scalar("float");
             case Types.DOUBLE -> ProtoType.scalar("double");
 
-            case Types.DECIMAL, Types.NUMERIC -> ProtoType.scalar("string"); // portable
+            case Types.DECIMAL, Types.NUMERIC, Types.CHAR, Types.VARCHAR, Types.LONGVARCHAR, Types.NCHAR, Types.NVARCHAR, Types.LONGNVARCHAR -> ProtoType.scalar("string"); // portable
 
             case Types.BIT, Types.BOOLEAN -> ProtoType.scalar("bool");
-
-            case Types.CHAR, Types.VARCHAR, Types.LONGVARCHAR,
-                    Types.NCHAR, Types.NVARCHAR, Types.LONGNVARCHAR -> ProtoType.scalar("string");
 
             case Types.BINARY, Types.VARBINARY, Types.LONGVARBINARY, Types.BLOB -> ProtoType.scalar("bytes");
 
@@ -126,5 +150,15 @@ public final class ProtoGenerator {
         static ProtoType message(String t, boolean ts) { return new ProtoType(t, false, ts); }
     }
 
-    private record ProtoField(String name, String protoType, boolean optional, int number, Col col, boolean isPk) {}
+    private record ProtoField(
+            String name,
+            String protoType,
+            boolean optional,
+            int number,
+            Col col,
+            boolean isPk,
+            EnumIndex.Binding enumBinding
+    ) {}
+
+    private static String nz(String s) { return s == null ? "" : s; }
 }

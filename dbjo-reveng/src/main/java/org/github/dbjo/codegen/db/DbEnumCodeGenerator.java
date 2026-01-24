@@ -8,33 +8,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.*;
-import java.sql.Types;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.OffsetDateTime;
 import java.util.*;
 
-/**
- * Generates Java enum classes from database "enum tables".
- *
- * Enum table naming conventions supported:
- *   - *_enum (case-insensitive)
- *   - *_ENUM
- *   - *Enum where the preceding character is lowercase (e.g. "countryEnum")
- *
- * Foreign keys from one enum table to another become enum-typed fields in the referencing enum.
- *
- * Assumptions:
- *   - enum tables have a SINGLE-COLUMN primary key
- *   - rows in enum tables are stable lookup values
- */
 public final class DbEnumCodeGenerator {
-
-    private static final Set<String> ENUM_RESERVED_METHODS = Set.of(
-            // java.lang.Enum instance methods / commonly generated names to avoid
-            "name", "ordinal", "compareTo", "equals", "hashCode", "toString",
-            "getDeclaringClass", "describeConstable"
-    );
 
     private final Config cfg;
 
@@ -45,79 +21,49 @@ public final class DbEnumCodeGenerator {
     public int generateAll(Connection con) throws SQLException, IOException {
         Objects.requireNonNull(con, "con");
 
-        if (!cfg.enumEnabled()) {
-            System.out.println("DbEnumCodeGenerator: disabled (enumEnabled=false)");
+        if (!cfg.enumEnabled() && !cfg.runMode().runEnums()) {
             return 0;
         }
 
         validatePackageName(cfg.enumPkg(), "enumPkg");
 
         DatabaseMetaData md = con.getMetaData();
-
         String quote = md.getIdentifierQuoteString();
         if (quote == null) quote = "\"";
         quote = quote.trim();
         if (quote.isEmpty()) quote = "\"";
 
-        // 1) Discover enum tables
         List<TableRef> enumTables = discoverEnumTables(md, con.getCatalog(), cfg.enumIncludeViews());
+        if (enumTables.isEmpty()) return 0;
 
-        if (enumTables.isEmpty()) {
-            System.out.println("DbEnumCodeGenerator: no enum tables found.");
-            return 0;
-        }
+        Map<String, TableRef> byKey = new HashMap<>();
+        for (TableRef t : enumTables) byKey.put(t.key(), t);
 
-        System.out.println("DbEnumCodeGenerator: discovered enum tables: " + enumTables.size());
-        for (TableRef t : enumTables) {
-            System.out.println("  - " + t.fqn());
-        }
-
-        // Map for quick lookup by (schema, name) case-insensitive
-        Map<String, TableRef> enumTableByKey = new HashMap<>();
-        for (TableRef t : enumTables) {
-            enumTableByKey.put(t.key(), t);
-        }
-
-        // 2) Build models + FK relationships
         Map<String, EnumTableModel> models = new HashMap<>();
         for (TableRef t : enumTables) {
-            EnumTableModel m = introspectEnumTable(md, t, enumTableByKey);
+            EnumTableModel m = introspectEnumTable(md, t, byKey);
             if (m != null) models.put(t.key(), m);
         }
+        if (models.isEmpty()) return 0;
 
-        if (models.isEmpty()) {
-            System.out.println("DbEnumCodeGenerator: all discovered enum tables were skipped (see logs above).");
-            return 0;
-        }
-
-        // 3) Topo-sort by enum FK dependencies (so referenced enums generated first)
         List<EnumTableModel> sorted = topoSort(models);
 
-        // 4) Generate
         Path pkgDir = cfg.codegenOutJava().resolve(cfg.enumPkg().replace('.', '/'));
         Files.createDirectories(pkgDir);
 
         int count = 0;
         for (EnumTableModel m : sorted) {
-            String src = renderEnum(con, md, m, quote);
+            String src = renderEnum(con, m, quote);
             Path outFile = pkgDir.resolve(m.className + ".java");
-
             FilesUtil.writeString(outFile, src, cfg.overwrite());
-
-            System.out.println("DbEnumCodeGenerator: wrote " + outFile);
             count++;
         }
-
         return count;
     }
 
-    // ----------------------------
-    // Discovery + Introspection
-    // ----------------------------
+    // ---------- discovery ----------
 
-    private static List<TableRef> discoverEnumTables(DatabaseMetaData md, String catalog, boolean includeViews)
-            throws SQLException {
-
+    private static List<TableRef> discoverEnumTables(DatabaseMetaData md, String catalog, boolean includeViews) throws SQLException {
         List<TableRef> out = new ArrayList<>();
         String[] types = includeViews ? new String[]{"TABLE", "VIEW"} : new String[]{"TABLE"};
 
@@ -126,54 +72,38 @@ public final class DbEnumCodeGenerator {
                 String schema = rs.getString("TABLE_SCHEM");
                 String name = rs.getString("TABLE_NAME");
                 if (name == null) continue;
-
-                if (isEnumTableName(name)) {
-                    out.add(new TableRef(catalog, schema, name));
-                }
+                if (isEnumTableName(name)) out.add(new TableRef(catalog, schema, name));
             }
         }
 
         out.sort(Comparator
                 .comparing((TableRef t) -> nz(t.schema), String.CASE_INSENSITIVE_ORDER)
                 .thenComparing(t -> t.name, String.CASE_INSENSITIVE_ORDER));
-
         return out;
     }
 
     private static boolean isEnumTableName(String tableName) {
         if (tableName == null) return false;
-
-        String n = tableName;
-        String low = n.toLowerCase(Locale.ROOT);
+        String low = tableName.toLowerCase(Locale.ROOT);
 
         if (low.endsWith("_enum")) return true;
-        if (n.endsWith("_ENUM")) return true;
+        if (tableName.endsWith("_ENUM")) return true;
 
-        if (n.endsWith("Enum") && n.length() > 4) {
-            char before = n.charAt(n.length() - 5);
+        if (tableName.endsWith("Enum") && tableName.length() > 4) {
+            char before = tableName.charAt(tableName.length() - 5);
             return Character.isLowerCase(before);
         }
-
         return false;
     }
 
-    private EnumTableModel introspectEnumTable(DatabaseMetaData md, TableRef t, Map<String, TableRef> enumTableByKey)
-            throws SQLException {
-
+    private EnumTableModel introspectEnumTable(DatabaseMetaData md, TableRef t, Map<String, TableRef> enumTableByKey) throws SQLException {
         List<Col> cols = readColumns(md, t);
-        if (cols.isEmpty()) {
-            System.out.println("DbEnumCodeGenerator: SKIP " + t.fqn() + " (no columns)");
-            return null;
-        }
+        if (cols.isEmpty()) return null;
 
-        List<String> pkCols = readPrimaryKeyColumns(md, t);
-        if (pkCols.size() != 1) {
-            System.out.println("DbEnumCodeGenerator: SKIP " + t.fqn()
-                    + " (expected 1-column PK, got " + pkCols.size() + ": " + pkCols + ")");
-            return null;
-        }
-        String pk = pkCols.get(0);
+        String pk = readSinglePk(md, t);
+        if (pk == null) return null;
 
+        // FK->enum
         Map<String, FkRef> fkToEnum = new HashMap<>();
         try (ResultSet rs = md.getImportedKeys(t.catalog, t.schema, t.name)) {
             while (rs.next()) {
@@ -181,22 +111,21 @@ public final class DbEnumCodeGenerator {
                 String pkTable = rs.getString("PKTABLE_NAME");
                 String pkSchema = rs.getString("PKTABLE_SCHEM");
                 String pkCol = rs.getString("PKCOLUMN_NAME");
-
                 if (fkCol == null || pkTable == null) continue;
 
-                TableRef pkRef = enumTableByKey.get(TableRef.key(t.catalog, pkSchema, pkTable));
+                TableRef pkRef = enumTableByKey.get(TableRef.key(pkSchema, pkTable));
                 if (pkRef == null) continue;
-
-                String refClass = toEnumClassName(pkRef.name);
-                fkToEnum.put(fkCol, new FkRef(pkRef, pkCol, refClass));
+                fkToEnum.put(fkCol, new FkRef(pkRef, pkCol, toEnumClassName(pkRef.name)));
             }
         }
 
-        String className = toEnumClassName(t.name);
-
         cols.sort(Comparator.comparingInt(c -> c.ordinal));
 
-        return new EnumTableModel(t, className, pk, cols, fkToEnum);
+        // unique single-cols (for byX lookup maps)
+        Set<String> uniqueSingleColsUpper = readUniqueSingleCols(md, t);
+        uniqueSingleColsUpper.add(pk.toUpperCase(Locale.ROOT));
+
+        return new EnumTableModel(t, toEnumClassName(t.name), pk, cols, fkToEnum, uniqueSingleColsUpper);
     }
 
     private static List<Col> readColumns(DatabaseMetaData md, TableRef t) throws SQLException {
@@ -208,25 +137,43 @@ public final class DbEnumCodeGenerator {
                 int nullable = rs.getInt("NULLABLE");
                 int ordinal = rs.getInt("ORDINAL_POSITION");
                 if (name == null) continue;
-
                 cols.add(new Col(name, dataType, nullable == DatabaseMetaData.columnNullable, ordinal));
             }
         }
         return cols;
     }
 
-    private static List<String> readPrimaryKeyColumns(DatabaseMetaData md, TableRef t) throws SQLException {
-        List<PkCol> tmp = new ArrayList<>();
+    private static String readSinglePk(DatabaseMetaData md, TableRef t) throws SQLException {
+        List<String> pkCols = new ArrayList<>();
         try (ResultSet rs = md.getPrimaryKeys(t.catalog, t.schema, t.name)) {
             while (rs.next()) {
                 String name = rs.getString("COLUMN_NAME");
-                short seq = rs.getShort("KEY_SEQ");
-                if (name != null) tmp.add(new PkCol(seq, name));
+                if (name != null) pkCols.add(name);
             }
         }
-        tmp.sort(Comparator.comparingInt(a -> a.seq));
-        List<String> out = new ArrayList<>();
-        for (PkCol p : tmp) out.add(p.name);
+        return pkCols.size() == 1 ? pkCols.get(0) : null;
+    }
+
+    private static Set<String> readUniqueSingleCols(DatabaseMetaData md, TableRef t) throws SQLException {
+        Map<String, List<String>> idxCols = new HashMap<>();
+        Map<String, Boolean> idxUnique = new HashMap<>();
+
+        try (ResultSet rs = md.getIndexInfo(t.catalog, t.schema, t.name, false, false)) {
+            while (rs.next()) {
+                String idx = rs.getString("INDEX_NAME");
+                String col = rs.getString("COLUMN_NAME");
+                boolean nonUnique = rs.getBoolean("NON_UNIQUE");
+                if (idx == null || col == null) continue;
+                idxCols.computeIfAbsent(idx, k -> new ArrayList<>()).add(col);
+                idxUnique.put(idx, !nonUnique);
+            }
+        }
+
+        Set<String> out = new HashSet<>();
+        for (var e : idxCols.entrySet()) {
+            if (!Boolean.TRUE.equals(idxUnique.get(e.getKey()))) continue;
+            if (e.getValue().size() == 1) out.add(e.getValue().get(0).toUpperCase(Locale.ROOT));
+        }
         return out;
     }
 
@@ -244,15 +191,13 @@ public final class DbEnumCodeGenerator {
         Deque<String> q = new ArrayDeque<>();
         Map<String, Integer> indeg = new HashMap<>();
         for (String k : deps.keySet()) indeg.put(k, 0);
-        for (Map.Entry<String, Set<String>> e : deps.entrySet()) {
-            for (String d : e.getValue()) indeg.put(d, indeg.get(d) + 1);
-        }
-        for (Map.Entry<String, Integer> e : indeg.entrySet()) if (e.getValue() == 0) q.add(e.getKey());
+        for (var e : deps.entrySet()) for (String d : e.getValue()) indeg.put(d, indeg.get(d) + 1);
+        for (var e : indeg.entrySet()) if (e.getValue() == 0) q.add(e.getKey());
 
-        List<String> orderKeys = new ArrayList<>();
+        List<String> order = new ArrayList<>();
         while (!q.isEmpty()) {
             String k = q.removeFirst();
-            orderKeys.add(k);
+            order.add(k);
             for (String d : deps.getOrDefault(k, Set.of())) {
                 int v = indeg.get(d) - 1;
                 indeg.put(d, v);
@@ -260,50 +205,44 @@ public final class DbEnumCodeGenerator {
             }
         }
 
-        if (orderKeys.size() != models.size()) {
-            orderKeys = new ArrayList<>(models.keySet());
-            orderKeys.sort(String::compareToIgnoreCase);
+        if (order.size() != models.size()) {
+            order = new ArrayList<>(models.keySet());
+            order.sort(String::compareToIgnoreCase);
         }
 
         List<EnumTableModel> out = new ArrayList<>();
-        for (String k : orderKeys) out.add(models.get(k));
+        for (String k : order) out.add(models.get(k));
         return out;
     }
 
-    // ----------------------------
-    // Rendering
-    // ----------------------------
+    // ---------- render ----------
 
-    private String renderEnum(Connection con, DatabaseMetaData md, EnumTableModel m, String quote) throws SQLException {
+    private String renderEnum(Connection con, EnumTableModel m, String quote) throws SQLException {
         String qTable = qualify(m.table, quote);
 
-        // ORDER BY sort_order if present
+        // ORDER BY sort_order if present using actual column name (avoid quoted "sort_order" vs "SORT_ORDER")
         Col sortCol = cfg.enumOrderBySortOrderIfPresent() ? m.findColumn("sort_order") : null;
 
-        String orderBy;
-        if (sortCol != null) {
-            orderBy = " ORDER BY " + ident(sortCol.name, quote) + " ASC, " + ident(m.pkColumn, quote) + " ASC";
-        } else {
-            orderBy = " ORDER BY " + ident(m.pkColumn, quote) + " ASC";
-        }
+        String orderBy = (sortCol != null)
+                ? " ORDER BY " + ident(sortCol.name, quote) + " ASC, " + ident(m.pkColumn, quote) + " ASC"
+                : " ORDER BY " + ident(m.pkColumn, quote) + " ASC";
 
         String sql = "SELECT * FROM " + qTable + orderBy;
 
         List<Row> rows = new ArrayList<>();
-        try (Statement st = con.createStatement();
-             ResultSet rs = st.executeQuery(sql)) {
+        try (Statement st = con.createStatement(); ResultSet rs = st.executeQuery(sql)) {
             while (rs.next()) rows.add(readRow(rs, m));
         }
 
-        // Build fields and keep names unique + Enum-safe
+        // fields + imports
         List<Field> fields = new ArrayList<>();
         Set<String> imports = new TreeSet<>();
-        Set<String> usedNames = new HashSet<>();
 
         for (Col c : m.columns) {
             boolean isFkEnum = m.fkToEnum.containsKey(c.name) && !c.name.equalsIgnoreCase(m.pkColumn);
 
-            String javaName = uniqueEnumMemberName(c.name, usedNames);
+            String rawField = Naming.toFieldName(c.name);
+            String javaField = avoidEnumMethodName(rawField); // name -> nameInDb, ordinal -> ordinalInDb, etc.
 
             String javaType;
             if (isFkEnum) {
@@ -312,44 +251,36 @@ public final class DbEnumCodeGenerator {
                 javaType = sqlTypeToJavaSimple(c.sqlType, c.nullable, imports);
             }
 
-            fields.add(new Field(c, javaName, javaType, isFkEnum));
+            fields.add(new Field(c, javaField, javaType, isFkEnum));
         }
 
-        // PK type uses raw SQL type
         Col pkCol = m.findColumn(m.pkColumn);
-        if (pkCol == null) throw new SQLException("PK column not found in column list: " + m.pkColumn);
+        if (pkCol == null) throw new SQLException("PK column not found: " + m.pkColumn);
 
-        String pkJavaType = sqlTypeToJavaSimple(pkCol.sqlType, false, imports);
+        Set<String> pkImports = new TreeSet<>();
+        String pkJavaType = sqlTypeToJavaSimple(pkCol.sqlType, false, pkImports);
+        imports.addAll(pkImports);
 
-        // Find generated pk field name (don’t recompute; use actual field)
-        String pkFieldName = null;
-        for (Field f : fields) {
-            if (f.col.name.equalsIgnoreCase(pkCol.name)) {
-                pkFieldName = f.javaName;
-                break;
+        String pkFieldName = avoidEnumMethodName(Naming.toFieldName(pkCol.name));
+        String byIdMapName = "BY_ID";
+
+        // unique lookup columns (single-col unique) => maps + methods
+        List<Col> uniqueCols = new ArrayList<>();
+        for (Col c : m.columns) {
+            if (m.uniqueSingleColsUpper.contains(c.name.toUpperCase(Locale.ROOT))
+                    && !c.name.equalsIgnoreCase(m.pkColumn)) {
+                uniqueCols.add(c);
             }
         }
-        if (pkFieldName == null) throw new SQLException("PK field name not resolved for " + m.table.fqn() + "." + m.pkColumn);
-
-        String byMapName = "BY_" + toUpperSnake(pkCol.name);
 
         StringBuilder sb = new StringBuilder(64_000);
         sb.append("package ").append(cfg.enumPkg()).append(";\n\n");
-
         sb.append("import java.util.*;\n");
-        for (String imp : imports) {
-            if (imp.startsWith("java.util.")) continue;
-            sb.append("import ").append(imp).append(";\n");
-        }
+        for (String imp : imports) if (!imp.startsWith("java.util.")) sb.append("import ").append(imp).append(";\n");
         sb.append("\n");
-
-        sb.append("/**\n");
-        sb.append(" * Auto-generated from table ").append(m.table.fqn()).append(".\n");
-        sb.append(" * Do not edit by hand.\n");
-        sb.append(" */\n");
         sb.append("public enum ").append(m.className).append(" {\n\n");
 
-        // Constants
+        // constants
         for (int i = 0; i < rows.size(); i++) {
             Row r = rows.get(i);
             String constName = toEnumConstName(String.valueOf(r.pkValue));
@@ -362,13 +293,11 @@ public final class DbEnumCodeGenerator {
                 String expr;
                 if (f.isFkEnum) {
                     FkRef fk = m.fkToEnum.get(f.col.name);
-                    // assume referenced enum PK is String (typical)
-                    String lit = literal(val, "String");
+                    String lit = literal(val, "String"); // safe default for enum FK keys
                     expr = f.col.nullable ? fk.refEnumClass + ".ofNullable(" + lit + ")" : fk.refEnumClass + ".of(" + lit + ")";
                 } else {
                     expr = literal(val, f.javaType);
                 }
-
                 if (j > 0) sb.append(", ");
                 sb.append(expr);
             }
@@ -376,13 +305,11 @@ public final class DbEnumCodeGenerator {
             sb.append(i == rows.size() - 1 ? ";\n\n" : ",\n");
         }
 
-        // Fields
-        for (Field f : fields) {
-            sb.append("    private final ").append(f.javaType).append(" ").append(f.javaName).append(";\n");
-        }
+        // fields
+        for (Field f : fields) sb.append("    private final ").append(f.javaType).append(" ").append(f.javaName).append(";\n");
         sb.append("\n");
 
-        // Ctor
+        // ctor
         sb.append("    ").append(m.className).append("(");
         for (int i = 0; i < fields.size(); i++) {
             Field f = fields.get(i);
@@ -390,41 +317,71 @@ public final class DbEnumCodeGenerator {
             sb.append(f.javaType).append(" ").append(f.javaName);
         }
         sb.append(") {\n");
-        for (Field f : fields) {
-            sb.append("        this.").append(f.javaName).append(" = ").append(f.javaName).append(";\n");
-        }
+        for (Field f : fields) sb.append("        this.").append(f.javaName).append(" = ").append(f.javaName).append(";\n");
         sb.append("    }\n\n");
 
-        // Getters (Enum-safe names)
+        // id() (PK)
+        sb.append("    public ").append(pkJavaType).append(" id() { return ").append(pkFieldName).append("; }\n\n");
+
+        // getters
         for (Field f : fields) {
-            sb.append("    public ").append(f.javaType).append(" ").append(f.javaName)
-                    .append("() { return ").append(f.javaName).append("; }\n");
+            sb.append("    public ").append(f.javaType).append(" ").append(f.javaName).append("() { return ").append(f.javaName).append("; }\n");
         }
         sb.append("\n");
 
-        // Lookup map
-        sb.append("    private static final Map<").append(pkJavaType).append(", ").append(m.className).append("> ").append(byMapName).append(";\n");
+        // BY_ID + of/ofNullable
+        sb.append("    private static final Map<").append(pkJavaType).append(", ").append(m.className).append("> ").append(byIdMapName).append(";\n");
         sb.append("    static {\n");
         sb.append("        Map<").append(pkJavaType).append(", ").append(m.className).append("> m = new HashMap<>();\n");
-        sb.append("        for (").append(m.className).append(" e : values()) {\n");
-        sb.append("            m.put(e.").append(pkFieldName).append(", e);\n");
-        sb.append("        }\n");
-        sb.append("        ").append(byMapName).append(" = Collections.unmodifiableMap(m);\n");
+        sb.append("        for (").append(m.className).append(" e : values()) m.put(e.").append(pkFieldName).append(", e);\n");
+        sb.append("        ").append(byIdMapName).append(" = Collections.unmodifiableMap(m);\n");
         sb.append("    }\n\n");
 
         sb.append("    public static ").append(m.className).append(" of(").append(pkJavaType).append(" id) {\n");
-        sb.append("        ").append(m.className).append(" e = ").append(byMapName).append(".get(id);\n");
+        sb.append("        ").append(m.className).append(" e = ").append(byIdMapName).append(".get(id);\n");
         sb.append("        if (e == null) throw new IllegalArgumentException(\"Unknown ").append(m.className).append(" id: \" + id);\n");
         sb.append("        return e;\n");
         sb.append("    }\n\n");
 
         sb.append("    public static ").append(m.className).append(" ofNullable(").append(pkJavaType).append(" id) {\n");
         sb.append("        if (id == null) return null;\n");
-        sb.append("        return ").append(byMapName).append(".get(id);\n");
+        sb.append("        return ").append(byIdMapName).append(".get(id);\n");
         sb.append("    }\n\n");
 
-        sb.append("    @Override public String toString() { return String.valueOf(").append(pkFieldName).append("); }\n");
+        // unique by<Col>
+        for (Col uc : uniqueCols) {
+            String rawField = Naming.toFieldName(uc.name);
+            String getterField = avoidEnumMethodName(rawField);
 
+            Set<String> tmpImp = new TreeSet<>();
+            String keyType = sqlTypeToJavaSimple(uc.sqlType, false, tmpImp);
+            for (String imp : tmpImp) if (!imp.startsWith("java.util.")) imports.add(imp);
+
+            String methodSuffix = "name".equalsIgnoreCase(uc.name)
+                    ? "Name"
+                    : Naming.toClassName(uc.name.toLowerCase(Locale.ROOT));
+            String mapName = "BY_" + toUpperSnake(uc.name);
+
+            sb.append("    private static final Map<").append(keyType).append(", ").append(m.className).append("> ").append(mapName).append(";\n");
+            sb.append("    static {\n");
+            sb.append("        Map<").append(keyType).append(", ").append(m.className).append("> m = new HashMap<>();\n");
+            sb.append("        for (").append(m.className).append(" e : values()) m.put(e.").append(getterField).append(", e);\n");
+            sb.append("        ").append(mapName).append(" = Collections.unmodifiableMap(m);\n");
+            sb.append("    }\n\n");
+
+            sb.append("    public static ").append(m.className).append(" by").append(methodSuffix).append("(").append(keyType).append(" v) {\n");
+            sb.append("        ").append(m.className).append(" e = ").append(mapName).append(".get(v);\n");
+            sb.append("        if (e == null) throw new IllegalArgumentException(\"Unknown ").append(m.className).append(" ").append(uc.name).append(": \" + v);\n");
+            sb.append("        return e;\n");
+            sb.append("    }\n\n");
+
+            sb.append("    public static ").append(m.className).append(" by").append(methodSuffix).append("Nullable(").append(keyType).append(" v) {\n");
+            sb.append("        if (v == null) return null;\n");
+            sb.append("        return ").append(mapName).append(".get(v);\n");
+            sb.append("    }\n\n");
+        }
+
+        sb.append("    @Override public String toString() { return String.valueOf(").append(pkFieldName).append("); }\n");
         sb.append("}\n");
         return sb.toString();
     }
@@ -432,7 +389,6 @@ public final class DbEnumCodeGenerator {
     private static Row readRow(ResultSet rs, EnumTableModel m) throws SQLException {
         Map<String, Object> vals = new HashMap<>();
         Object pkVal = null;
-
         for (Col c : m.columns) {
             Object v = rs.getObject(c.name);
             vals.put(c.name, v);
@@ -442,25 +398,13 @@ public final class DbEnumCodeGenerator {
         return new Row(pkVal, vals);
     }
 
-    // ----------------------------
-    // Naming + Literals
-    // ----------------------------
+    // ---------- naming / types ----------
 
-    private static String toEnumClassName(String tableName) {
-        String base = stripEnumSuffix(tableName);
+    private static String toEnumClassName(String enumTableName) {
+        String base = stripEnumSuffix(enumTableName).toLowerCase(Locale.ROOT);
         String cls = Naming.toClassName(base);
-        if (!cls.endsWith("Enum")) cls = cls + "Enum";
+        if (!cls.endsWith("Enum")) cls += "Enum";
         return cls;
-    }
-
-    private static String stripEnumSuffix(String tableName) {
-        if (tableName == null) return "";
-        String n = tableName;
-        String low = n.toLowerCase(Locale.ROOT);
-        if (low.endsWith("_enum")) return n.substring(0, n.length() - 5);
-        if (n.endsWith("_ENUM")) return n.substring(0, n.length() - 5);
-        if (n.endsWith("Enum")) return n.substring(0, n.length() - 4);
-        return n;
     }
 
     private static String toEnumConstName(String pkValue) {
@@ -468,6 +412,7 @@ public final class DbEnumCodeGenerator {
         String s = pkValue.trim();
         if (s.isEmpty()) return "_EMPTY";
 
+        // Replace non [A-Za-z0-9] with underscore, uppercase
         StringBuilder b = new StringBuilder(s.length() + 8);
         for (int i = 0; i < s.length(); i++) {
             char ch = s.charAt(i);
@@ -476,58 +421,32 @@ public final class DbEnumCodeGenerator {
         }
         String out = b.toString();
 
+        // Must not start with digit
         if (!out.isEmpty() && Character.isDigit(out.charAt(0))) out = "_" + out;
+
+        // Collapse "__"
         out = out.replaceAll("_+", "_");
+
+        // Avoid keywords
         if (Naming.JAVA_KEYWORDS.contains(out)) out = out + "_";
+
         return out;
     }
 
-    private static String toUpperSnake(String name) {
-        if (name == null) return "";
-        String s = name.replaceAll("([a-z0-9])([A-Z])", "$1_$2");
-        s = s.replace('-', '_').replace(' ', '_');
-        return s.toUpperCase(Locale.ROOT);
+    private static String stripEnumSuffix(String tableName) {
+        if (tableName == null) return "";
+        String low = tableName.toLowerCase(Locale.ROOT);
+        String substring = tableName.substring(0, tableName.length() - 5);
+        if (low.endsWith("_enum")) return substring;
+        if (tableName.endsWith("_ENUM")) return substring;
+        if (tableName.endsWith("Enum")) return tableName.substring(0, tableName.length() - 4);
+        return tableName;
     }
 
-    private static String safeJavaIdent(String s) {
-        if (s == null || s.isEmpty()) return "_";
-        String out = s;
-        if (!Character.isJavaIdentifierStart(out.charAt(0))) out = "_" + out;
-
-        StringBuilder b = new StringBuilder(out.length());
-        for (int i = 0; i < out.length(); i++) {
-            char ch = out.charAt(i);
-            b.append(Character.isJavaIdentifierPart(ch) ? ch : '_');
-        }
-        out = b.toString();
-        if (Naming.JAVA_KEYWORDS.contains(out)) out = out + "_";
-        return out;
-    }
-
-    private static String baseEnumMemberName(String dbColumnName) {
-        String base = Naming.toFieldName(dbColumnName);
-        String ident = safeJavaIdent(base);
-
-        // hard rule you asked for
-        if ("name".equals(ident)) return "nameInDB";
-
-        // also avoid other Enum method collisions
-        if (ENUM_RESERVED_METHODS.contains(ident)) return ident + "InDB";
-
-        return ident;
-    }
-
-    private static String uniqueEnumMemberName(String dbColumnName, Set<String> used) {
-        String n = baseEnumMemberName(dbColumnName);
-        if (used.add(n)) return n;
-
-        // de-dupe
-        int k = 2;
-        while (true) {
-            String cand = n + k;
-            if (used.add(cand)) return cand;
-            k++;
-        }
+    private static String avoidEnumMethodName(String field) {
+        if ("name".equals(field)) return "nameInDb";
+        if (RESERVED_ENUM_METHODS.contains(field)) return field + "InDb";
+        return field;
     }
 
     private static String sqlTypeToJavaSimple(int sqlType, boolean nullable, Set<String> imports) {
@@ -540,19 +459,19 @@ public final class DbEnumCodeGenerator {
             case Types.DOUBLE -> nullable ? "Double" : "double";
             case Types.DECIMAL, Types.NUMERIC -> {
                 if (imports != null) imports.add("java.math.BigDecimal");
-                yield "BigDecimal";
+                yield "java.math.BigDecimal";
             }
             case Types.DATE -> {
                 if (imports != null) imports.add("java.time.LocalDate");
-                yield "LocalDate";
+                yield "java.time.LocalDate";
             }
             case Types.TIMESTAMP -> {
                 if (imports != null) imports.add("java.time.LocalDateTime");
-                yield "LocalDateTime";
+                yield "java.time.LocalDateTime";
             }
             case Types.TIMESTAMP_WITH_TIMEZONE -> {
                 if (imports != null) imports.add("java.time.OffsetDateTime");
-                yield "OffsetDateTime";
+                yield "java.time.OffsetDateTime";
             }
             default -> "Object";
         };
@@ -560,202 +479,93 @@ public final class DbEnumCodeGenerator {
 
     private static String literal(Object v, String javaType) {
         if (v == null) return "null";
-
         return switch (javaType) {
-            case "String" -> "\"" + escapeJava(String.valueOf(v)) + "\"";
-
-            case "boolean", "Boolean" -> {
-                if (v instanceof Boolean b) yield b ? "true" : "false";
-                yield Boolean.parseBoolean(String.valueOf(v)) ? "true" : "false";
-            }
-
-            case "int", "Integer" -> String.valueOf(((Number) coerceNumber(v)).intValue());
-            case "long", "Long" -> String.valueOf(((Number) coerceNumber(v)).longValue()) + "L";
-            case "float", "Float" -> String.valueOf(((Number) coerceNumber(v)).floatValue()) + "f";
-            case "double", "Double" -> String.valueOf(((Number) coerceNumber(v)).doubleValue());
-
-            case "BigDecimal" -> "new java.math.BigDecimal(\"" + escapeJava(String.valueOf(v)) + "\")";
-
-            case "LocalDate" -> {
-                if (v instanceof java.sql.Date d) yield "LocalDate.parse(\"" + d.toString() + "\")";
-                yield "LocalDate.parse(\"" + escapeJava(String.valueOf(v)) + "\")";
-            }
-
-            case "LocalDateTime" -> {
-                if (v instanceof java.sql.Timestamp ts) {
-                    yield "LocalDateTime.parse(\"" + ts.toString().replace(' ', 'T') + "\")";
-                }
-                yield "LocalDateTime.parse(\"" + escapeJava(String.valueOf(v)).replace(" ", "T") + "\")";
-            }
-
-            case "OffsetDateTime" -> "OffsetDateTime.parse(\"" + escapeJava(String.valueOf(v)) + "\")";
-
-            default -> {
-                if (v instanceof Number) yield String.valueOf(v);
-                yield "\"" + escapeJava(String.valueOf(v)) + "\"";
-            }
+            case "boolean", "Boolean" -> (Boolean.parseBoolean(String.valueOf(v)) ? "true" : "false");
+            case "int", "Integer" -> String.valueOf(coerceNumber(v).intValue());
+            case "long", "Long" -> coerceNumber(v).longValue() + "L";
+            case "float", "Float" -> coerceNumber(v).floatValue() + "f";
+            case "double", "Double" -> String.valueOf(coerceNumber(v).doubleValue());
+            case "java.math.BigDecimal" -> "new java.math.BigDecimal(\"" + escapeJava(String.valueOf(v)) + "\")";
+            case "java.time.LocalDate" -> "java.time.LocalDate.parse(\"" + escapeJava(String.valueOf(v)) + "\")";
+            case "java.time.LocalDateTime" -> "java.time.LocalDateTime.parse(\"" + escapeJava(String.valueOf(v)).replace(" ", "T") + "\")";
+            case "java.time.OffsetDateTime" -> "java.time.OffsetDateTime.parse(\"" + escapeJava(String.valueOf(v)) + "\")";
+            default -> "\"" + escapeJava(String.valueOf(v)) + "\"";
         };
     }
 
     private static Number coerceNumber(Object v) {
         if (v instanceof Number n) return n;
-        if (v instanceof Boolean b) return b ? 1 : 0;
-        try {
-            return new java.math.BigDecimal(String.valueOf(v));
-        } catch (Exception e) {
-            return 0;
-        }
+        try { return new java.math.BigDecimal(String.valueOf(v)); } catch (Exception e) { return 0; }
     }
 
     private static String escapeJava(String s) {
-        return s.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\r", "\\r")
-                .replace("\n", "\\n")
-                .replace("\t", "\\t");
+        return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\r", "\\r").replace("\n", "\\n").replace("\t", "\\t");
     }
 
     private static String qualify(TableRef t, String quote) {
-        if (t.schema != null && !t.schema.isEmpty()) {
-            return ident(t.schema, quote) + "." + ident(t.name, quote);
-        }
+        if (t.schema != null && !t.schema.isEmpty()) return ident(t.schema, quote) + "." + ident(t.name, quote);
         return ident(t.name, quote);
     }
 
     private static String ident(String name, String quote) {
+        String esc = name.replace(quote, quote + quote);
+        return quote + esc + quote;
+    }
+
+    private static String toUpperSnake(String name) {
         if (name == null) return "";
-        String q = quote;
-        String esc = name.replace(q, q + q);
-        return q + esc + q;
+        String s = name.replaceAll("([a-z\\d])([A-Z])", "$1_$2");
+        s = s.replace('-', '_').replace(' ', '_');
+        return s.toUpperCase(Locale.ROOT);
     }
 
-    private static String nz(String s) {
-        return s == null ? "" : s;
-    }
-
-    // ----------------------------
-    // Package validation
-    // ----------------------------
+    private static String nz(String s) { return s == null ? "" : s; }
 
     private static void validatePackageName(String pkg, String fieldName) {
-        if (pkg == null || pkg.isBlank()) {
-            throw new IllegalArgumentException(fieldName + " is blank");
-        }
-        String[] parts = pkg.split("\\.");
-        for (String p : parts) {
+        if (pkg == null || pkg.isBlank()) throw new IllegalArgumentException(fieldName + " is blank");
+        for (String p : pkg.split("\\.")) {
             if (p.isEmpty()) throw new IllegalArgumentException("Invalid " + fieldName + ": " + pkg);
-            if (Naming.JAVA_KEYWORDS.contains(p)) {
-                throw new IllegalArgumentException(
-                        "Invalid " + fieldName + " '" + pkg + "': segment '" + p + "' is a Java keyword."
-                );
-            }
-            if (!Character.isJavaIdentifierStart(p.charAt(0))) {
-                throw new IllegalArgumentException("Invalid " + fieldName + " '" + pkg + "': segment '" + p + "' is not a valid identifier");
-            }
-            for (int i = 1; i < p.length(); i++) {
-                if (!Character.isJavaIdentifierPart(p.charAt(i))) {
-                    throw new IllegalArgumentException("Invalid " + fieldName + " '" + pkg + "': segment '" + p + "' is not a valid identifier");
-                }
-            }
+            if (Naming.JAVA_KEYWORDS.contains(p)) throw new IllegalArgumentException("Invalid " + fieldName + ": keyword segment " + p);
         }
     }
 
-    // ----------------------------
-    // Models
-    // ----------------------------
+    // ---------- models ----------
 
-    private static final class TableRef {
-        final String catalog;
-        final String schema;
-        final String name;
-
-        TableRef(String catalog, String schema, String name) {
-            this.catalog = catalog;
-            this.schema = schema;
-            this.name = name;
+    private record TableRef(String catalog, String schema, String name) {
+        String key() {
+            return key(schema, name);
         }
 
-        String key() { return key(catalog, schema, name); }
-
-        static String key(String catalog, String schema, String name) {
-            return (nz(schema) + "." + name).toLowerCase(Locale.ROOT);
+        static String key(String schema, String name) {
+                return (nz(schema) + "." + name).toLowerCase(Locale.ROOT);
         }
 
         String fqn() {
-            if (schema == null || schema.isBlank()) return name;
-            return schema + "." + name;
+            return (schema == null || schema.isBlank()) ? name : (schema + "." + name);
         }
     }
 
-    private static final class Col {
-        final String name;
-        final int sqlType;
-        final boolean nullable;
-        final int ordinal;
-
-        Col(String name, int sqlType, boolean nullable, int ordinal) {
-            this.name = name;
-            this.sqlType = sqlType;
-            this.nullable = nullable;
-            this.ordinal = ordinal;
-        }
+    private record Col(String name, int sqlType, boolean nullable, int ordinal) {
     }
 
-    private static final class PkCol {
-        final int seq;
-        final String name;
-        PkCol(int seq, String name) { this.seq = seq; this.name = name; }
+    private record FkRef(TableRef pkTable, String pkColumn, String refEnumClass) {
     }
 
-    private static final class FkRef {
-        final TableRef pkTable;
-        final String pkColumn;
-        final String refEnumClass;
-        FkRef(TableRef pkTable, String pkColumn, String refEnumClass) {
-            this.pkTable = pkTable;
-            this.pkColumn = pkColumn;
-            this.refEnumClass = refEnumClass;
-        }
-    }
-
-    private static final class EnumTableModel {
-        final TableRef table;
-        final String className;
-        final String pkColumn;
-        final List<Col> columns;
-        final Map<String, FkRef> fkToEnum;
-
-        EnumTableModel(TableRef table, String className, String pkColumn, List<Col> columns, Map<String, FkRef> fkToEnum) {
-            this.table = table;
-            this.className = className;
-            this.pkColumn = pkColumn;
-            this.columns = columns;
-            this.fkToEnum = fkToEnum;
-        }
-
+    private record EnumTableModel(TableRef table, String className, String pkColumn, List<Col> columns,
+                                  Map<String, FkRef> fkToEnum, Set<String> uniqueSingleColsUpper) {
         Col findColumn(String name) {
             for (Col c : columns) if (c.name.equalsIgnoreCase(name)) return c;
             return null;
         }
     }
 
-    private static final class Field {
-        final Col col;
-        final String javaName;
-        final String javaType;
-        final boolean isFkEnum;
-
-        Field(Col col, String javaName, String javaType, boolean isFkEnum) {
-            this.col = col;
-            this.javaName = javaName;
-            this.javaType = javaType;
-            this.isFkEnum = isFkEnum;
-        }
+    private record Field(Col col, String javaName, String javaType, boolean isFkEnum) {
     }
 
-    private static final class Row {
-        final Object pkValue;
-        final Map<String, Object> values;
-        Row(Object pkValue, Map<String, Object> values) { this.pkValue = pkValue; this.values = values; }
+    private record Row(Object pkValue, Map<String, Object> values) {
     }
+
+    private static final Set<String> RESERVED_ENUM_METHODS = Set.of(
+            "name", "ordinal", "values", "valueOf", "getDeclaringClass", "describeConstable"
+    );
 }

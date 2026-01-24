@@ -14,19 +14,13 @@ import java.sql.DatabaseMetaData;
 import java.sql.Types;
 import java.util.*;
 
-/**
- * Generates per table:
- *   <Entity>DbMeta implementing org.github.dbjo.meta.jdbc.DbMeta<T>
- *
- * IMPORTANT:
- *  - Uses shared helpers from org.github.dbjo.meta.jdbc.Jdbc (no per-class bind/rs* helpers).
- *  - Keeps SQL strings + parameter arrays/types + row mapper.
- */
 public final class DbMetaGenerator {
     private final Config cfg;
+    private final EnumOverrideIndex enumOverrides; // may be empty
 
-    public DbMetaGenerator(Config cfg) {
+    public DbMetaGenerator(Config cfg, EnumOverrideIndex enumOverrides) {
         this.cfg = Objects.requireNonNull(cfg, "cfg");
+        this.enumOverrides = Objects.requireNonNull(enumOverrides, "enumOverrides");
     }
 
     public int generateAll(List<TableModel> tables) throws IOException {
@@ -42,10 +36,8 @@ public final class DbMetaGenerator {
 
             Path outFile = outDir.resolve(metaClass + ".java");
             FilesUtil.writeString(outFile, src, cfg.overwrite());
-            System.out.println("Wrote: " + outFile);
             count++;
         }
-
         return count;
     }
 
@@ -54,26 +46,18 @@ public final class DbMetaGenerator {
         String table  = tm.table().table();
         String fqn = (schema == null || schema.isBlank()) ? table : (schema + "." + table);
 
-        // Column sets
-        List<Col> cols = tm.cols() == null ? List.of() : tm.cols();
+        List<Col> cols = tm.cols();
 
-        // PK columns in stable order (as columns appear)
+        // PK columns in stable order
         List<Col> pkCols = new ArrayList<>();
         Set<String> pkUpper = tm.pkColsUpper() == null ? Set.of() : tm.pkColsUpper();
         for (Col c : cols) {
-            if (c.colName() != null && pkUpper.contains(c.colName().toUpperCase(Locale.ROOT))) {
-                pkCols.add(c);
-            }
+            if (c.colName() != null && pkUpper.contains(c.colName().toUpperCase(Locale.ROOT))) pkCols.add(c);
         }
 
-        // Insert cols: exclude auto-increment
         List<Col> insCols = new ArrayList<>();
-        for (Col c : cols) {
-            if ("YES".equalsIgnoreCase(c.isAutoIncrement())) continue;
-            insCols.add(c);
-        }
+        for (Col c : cols) if (!"YES".equalsIgnoreCase(c.isAutoIncrement())) insCols.add(c);
 
-        // Update cols: exclude PK and auto-increment
         List<Col> updCols = new ArrayList<>();
         for (Col c : cols) {
             if ("YES".equalsIgnoreCase(c.isAutoIncrement())) continue;
@@ -81,47 +65,38 @@ public final class DbMetaGenerator {
             updCols.add(c);
         }
 
-        // SQL strings
-        String insertSql    = buildInsertSql(fqn, insCols);
-        String updateSql    = buildUpdateByIdSql(fqn, updCols, pkCols);
+        String insertSql = buildInsertSql(fqn, insCols);
+        String updateSql = buildUpdateByIdSql(fqn, updCols, pkCols);
         String selectAllSql = buildSelectAllSql(fqn, cols);
 
-        // imports for generated class
+        // imports
         Set<String> imports = new TreeSet<>();
         imports.add("java.sql.ResultSet");
         imports.add("java.sql.SQLException");
         imports.add("java.sql.SQLType");
         imports.add("java.sql.JDBCType");
-
-        // shared runtime api
         imports.add("org.github.dbjo.meta.jdbc.DbMeta");
         imports.add("org.github.dbjo.meta.jdbc.Jdbc");
 
-        // Import entity bean
-        if (!cfg.beanPkg().equals(cfg.dbMetaPkg())) {
-            imports.add(cfg.beanPkg() + "." + beanClass);
-        }
+        if (!cfg.beanPkg().equals(cfg.dbMetaPkg())) imports.add(cfg.beanPkg() + "." + beanClass);
 
-        // If any java type requires extra imports (BigDecimal, Date, Time, Timestamp, UUID, etc.)
+        // add type imports
+        for (Col c : cols) TypeMappings.mapSqlTypeToJava(c.sqlType(), imports);
+
+        // enum imports (for fromRow conversions)
         for (Col c : cols) {
-            TypeMappings.mapSqlTypeToJava(c.sqlType(), imports);
+            EnumOverrideIndex.Binding b = enumOverrides.find(schema, table, c.colName());
+            if (b != null) imports.add(b.enumJavaFqn());
         }
 
-        StringBuilder sb = new StringBuilder(12_000);
+        StringBuilder sb = new StringBuilder(14_000);
         sb.append("package ").append(cfg.dbMetaPkg()).append(";\n\n");
         for (String imp : imports) sb.append("import ").append(imp).append(";\n");
         sb.append("\n");
 
-        sb.append("/**\n");
-        sb.append(" * Auto-generated JDBC meta for ").append(fqn).append("\n");
-        sb.append(" *\n");
-        sb.append(" * Provides SQL strings + parameter lists/types + row mapper.\n");
-        sb.append(" */\n");
-        sb.append("public final class ").append(metaClass)
-                .append(" implements DbMeta<").append(beanClass).append("> {\n\n");
+        sb.append("public final class ").append(metaClass).append(" implements DbMeta<").append(beanClass).append("> {\n\n");
 
-        sb.append("    public static final String SCHEMA = ")
-                .append(schema == null ? "null" : "\"" + escape(schema) + "\"").append(";\n");
+        sb.append("    public static final String SCHEMA = ").append(schema == null ? "null" : "\"" + escape(schema) + "\"").append(";\n");
         sb.append("    public static final String TABLE  = \"").append(escape(table)).append("\";\n");
         sb.append("    public static final String FQN    = \"").append(escape(fqn)).append("\";\n\n");
 
@@ -132,12 +107,15 @@ public final class DbMetaGenerator {
         sb.append("    public static final ").append(metaClass).append(" INSTANCE = new ").append(metaClass).append("();\n\n");
         sb.append("    private ").append(metaClass).append("() {}\n\n");
 
-        // DbMeta SQL accessors
+        // DbMeta interface
+        sb.append("    @Override public String schema() { return SCHEMA; }\n");
+        sb.append("    @Override public String table()  { return TABLE; }\n");
+        sb.append("    @Override public String fqn()    { return FQN; }\n\n");
         sb.append("    @Override public String insertSql() { return INSERT_SQL; }\n");
         sb.append("    @Override public String updateByIdSql() { return UPDATE_BY_ID_SQL; }\n");
         sb.append("    @Override public String selectAllSql() { return SELECT_ALL_SQL; }\n\n");
 
-        // Row mapper: by column index in same order as SELECT_ALL_SQL list
+        // fromRow
         sb.append("    @Override\n");
         sb.append("    public ").append(beanClass).append(" fromRow(ResultSet rs) throws SQLException {\n");
         sb.append("        ").append(beanClass).append(" e = new ").append(beanClass).append("();\n");
@@ -146,85 +124,112 @@ public final class DbMetaGenerator {
         for (Col c : cols) {
             String prop = Naming.sanitizeJavaIdentifier(Naming.toFieldName(c.colName()));
             String cap  = Naming.capitalize(prop);
-            TypeMappings.JavaType jt = TypeMappings.mapSqlTypeToJava(c.sqlType(), null);
 
             boolean nullable = c.nullable() != DatabaseMetaData.columnNoNulls;
-            String readExpr = rsReadExpr(jt.javaType(), nullable, "rs", "i");
 
-            sb.append("        e.set").append(cap).append("(").append(readExpr).append(");\n");
+            EnumOverrideIndex.Binding eb = enumOverrides.find(schema, table, c.colName());
+            if (eb != null) {
+                // read raw key then convert to enum
+                TypeMappings.JavaType jt = TypeMappings.mapSqlTypeToJava(c.sqlType(), null);
+                String rawExpr = rsReadExpr(jt.javaType(), nullable, "rs", "i");
+                sb.append("        e.set").append(cap).append("(")
+                        .append(eb.enumJavaSimple()).append(".").append(eb.lookupNullableMethod())
+                        .append("(").append(rawExpr).append(")")
+                        .append(");\n");
+            } else {
+                TypeMappings.JavaType jt = TypeMappings.mapSqlTypeToJava(c.sqlType(), null);
+                String readExpr = rsReadExpr(jt.javaType(), nullable, "rs", "i");
+                sb.append("        e.set").append(cap).append("(").append(readExpr).append(");\n");
+            }
+
             sb.append("        i++;\n");
         }
 
         sb.append("        return e;\n");
         sb.append("    }\n\n");
 
-        // INSERT params + types
-        sb.append("    @Override\n");
-        sb.append("    public Object[] insertParams(").append(beanClass).append(" e) {\n");
+        // insert params/types
+        sb.append("    public Object[] getInsertParameters(").append(beanClass).append(" e) {\n");
         sb.append("        return new Object[] {");
         for (int idx = 0; idx < insCols.size(); idx++) {
             Col c = insCols.get(idx);
+            if (idx > 0) sb.append(", ");
+
             String prop = Naming.sanitizeJavaIdentifier(Naming.toFieldName(c.colName()));
             String cap = Naming.capitalize(prop);
-            if (idx > 0) sb.append(", ");
-            sb.append("e.get").append(cap).append("()");
+
+            EnumOverrideIndex.Binding eb = enumOverrides.find(schema, table, c.colName());
+            if (eb != null) {
+                // enum -> key
+                sb.append("e.get").append(cap).append("() == null ? null : e.get").append(cap).append("().").append(eb.keyGetterMethod()).append("()");
+            } else {
+                sb.append("e.get").append(cap).append("()");
+            }
         }
         sb.append("};\n");
         sb.append("    }\n\n");
 
-        sb.append("    @Override\n");
-        sb.append("    public SQLType[] insertParamTypes() {\n");
+        sb.append("    public SQLType[] getInsertParameterTypes() {\n");
         sb.append("        return new SQLType[] {");
         for (int idx = 0; idx < insCols.size(); idx++) {
-            Col c = insCols.get(idx);
             if (idx > 0) sb.append(", ");
-            sb.append(jdbcTypeExpr(c.sqlType()));
+            sb.append(jdbcTypeExpr(insCols.get(idx).sqlType()));
         }
         sb.append("};\n");
         sb.append("    }\n\n");
 
-        // UPDATE params + types
-        sb.append("    @Override\n");
-        sb.append("    public Object[] updateByIdParams(").append(beanClass).append(" e) {\n");
+        // update params/types
+        sb.append("    public Object[] getUpdateByIdParameters(").append(beanClass).append(" e) {\n");
         sb.append("        return new Object[] {");
 
         boolean first = true;
         for (Col c : updCols) {
+            if (!first) sb.append(", ");
+            first = false;
             String prop = Naming.sanitizeJavaIdentifier(Naming.toFieldName(c.colName()));
             String cap = Naming.capitalize(prop);
-            if (!first) sb.append(", ");
-            sb.append("e.get").append(cap).append("()");
-            first = false;
+
+            EnumOverrideIndex.Binding eb = enumOverrides.find(schema, table, c.colName());
+            if (eb != null) sb.append("e.get").append(cap).append("() == null ? null : e.get").append(cap).append("().").append(eb.keyGetterMethod()).append("()");
+            else sb.append("e.get").append(cap).append("()");
         }
         for (Col c : pkCols) {
+            sb.append(", ");
             String prop = Naming.sanitizeJavaIdentifier(Naming.toFieldName(c.colName()));
             String cap = Naming.capitalize(prop);
-            if (!first) sb.append(", ");
-            sb.append("e.get").append(cap).append("()");
-            first = false;
+
+            EnumOverrideIndex.Binding eb = enumOverrides.find(schema, table, c.colName());
+            if (eb != null) sb.append("e.get").append(cap).append("() == null ? null : e.get").append(cap).append("().").append(eb.keyGetterMethod()).append("()");
+            else sb.append("e.get").append(cap).append("()");
         }
 
         sb.append("};\n");
         sb.append("    }\n\n");
 
-        sb.append("    @Override\n");
-        sb.append("    public SQLType[] updateByIdParamTypes() {\n");
+        sb.append("    public SQLType[] getUpdateByIdParameterTypes() {\n");
         sb.append("        return new SQLType[] {");
-
         first = true;
         for (Col c : updCols) {
             if (!first) sb.append(", ");
-            sb.append(jdbcTypeExpr(c.sqlType()));
             first = false;
+            sb.append(jdbcTypeExpr(c.sqlType()));
         }
         for (Col c : pkCols) {
-            if (!first) sb.append(", ");
-            sb.append(jdbcTypeExpr(c.sqlType()));
-            first = false;
+            sb.append(", ").append(jdbcTypeExpr(c.sqlType()));
         }
-
         sb.append("};\n");
         sb.append("    }\n\n");
+
+        // implement DbMeta methods via the existing ones (compat)
+        sb.append("    @Override public Object[] insertParams(").append(beanClass).append(" e) { return getInsertParameters(e); }\n");
+        sb.append("    @Override public SQLType[] insertParamTypes() { return getInsertParameterTypes(); }\n");
+        sb.append("    @Override public Object[] updateByIdParams(").append(beanClass).append(" e) { return getUpdateByIdParameters(e); }\n");
+        sb.append("    @Override public SQLType[] updateByIdParamTypes() { return getUpdateByIdParameterTypes(); }\n\n");
+
+        // optional convenience bind delegating to Jdbc (no duplication)
+        sb.append("    public static void bind(java.sql.PreparedStatement ps, Object[] params, SQLType[] types) throws SQLException {\n");
+        sb.append("        Jdbc.bind(ps, params, types);\n");
+        sb.append("    }\n");
 
         sb.append("}\n");
         return sb.toString();
@@ -250,10 +255,7 @@ public final class DbMetaGenerator {
         StringBuilder sb = new StringBuilder();
         sb.append("UPDATE ").append(fqn).append(" SET ");
         if (setCols.isEmpty()) {
-            // Avoid invalid SQL; you can decide whether to throw instead.
-            sb.append(pkCols.isEmpty()
-                    ? "/* no columns */ 1=1"
-                    : (pkCols.get(0).colName() + "=" + pkCols.get(0).colName()));
+            sb.append(pkCols.isEmpty() ? "/* no columns */ 1=1" : (pkCols.get(0).colName() + "=" + pkCols.get(0).colName()));
         } else {
             for (int i = 0; i < setCols.size(); i++) {
                 if (i > 0) sb.append(", ");
@@ -286,7 +288,6 @@ public final class DbMetaGenerator {
     }
 
     private static String jdbcTypeExpr(int sqlType) {
-        // Map java.sql.Types -> JDBCType constant (best-effort)
         return switch (sqlType) {
             case Types.TINYINT -> "JDBCType.TINYINT";
             case Types.SMALLINT -> "JDBCType.SMALLINT";
@@ -311,25 +312,22 @@ public final class DbMetaGenerator {
         };
     }
 
-    /**
-     * Expression to read a column at index {@code idxVar} from {@code rsVar}.
-     * Uses shared helper Jdbc.rsX(...) for nullable primitive-wrapper reads.
-     */
-    private static String rsReadExpr(String javaType, boolean nullable, String rsVar, String idxVar) {
+    private static String rsReadExpr(String javaType, boolean nullable, String rs, String idxVar) {
+        // use Jdbc helpers for nullable boxed numerics/bool
         return switch (javaType) {
-            case "Short"   -> nullable ? "Jdbc.rsShort(" + rsVar + ", " + idxVar + ")" : rsVar + ".getShort(" + idxVar + ")";
-            case "Integer" -> nullable ? "Jdbc.rsInt(" + rsVar + ", " + idxVar + ")" : rsVar + ".getInt(" + idxVar + ")";
-            case "Long"    -> nullable ? "Jdbc.rsLong(" + rsVar + ", " + idxVar + ")" : rsVar + ".getLong(" + idxVar + ")";
-            case "Float"   -> nullable ? "Jdbc.rsFloat(" + rsVar + ", " + idxVar + ")" : rsVar + ".getFloat(" + idxVar + ")";
-            case "Double"  -> nullable ? "Jdbc.rsDouble(" + rsVar + ", " + idxVar + ")" : rsVar + ".getDouble(" + idxVar + ")";
-            case "Boolean" -> nullable ? "Jdbc.rsBool(" + rsVar + ", " + idxVar + ")" : rsVar + ".getBoolean(" + idxVar + ")";
-            case "String"  -> rsVar + ".getString(" + idxVar + ")";
-            case "byte[]"  -> rsVar + ".getBytes(" + idxVar + ")";
-            case "BigDecimal" -> rsVar + ".getBigDecimal(" + idxVar + ")";
-            case "Date"    -> rsVar + ".getDate(" + idxVar + ")";
-            case "Time"    -> rsVar + ".getTime(" + idxVar + ")";
-            case "Timestamp" -> rsVar + ".getTimestamp(" + idxVar + ")";
-            default -> rsVar + ".getObject(" + idxVar + ")";
+            case "Short"   -> nullable ? "Jdbc.rsShort(" + rs + ", " + idxVar + ")" : rs + ".getShort(" + idxVar + ")";
+            case "Integer" -> nullable ? "Jdbc.rsInt(" + rs + ", " + idxVar + ")" : rs + ".getInt(" + idxVar + ")";
+            case "Long"    -> nullable ? "Jdbc.rsLong(" + rs + ", " + idxVar + ")" : rs + ".getLong(" + idxVar + ")";
+            case "Float"   -> nullable ? "Jdbc.rsFloat(" + rs + ", " + idxVar + ")" : rs + ".getFloat(" + idxVar + ")";
+            case "Double"  -> nullable ? "Jdbc.rsDouble(" + rs + ", " + idxVar + ")" : rs + ".getDouble(" + idxVar + ")";
+            case "Boolean" -> nullable ? "Jdbc.rsBool(" + rs + ", " + idxVar + ")" : rs + ".getBoolean(" + idxVar + ")";
+            case "String"  -> rs + ".getString(" + idxVar + ")";
+            case "byte[]"  -> rs + ".getBytes(" + idxVar + ")";
+            case "BigDecimal" -> rs + ".getBigDecimal(" + idxVar + ")";
+            case "Date"    -> rs + ".getDate(" + idxVar + ")";
+            case "Time"    -> rs + ".getTime(" + idxVar + ")";
+            case "Timestamp" -> rs + ".getTimestamp(" + idxVar + ")";
+            default -> rs + ".getObject(" + idxVar + ")";
         };
     }
 }

@@ -120,6 +120,9 @@
                             <user>SA</user>
                             <pass></pass>
 
+                            <enumOverridesFile>${project.basedir}/dbjo-enum-overrides.properties</enumOverridesFile>
+                            <strictUnique>true</strictUnique>
+
                             <overwrite>true</overwrite>
 
                             <codegenOutJava>${project.build.directory}/generated-sources/dbjo</codegenOutJava>
