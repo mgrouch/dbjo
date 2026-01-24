@@ -79,12 +79,6 @@ public final class EnumIndex {
             return enumPropertyNameForColumn(enumKeyColumn);
         }
 
-        /** Lookup method name without Nullable suffix. */
-        public String lookupMethod() {
-            if (isPkKey()) return "of";
-            return "by" + Naming.capitalize(enumPropertyNameForColumn(enumKeyColumn));
-        }
-
         /** Lookup method name with Nullable behavior. */
         public String lookupNullableMethod() {
             if (isPkKey()) return "ofNullable";
@@ -190,12 +184,6 @@ public final class EnumIndex {
         return idx;
     }
 
-    /** Optional: makes Binding.enumJavaFqn() available for generators. */
-    public EnumIndex withEnumJavaPackage(String enumJavaPackage) {
-        this.enumJavaPackage = enumJavaPackage;
-        return this;
-    }
-
     /** Load overrides from file. */
     public EnumIndex loadOverrides(Path file) throws IOException {
         if (file == null) return this;
@@ -275,16 +263,6 @@ public final class EnumIndex {
     // Uses Types.OTHER as "unknown" (treated as wildcard in sqlTypeCompatible).
     public Binding find(String tableSchema, String tableName, String columnName) {
         return find(tableSchema, tableName, columnName, java.sql.Types.OTHER, false);
-    }
-
-    public Binding find(String tableSchema, String tableName, String columnName, boolean allowHeuristicFallback) {
-        return find(tableSchema, tableName, columnName, java.sql.Types.OTHER, allowHeuristicFallback);
-    }
-
-    // Convenience overload if you *do* have the codegen Col
-    public Binding find(String tableSchema, String tableName, Col col) {
-        if (col == null) return null;
-        return find(tableSchema, tableName, col.colName(), col.sqlType(), false);
     }
 
     /** Old behavior: resolve by column name only (no table), no type check. */
@@ -379,7 +357,7 @@ public final class EnumIndex {
         if (refSchema == null || refSchema.isBlank()) {
             String fb = normalizeSchema(fallbackTableSchema);
             e = bySchemaAndBase.get(key(fb, normalize(base1)));
-            if (e != null) return e;
+            return e;
         }
 
         return null;
@@ -478,14 +456,13 @@ public final class EnumIndex {
     public static boolean isEnumTableName(String tableName) {
         if (tableName == null) return false;
 
-        String n = tableName;
-        String low = n.toLowerCase(Locale.ROOT);
+        String low = tableName.toLowerCase(Locale.ROOT);
 
         if (low.endsWith("_enum")) return true;
-        if (n.endsWith("_ENUM")) return true;
+        if (tableName.endsWith("_ENUM")) return true;
 
-        if (n.endsWith("Enum") && n.length() > 4) {
-            char before = n.charAt(n.length() - 5);
+        if (tableName.endsWith("Enum") && tableName.length() > 4) {
+            char before = tableName.charAt(tableName.length() - 5);
             return Character.isLowerCase(before);
         }
         return false;
