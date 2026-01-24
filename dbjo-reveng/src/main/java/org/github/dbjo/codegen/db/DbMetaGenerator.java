@@ -16,11 +16,16 @@ import java.util.*;
 
 public final class DbMetaGenerator {
     private final Config cfg;
-    private final EnumOverrideIndex enumOverrides; // may be empty
+    private final EnumOverrideIndex enumOverrides; // nullable => no overrides
+
+    // ✅ keep old toolchain calls compiling
+    public DbMetaGenerator(Config cfg) {
+        this(cfg, null);
+    }
 
     public DbMetaGenerator(Config cfg, EnumOverrideIndex enumOverrides) {
         this.cfg = Objects.requireNonNull(cfg, "cfg");
-        this.enumOverrides = Objects.requireNonNull(enumOverrides, "enumOverrides");
+        this.enumOverrides = enumOverrides; // may be null
     }
 
     public int generateAll(List<TableModel> tables) throws IOException {
@@ -84,9 +89,11 @@ public final class DbMetaGenerator {
         for (Col c : cols) TypeMappings.mapSqlTypeToJava(c.sqlType(), imports);
 
         // enum imports (for fromRow conversions)
-        for (Col c : cols) {
-            EnumOverrideIndex.Binding b = enumOverrides.find(schema, table, c.colName());
-            if (b != null) imports.add(b.enumJavaFqn());
+        if (enumOverrides != null) {
+            for (Col c : cols) {
+                EnumOverrideIndex.Binding b = enumOverrides.find(schema, table, c.colName());
+                if (b != null) imports.add(b.enumJavaFqn());
+            }
         }
 
         StringBuilder sb = new StringBuilder(14_000);
@@ -94,9 +101,11 @@ public final class DbMetaGenerator {
         for (String imp : imports) sb.append("import ").append(imp).append(";\n");
         sb.append("\n");
 
-        sb.append("public final class ").append(metaClass).append(" implements DbMeta<").append(beanClass).append("> {\n\n");
+        sb.append("public final class ").append(metaClass)
+                .append(" implements DbMeta<").append(beanClass).append("> {\n\n");
 
-        sb.append("    public static final String SCHEMA = ").append(schema == null ? "null" : "\"" + escape(schema) + "\"").append(";\n");
+        sb.append("    public static final String SCHEMA = ")
+                .append(schema == null ? "null" : "\"" + escape(schema) + "\"").append(";\n");
         sb.append("    public static final String TABLE  = \"").append(escape(table)).append("\";\n");
         sb.append("    public static final String FQN    = \"").append(escape(fqn)).append("\";\n\n");
 
@@ -104,7 +113,8 @@ public final class DbMetaGenerator {
         sb.append("    public static final String UPDATE_BY_ID_SQL = \"").append(escape(updateSql)).append("\";\n");
         sb.append("    public static final String SELECT_ALL_SQL = \"").append(escape(selectAllSql)).append("\";\n\n");
 
-        sb.append("    public static final ").append(metaClass).append(" INSTANCE = new ").append(metaClass).append("();\n\n");
+        sb.append("    public static final ").append(metaClass)
+                .append(" INSTANCE = new ").append(metaClass).append("();\n\n");
         sb.append("    private ").append(metaClass).append("() {}\n\n");
 
         // DbMeta interface
@@ -127,11 +137,13 @@ public final class DbMetaGenerator {
 
             boolean nullable = c.nullable() != DatabaseMetaData.columnNoNulls;
 
-            EnumOverrideIndex.Binding eb = enumOverrides.find(schema, table, c.colName());
+            EnumOverrideIndex.Binding eb = (enumOverrides == null) ? null : enumOverrides.find(schema, table, c.colName());
             if (eb != null) {
                 // read raw key then convert to enum
                 TypeMappings.JavaType jt = TypeMappings.mapSqlTypeToJava(c.sqlType(), null);
                 String rawExpr = rsReadExpr(jt.javaType(), nullable, "rs", "i");
+
+                // ✅ you don't have lookupMethod(); use whatever you already have
                 sb.append("        e.set").append(cap).append("(")
                         .append(eb.enumJavaSimple()).append(".").append(eb.lookupNullableMethod())
                         .append("(").append(rawExpr).append(")")
@@ -158,10 +170,10 @@ public final class DbMetaGenerator {
             String prop = Naming.sanitizeJavaIdentifier(Naming.toFieldName(c.colName()));
             String cap = Naming.capitalize(prop);
 
-            EnumOverrideIndex.Binding eb = enumOverrides.find(schema, table, c.colName());
+            EnumOverrideIndex.Binding eb = (enumOverrides == null) ? null : enumOverrides.find(schema, table, c.colName());
             if (eb != null) {
-                // enum -> key
-                sb.append("e.get").append(cap).append("() == null ? null : e.get").append(cap).append("().").append(eb.keyGetterMethod()).append("()");
+                sb.append("e.get").append(cap).append("() == null ? null : e.get")
+                        .append(cap).append("().").append(eb.keyGetterMethod()).append("()");
             } else {
                 sb.append("e.get").append(cap).append("()");
             }
@@ -186,21 +198,32 @@ public final class DbMetaGenerator {
         for (Col c : updCols) {
             if (!first) sb.append(", ");
             first = false;
+
             String prop = Naming.sanitizeJavaIdentifier(Naming.toFieldName(c.colName()));
             String cap = Naming.capitalize(prop);
 
-            EnumOverrideIndex.Binding eb = enumOverrides.find(schema, table, c.colName());
-            if (eb != null) sb.append("e.get").append(cap).append("() == null ? null : e.get").append(cap).append("().").append(eb.keyGetterMethod()).append("()");
-            else sb.append("e.get").append(cap).append("()");
+            EnumOverrideIndex.Binding eb = (enumOverrides == null) ? null : enumOverrides.find(schema, table, c.colName());
+            if (eb != null) {
+                sb.append("e.get").append(cap).append("() == null ? null : e.get")
+                        .append(cap).append("().").append(eb.keyGetterMethod()).append("()");
+            } else {
+                sb.append("e.get").append(cap).append("()");
+            }
         }
         for (Col c : pkCols) {
-            sb.append(", ");
+            if (!first) sb.append(", ");
+            first = false;
+
             String prop = Naming.sanitizeJavaIdentifier(Naming.toFieldName(c.colName()));
             String cap = Naming.capitalize(prop);
 
-            EnumOverrideIndex.Binding eb = enumOverrides.find(schema, table, c.colName());
-            if (eb != null) sb.append("e.get").append(cap).append("() == null ? null : e.get").append(cap).append("().").append(eb.keyGetterMethod()).append("()");
-            else sb.append("e.get").append(cap).append("()");
+            EnumOverrideIndex.Binding eb = (enumOverrides == null) ? null : enumOverrides.find(schema, table, c.colName());
+            if (eb != null) {
+                sb.append("e.get").append(cap).append("() == null ? null : e.get")
+                        .append(cap).append("().").append(eb.keyGetterMethod()).append("()");
+            } else {
+                sb.append("e.get").append(cap).append("()");
+            }
         }
 
         sb.append("};\n");
@@ -215,18 +238,19 @@ public final class DbMetaGenerator {
             sb.append(jdbcTypeExpr(c.sqlType()));
         }
         for (Col c : pkCols) {
-            sb.append(", ").append(jdbcTypeExpr(c.sqlType()));
+            if (!first) sb.append(", ");
+            first = false;
+            sb.append(jdbcTypeExpr(c.sqlType()));
         }
         sb.append("};\n");
         sb.append("    }\n\n");
 
-        // implement DbMeta methods via the existing ones (compat)
+        // DbMeta methods via above
         sb.append("    @Override public Object[] insertParams(").append(beanClass).append(" e) { return getInsertParameters(e); }\n");
         sb.append("    @Override public SQLType[] insertParamTypes() { return getInsertParameterTypes(); }\n");
         sb.append("    @Override public Object[] updateByIdParams(").append(beanClass).append(" e) { return getUpdateByIdParameters(e); }\n");
         sb.append("    @Override public SQLType[] updateByIdParamTypes() { return getUpdateByIdParameterTypes(); }\n\n");
 
-        // optional convenience bind delegating to Jdbc (no duplication)
         sb.append("    public static void bind(java.sql.PreparedStatement ps, Object[] params, SQLType[] types) throws SQLException {\n");
         sb.append("        Jdbc.bind(ps, params, types);\n");
         sb.append("    }\n");
@@ -255,7 +279,9 @@ public final class DbMetaGenerator {
         StringBuilder sb = new StringBuilder();
         sb.append("UPDATE ").append(fqn).append(" SET ");
         if (setCols.isEmpty()) {
-            sb.append(pkCols.isEmpty() ? "/* no columns */ 1=1" : (pkCols.get(0).colName() + "=" + pkCols.get(0).colName()));
+            sb.append(pkCols.isEmpty()
+                    ? "/* no columns */ 1=1"
+                    : (pkCols.get(0).colName() + "=" + pkCols.get(0).colName()));
         } else {
             for (int i = 0; i < setCols.size(); i++) {
                 if (i > 0) sb.append(", ");
@@ -299,7 +325,6 @@ public final class DbMetaGenerator {
             case Types.NUMERIC -> "JDBCType.NUMERIC";
             case Types.BIT, Types.BOOLEAN -> "JDBCType.BOOLEAN";
             case Types.CHAR -> "JDBCType.CHAR";
-            case Types.VARCHAR, Types.LONGVARCHAR -> "JDBCType.VARCHAR";
             case Types.NCHAR -> "JDBCType.NCHAR";
             case Types.NVARCHAR, Types.LONGNVARCHAR -> "JDBCType.NVARCHAR";
             case Types.DATE -> "JDBCType.DATE";
