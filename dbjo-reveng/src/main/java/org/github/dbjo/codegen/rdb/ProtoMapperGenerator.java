@@ -1,8 +1,8 @@
 package org.github.dbjo.codegen.rdb;
 
 import org.github.dbjo.codegen.Config;
-import org.github.dbjo.codegen.model.Col;
-import org.github.dbjo.codegen.model.TableModel;
+import org.github.dbjo.meta.db.Col;
+import org.github.dbjo.meta.db.TableModel;
 import org.github.dbjo.codegen.types.TypeMappings;
 import org.github.dbjo.codegen.util.EnumIndex;
 import org.github.dbjo.codegen.util.FilesUtil;

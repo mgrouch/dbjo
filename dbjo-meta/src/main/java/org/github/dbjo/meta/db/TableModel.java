@@ -1,4 +1,4 @@
-package org.github.dbjo.codegen.model;
+package org.github.dbjo.meta.db;
 
 import java.util.List;
 import java.util.Set;

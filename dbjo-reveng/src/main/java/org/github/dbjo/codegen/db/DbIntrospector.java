@@ -1,10 +1,10 @@
 package org.github.dbjo.codegen.db;
 
 import org.github.dbjo.codegen.Config;
-import org.github.dbjo.codegen.model.Col;
-import org.github.dbjo.codegen.model.IndexModel;
-import org.github.dbjo.codegen.model.TableModel;
-import org.github.dbjo.codegen.model.TableRef;
+import org.github.dbjo.meta.db.Col;
+import org.github.dbjo.meta.db.IndexModel;
+import org.github.dbjo.meta.db.TableModel;
+import org.github.dbjo.meta.db.TableRef;
 
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;

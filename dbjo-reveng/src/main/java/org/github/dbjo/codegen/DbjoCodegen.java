@@ -3,7 +3,7 @@ package org.github.dbjo.codegen;
 import org.github.dbjo.codegen.db.DbIntrospector;
 import org.github.dbjo.codegen.db.DbMetaGenerator;
 import org.github.dbjo.codegen.entity.EntityGenerator;
-import org.github.dbjo.codegen.model.TableModel;
+import org.github.dbjo.meta.db.TableModel;
 import org.github.dbjo.codegen.proto.ProtoGenerator;
 import org.github.dbjo.codegen.proto.ProtocInvoker;
 import org.github.dbjo.codegen.query.QueryTermsGenerator;

@@ -1,7 +1,7 @@
 package org.github.dbjo.codegen.util;
 
-import org.github.dbjo.codegen.model.Col;
-import org.github.dbjo.codegen.model.TableModel;
+import org.github.dbjo.meta.db.Col;
+import org.github.dbjo.meta.db.TableModel;
 
 import java.io.IOException;
 import java.lang.reflect.Method;
@@ -282,7 +282,7 @@ public final class EnumIndex {
     }
 
     // Convenience overload if you *do* have the codegen Col
-    public Binding find(String tableSchema, String tableName, org.github.dbjo.codegen.model.Col col) {
+    public Binding find(String tableSchema, String tableName, Col col) {
         if (col == null) return null;
         return find(tableSchema, tableName, col.colName(), col.sqlType(), false);
     }
