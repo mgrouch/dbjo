@@ -2,7 +2,9 @@ package org.github.dbjo.codegen.maven;
 
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
-import org.apache.maven.plugins.annotations.*;
+import org.apache.maven.plugins.annotations.LifecyclePhase;
+import org.apache.maven.plugins.annotations.Mojo;
+import org.apache.maven.plugins.annotations.Parameter;
 import org.apache.maven.project.MavenProject;
 
 import java.io.File;
@@ -10,10 +12,9 @@ import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 
 /**
- * Runs org.github.dbjo.codegen.DbjoCodegen (your generator) during Maven build.
+ * Runs org.github.dbjo.codegen.DbjoCodegen during Maven build.
  *
  * Goal: dbjo:generate
  */
@@ -61,23 +62,25 @@ public final class DbjoCodegenMojo extends AbstractMojo {
 
     /**
      * Java output directory for generated sources.
-     * Your generator should honor --codegenOutJava=...
+     * Generator should honor --codegenOutJava=...
      */
-    @Parameter(property = "dbjo.codegen.codegenOutJava",
-            defaultValue = "${project.build.directory}/generated-sources/dbjo")
+    @Parameter(
+            property = "dbjo.codegen.codegenOutJava",
+            defaultValue = "${project.build.directory}/generated-sources/dbjo"
+    )
     private File codegenOutJava;
 
     /**
      * Protobuf Java output directory (if you run protoc).
-     * Your generator should honor --protoOutJava=...
+     * Generator should honor --protoOutJava=...
      */
-    @Parameter(property = "dbjo.codegen.protoOutJava",
-            defaultValue = "${project.build.directory}/generated-sources/dbjo")
+    @Parameter(
+            property = "dbjo.codegen.protoOutJava",
+            defaultValue = "${project.build.directory}/generated-sources/dbjo"
+    )
     private File protoOutJava;
 
-    /**
-     * Add generated dirs as compile source roots automatically.
-     */
+    /** Add generated dirs as compile source roots automatically. */
     @Parameter(property = "dbjo.codegen.addCompileRoots", defaultValue = "true")
     private boolean addCompileRoots;
 
@@ -104,12 +107,28 @@ public final class DbjoCodegenMojo extends AbstractMojo {
     @Parameter(property = "dbjo.codegen.downloadProtoc", defaultValue = "true")
     private boolean downloadProtoc;
 
-    @Parameter(property = "dbjo.codegen.protocBaseUrl",
-            defaultValue = "https://github.com/protocolbuffers/protobuf/releases/download")
+    @Parameter(
+            property = "dbjo.codegen.protocBaseUrl",
+            defaultValue = "https://github.com/protocolbuffers/protobuf/releases/download"
+    )
     private String protocBaseUrl;
 
     @Parameter(defaultValue = "${settings.offline}", readonly = true)
     private boolean offline;
+
+    // --- NEW: enum overrides integration (passed through to generator CLI) ---
+
+    @Parameter(
+            property = "dbjo.codegen.enumOverridesFile",
+            defaultValue = "${project.basedir}/dbjo-enum-overrides.properties"
+    )
+    private File enumOverridesFile;
+
+    @Parameter(
+            property = "dbjo.codegen.strictUnique",
+            defaultValue = "true"
+    )
+    private boolean strictUnique;
 
     @Override
     public void execute() throws MojoExecutionException {
@@ -119,18 +138,23 @@ public final class DbjoCodegenMojo extends AbstractMojo {
         }
 
         List<String> argv = new ArrayList<>();
+
         // Common args
-        argv.add("--run=" + run);
-        argv.add("--driver=" + driver);
-        if (url != null && !url.isBlank()) argv.add("--url=" + url);
-        String user0 = (user == null) ? "" : user;
-        String pass0 = (pass == null) ? "" : pass;
-        argv.add("--user=" + user0);
-        argv.add("--pass=" + pass0);
+        argv.add("--run=" + nz(run, "all"));
+        argv.add("--driver=" + nz(driver, ""));
+        if (url != null && !url.isBlank()) argv.add("--url=" + url.trim());
+        argv.add("--user=" + nz(user, ""));
+        argv.add("--pass=" + nz(pass, ""));
         argv.add("--overwrite=" + overwrite);
 
-        argv.add("--codegenOutJava=" + codegenOutJava.getAbsolutePath());
-        argv.add("--protoOutJava=" + protoOutJava.getAbsolutePath());
+        argv.add("--codegenOutJava=" + mustFile(codegenOutJava, "codegenOutJava").getAbsolutePath());
+        argv.add("--protoOutJava=" + mustFile(protoOutJava, "protoOutJava").getAbsolutePath());
+
+        // NEW: pass enum override options to your generator (it must support these flags)
+        if (enumOverridesFile != null) {
+            argv.add("--enumOverridesFile=" + enumOverridesFile.getAbsolutePath());
+        }
+        argv.add("--strictUnique=" + strictUnique);
 
         // Extra args passthrough
         if (args != null) {
@@ -152,12 +176,12 @@ public final class DbjoCodegenMojo extends AbstractMojo {
         String sysProtoc = System.getProperty("protoc");
         String sysInclude = System.getProperty("protoc.include");
 
-        if ((sysProtoc == null || sysProtoc.isBlank()) && downloadProtoc) {
+        if ((sysProtoc == null || sysProtoc.isBlank() || sysInclude == null || sysInclude.isBlank()) && downloadProtoc) {
             String effVer = (protocVersion != null && !protocVersion.isBlank())
                     ? protocVersion.trim()
                     : ProtocInstaller.inferProtocVersionFromProtobufJava(protobufJavaVersion);
 
-            if (effVer == null) {
+            if (effVer == null || effVer.isBlank()) {
                 throw new MojoExecutionException(
                         "Cannot infer protoc version. Set <protocVersion>33.2</protocVersion> " +
                                 "or provide <protobufJavaVersion>4.33.2</protobufJavaVersion>."
@@ -166,13 +190,13 @@ public final class DbjoCodegenMojo extends AbstractMojo {
 
             var paths = ProtocInstaller.ensureInstalled(
                     getLog(),
-                    protocInstallDir.toPath(),
+                    mustFile(protocInstallDir, "protocInstallDir").toPath(),
                     effVer,
-                    protocBaseUrl,
+                    nz(protocBaseUrl, "https://github.com/protocolbuffers/protobuf/releases/download"),
                     offline
             );
 
-            // Make your existing codegen pick it up via System.getProperty("protoc"/"protoc.include")
+            // Make your existing codegen pick it up via System properties
             System.setProperty("protoc", paths.protocExe().toAbsolutePath().toString());
             System.setProperty("protoc.include", paths.includeDir().toAbsolutePath().toString());
 
@@ -189,7 +213,17 @@ public final class DbjoCodegenMojo extends AbstractMojo {
         }
     }
 
+    private static String nz(String s, String dflt) {
+        return (s == null) ? dflt : s;
+    }
+
+    private static File mustFile(File f, String name) throws MojoExecutionException {
+        if (f == null) throw new MojoExecutionException("Missing required configuration: " + name);
+        return f;
+    }
+
     private void mkdirs(File dir) throws MojoExecutionException {
+        if (dir == null) return;
         try {
             Files.createDirectories(dir.toPath());
         } catch (Exception e) {
