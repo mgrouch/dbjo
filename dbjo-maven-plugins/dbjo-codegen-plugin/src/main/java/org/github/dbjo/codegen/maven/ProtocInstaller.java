@@ -126,19 +126,17 @@ public final class ProtocInstaller {
     // ----------------- internals -----------------
 
     private static void download(URI url, Path out) throws IOException, InterruptedException, MojoExecutionException {
-        HttpResponse<InputStream> resp;
-        try (HttpClient client = HttpClient.newBuilder()
+        HttpClient client = HttpClient.newBuilder()
                 .followRedirects(HttpClient.Redirect.NORMAL)
                 .connectTimeout(Duration.ofSeconds(20))
-                .build()) {
+                .build();
 
-            HttpRequest req = HttpRequest.newBuilder(url)
-                    .timeout(Duration.ofMinutes(3))
-                    .GET()
-                    .build();
+        HttpRequest req = HttpRequest.newBuilder(url)
+                .timeout(Duration.ofMinutes(3))
+                .GET()
+                .build();
 
-            resp = client.send(req, HttpResponse.BodyHandlers.ofInputStream());
-        }
+        HttpResponse<InputStream> resp = client.send(req, HttpResponse.BodyHandlers.ofInputStream());
         int code = resp.statusCode();
         if (code < 200 || code >= 300) {
             throw new MojoExecutionException("Download failed: HTTP " + code + " for " + url);
