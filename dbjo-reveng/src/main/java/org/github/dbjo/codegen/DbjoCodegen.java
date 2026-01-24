@@ -2,6 +2,7 @@ package org.github.dbjo.codegen;
 
 import org.github.dbjo.codegen.db.DbIntrospector;
 import org.github.dbjo.codegen.db.DbMetaGenerator;
+import org.github.dbjo.codegen.db.DbSchemaGenerator;
 import org.github.dbjo.codegen.entity.EntityGenerator;
 import org.github.dbjo.meta.db.TableModel;
 import org.github.dbjo.codegen.proto.ProtoGenerator;
@@ -45,7 +46,7 @@ public final class DbjoCodegen {
             System.out.println();
 
             DbIntrospector di = new DbIntrospector(cfg);
-            List<TableModel> tables = di.loadTables(conn.getMetaData());
+            List<TableModel> tables = di.loadTables(md);
 
             if (tables.isEmpty()) {
                 System.out.println("No user tables found after filtering.");
@@ -54,6 +55,22 @@ public final class DbjoCodegen {
 
             System.out.println("Tables: " + tables.size());
             System.out.println();
+
+            // 0) DB SCHEMA (runtime metadata of tables/columns/indexes)
+            // Runs when --run=schema or --run=all
+            if (shouldRun(cfg, "schema")) {
+                // Pick the package you want the schema meta generated into:
+                // - if you already have cfg.schemaPkg() for this, use it
+                // - otherwise use whatever you added (e.g. cfg.dbSchemaPkg())
+                int n = new DbSchemaGenerator(
+                        cfg.codegenOutJava(),
+                        cfg.schemaPkg(),          // or: cfg.dbSchemaPkg()
+                        cfg.overwrite()
+                ).generateAll(tables);
+
+                System.out.println("Generated DbSchema: " + n + " file(s)");
+                System.out.println();
+            }
 
             // 1) PROTO
             if (cfg.runMode().runProto()) {
@@ -86,8 +103,8 @@ public final class DbjoCodegen {
                 System.out.println();
             }
 
-            // 4) ROCKS SCHEMAS (needed by DAO)
-            if (cfg.runMode().runDao() || cfg.runMode().runMapper()) {
+            // 4) ROCKS SCHEMAS (needed by DAO + mapper; also generate under "schema")
+            if (shouldRun(cfg, "schema") || cfg.runMode().runDao() || cfg.runMode().runMapper()) {
                 int ns = new RocksSchemaGenerator(cfg).generateAll(tables);
                 System.out.println("Generated RocksDB Schema(s): " + ns);
                 System.out.println();
@@ -100,7 +117,7 @@ public final class DbjoCodegen {
                 System.out.println();
             }
 
-            // 5) ROCKS DAOs
+            // 5) ROCKS DAOs + DB META
             if (cfg.runMode().runDao()) {
                 int n = new RocksDaoGenerator(cfg).generateAll(tables);
                 System.out.println("Generated RocksDB DAO(s): " + n);
@@ -118,5 +135,10 @@ public final class DbjoCodegen {
                 System.out.println();
             }
         }
+    }
+
+    private static boolean shouldRun(Config cfg, String mode) {
+        String rm = String.valueOf(cfg.runMode()); // works for enum or custom RunMode
+        return "all".equalsIgnoreCase(rm) || mode.equalsIgnoreCase(rm);
     }
 }
