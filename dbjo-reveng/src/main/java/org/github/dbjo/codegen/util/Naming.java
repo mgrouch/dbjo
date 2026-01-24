@@ -34,7 +34,7 @@ public final class Naming {
     }
 
     public static String toCamelCase(String s, boolean capFirst) {
-        String[] parts = s == null ? new String[0] : s.split("[^A-Za-z0-9]+");
+        String[] parts = s == null ? new String[0] : s.split("[^A-Za-z\\d]+");
         StringBuilder out = new StringBuilder();
         for (String p : parts) {
             if (p.isEmpty()) continue;
@@ -49,7 +49,7 @@ public final class Naming {
         if (s == null || s.isEmpty()) return s;
 
         // normalize separators
-        String norm = s.replaceAll("[^A-Za-z0-9]+", "_");
+        String norm = s.replaceAll("[^A-Za-z\\d]+", "_");
 
         StringBuilder sb = new StringBuilder(norm.length() + 8);
         char prev = 0;
@@ -111,7 +111,7 @@ public final class Naming {
 
     public static String sanitizeProtoIdentifier(String name) {
         if (name == null || name.isBlank()) return "field";
-        String n = name.replaceAll("[^A-Za-z0-9_]", "_");
+        String n = name.replaceAll("\\W", "_");
         if (Character.isDigit(n.charAt(0))) n = "_" + n;
         return switch (n) {
             case "package", "syntax", "import", "message", "enum", "service", "rpc",
@@ -122,7 +122,7 @@ public final class Naming {
 
     public static String toUpperConst(String s) {
         if (s == null || s.isBlank()) return "X";
-        String n = s.replaceAll("[^A-Za-z0-9]+", "_").toUpperCase(Locale.ROOT);
+        String n = s.replaceAll("[^A-Za-z\\d]+", "_").toUpperCase(Locale.ROOT);
         if (!n.isEmpty() && Character.isDigit(n.charAt(0))) n = "_" + n;
         return sanitizeJavaIdentifier(n);
     }
