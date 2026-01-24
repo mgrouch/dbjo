@@ -17,12 +17,12 @@ import java.util.List;
  * Runs org.github.dbjo.codegen.DbjoCodegen during Maven build.
  *
  * Goal: dbjo:generate
+ * @noinspection unused
  */
 @Mojo(
         name = "generate",
         defaultPhase = LifecyclePhase.GENERATE_SOURCES,
-        threadSafe = true,
-        requiresProject = true
+        threadSafe = true
 )
 public final class DbjoCodegenMojo extends AbstractMojo {
 
@@ -53,7 +53,7 @@ public final class DbjoCodegenMojo extends AbstractMojo {
     private String user;
 
     /** JDBC password. */
-    @Parameter(property = "dbjo.codegen.pass", defaultValue = "")
+    @Parameter(property = "dbjo.codegen.pass")
     private String pass;
 
     /** Overwrite generated files. */
