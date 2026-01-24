@@ -14,8 +14,6 @@ import java.util.*;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
-import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
-
 public final class ProtocInstaller {
 
     public record ProtocPaths(Path protocExe, Path includeDir, String version, String platform) {}
@@ -119,7 +117,7 @@ public final class ProtocInstaller {
 
         // parts[0]=major, parts[1]=minor, parts[2]=patch...
         String minor = parts[1];
-        String patch = parts[2].replaceAll("[^0-9].*$", ""); // strip qualifiers if any
+        String patch = parts[2].replaceAll("\\D.*$", ""); // strip qualifiers if any
         if (minor.isBlank() || patch.isBlank()) return null;
 
         return minor + "." + patch;
@@ -128,17 +126,19 @@ public final class ProtocInstaller {
     // ----------------- internals -----------------
 
     private static void download(URI url, Path out) throws IOException, InterruptedException, MojoExecutionException {
-        HttpClient client = HttpClient.newBuilder()
+        HttpResponse<InputStream> resp;
+        try (HttpClient client = HttpClient.newBuilder()
                 .followRedirects(HttpClient.Redirect.NORMAL)
                 .connectTimeout(Duration.ofSeconds(20))
-                .build();
+                .build()) {
 
-        HttpRequest req = HttpRequest.newBuilder(url)
-                .timeout(Duration.ofMinutes(3))
-                .GET()
-                .build();
+            HttpRequest req = HttpRequest.newBuilder(url)
+                    .timeout(Duration.ofMinutes(3))
+                    .GET()
+                    .build();
 
-        HttpResponse<InputStream> resp = client.send(req, HttpResponse.BodyHandlers.ofInputStream());
+            resp = client.send(req, HttpResponse.BodyHandlers.ofInputStream());
+        }
         int code = resp.statusCode();
         if (code < 200 || code >= 300) {
             throw new MojoExecutionException("Download failed: HTTP " + code + " for " + url);
