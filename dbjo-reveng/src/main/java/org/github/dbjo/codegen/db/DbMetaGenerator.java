@@ -11,9 +11,6 @@ import org.github.dbjo.meta.db.TableModel;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.SQLType;
 import java.sql.Types;
 import java.util.*;
 
@@ -32,11 +29,27 @@ public final class DbMetaGenerator {
     }
 
     public int generateAll(List<TableModel> tables) throws IOException {
+        Objects.requireNonNull(tables, "tables");
+
+        // main DbMeta pkg
         Path outDir = cfg.codegenOutJava().resolve(cfg.dbMetaPkg().replace('.', '/'));
         Files.createDirectories(outDir);
 
+        // registry subpackage
+        String registryPkg = cfg.dbMetaPkg() + ".registry";
+        Path regOutDir = cfg.codegenOutJava().resolve(registryPkg.replace('.', '/'));
+        Files.createDirectories(regOutDir);
+
+        // stable order
+        List<TableModel> sorted = new ArrayList<>(tables);
+        sorted.sort(Comparator
+                .comparing((TableModel tm) -> nz(tm.table().schema()).toUpperCase(Locale.ROOT))
+                .thenComparing(tm -> nz(tm.table().table()).toUpperCase(Locale.ROOT)));
+
         int count = 0;
-        for (TableModel tm : tables) {
+        List<String> metaClassNames = new ArrayList<>();
+
+        for (TableModel tm : sorted) {
             String beanClass = Naming.toClassName(tm.table().table());
             String metaClass = beanClass + "DbMeta";
 
@@ -45,9 +58,23 @@ public final class DbMetaGenerator {
             Path outFile = outDir.resolve(metaClass + ".java");
             FilesUtil.writeString(outFile, src, cfg.overwrite());
             count++;
+
+            metaClassNames.add(metaClass);
         }
-        return count;
+
+        // write registry (single file)
+        String regCls = "DbMetas";
+        String regSrc = renderRegistry(registryPkg, regCls, cfg.dbMetaPkg(), metaClassNames);
+        Path regFile = regOutDir.resolve(regCls + ".java");
+        FilesUtil.writeString(regFile, regSrc, cfg.overwrite());
+        count++;
+
+        return count; // metas + registry
     }
+
+    // ------------------------------------------------------------------
+    // DbMeta per-table class rendering
+    // ------------------------------------------------------------------
 
     private String render(String metaClass, String beanClass, TableModel tm) {
         String schema = tm.table().schema();
@@ -142,7 +169,6 @@ public final class DbMetaGenerator {
 
             EnumOverrideIndex.Binding eb = (enumOverrides == null) ? null : enumOverrides.find(schema, table, c.colName());
             if (eb != null) {
-                // read raw key then convert to enum
                 TypeMappings.JavaType jt = TypeMappings.mapSqlTypeToJava(c.sqlType(), c.typeName(), null);
                 String rawExpr = rsReadExpr(jt.javaType(), nullable, "rs", "i");
 
@@ -261,12 +287,80 @@ public final class DbMetaGenerator {
         return sb.toString();
     }
 
+    // ------------------------------------------------------------------
+    // Registry rendering (single class under .registry)
+    // ------------------------------------------------------------------
+
+    private static String renderRegistry(String pkg, String cls, String metasPkg, List<String> metaClassNames) {
+        StringBuilder sb = new StringBuilder(12_000);
+        sb.append("package ").append(pkg).append(";\n\n");
+        sb.append("import java.util.*;\n");
+        sb.append("import org.github.dbjo.meta.jdbc.DbMeta;\n");
+        sb.append("import ").append(metasPkg).append(".*;\n\n");
+
+        sb.append("/**\n");
+        sb.append(" * Auto-generated registry of all DbMeta instances.\n");
+        sb.append(" *\n");
+        sb.append(" * Keys:\n");
+        sb.append(" *  - fqn: \"SCHEMA.TABLE\" when schema present, else \"TABLE\".\n");
+        sb.append(" *  - lookups are case-insensitive.\n");
+        sb.append(" */\n");
+        sb.append("public final class ").append(cls).append(" {\n\n");
+
+        sb.append("    private ").append(cls).append("() {}\n\n");
+
+        sb.append("    public static final List<DbMeta<?>> ALL;\n");
+        sb.append("    public static final Map<String, DbMeta<?>> BY_FQN;\n\n");
+
+        sb.append("    static {\n");
+        sb.append("        List<DbMeta<?>> a = new ArrayList<>();\n");
+        for (String m : metaClassNames) {
+            sb.append("        a.add(").append(m).append(".INSTANCE);\n");
+        }
+        sb.append("        ALL = Collections.unmodifiableList(a);\n\n");
+
+        sb.append("        Map<String, DbMeta<?>> m = new HashMap<>();\n");
+        sb.append("        for (DbMeta<?> dm : a) {\n");
+        sb.append("            m.put(norm(dm.fqn()), dm);\n");
+        sb.append("        }\n");
+        sb.append("        BY_FQN = Collections.unmodifiableMap(m);\n");
+        sb.append("    }\n\n");
+
+        sb.append("    public static Optional<DbMeta<?>> find(String schema, String table) {\n");
+        sb.append("        if (table == null || table.isBlank()) return Optional.empty();\n");
+        sb.append("        String fqn = (schema == null || schema.isBlank()) ? table : (schema + \".\" + table);\n");
+        sb.append("        return Optional.ofNullable(BY_FQN.get(norm(fqn)));\n");
+        sb.append("    }\n\n");
+
+        sb.append("    public static DbMeta<?> get(String schema, String table) {\n");
+        sb.append("        return find(schema, table).orElseThrow(() ->\n");
+        sb.append("                new NoSuchElementException(\"Unknown table: \" + ((schema == null || schema.isBlank()) ? \"\" : (schema + \".\")) + table));\n");
+        sb.append("    }\n\n");
+
+        sb.append("    public static Optional<DbMeta<?>> findByFqn(String fqn) {\n");
+        sb.append("        if (fqn == null || fqn.isBlank()) return Optional.empty();\n");
+        sb.append("        return Optional.ofNullable(BY_FQN.get(norm(fqn)));\n");
+        sb.append("    }\n\n");
+
+        sb.append("    public static DbMeta<?> getByFqn(String fqn) {\n");
+        sb.append("        return findByFqn(fqn).orElseThrow(() -> new NoSuchElementException(\"Unknown fqn: \" + fqn));\n");
+        sb.append("    }\n\n");
+
+        sb.append("    private static String norm(String s) {\n");
+        sb.append("        return s.trim().toLowerCase(Locale.ROOT);\n");
+        sb.append("    }\n");
+
+        sb.append("}\n");
+        return sb.toString();
+    }
+
+    // ------------------------------------------------------------------
+    // helpers
+    // ------------------------------------------------------------------
+
     private static boolean isNullable(Col c) {
-        // robust against enum naming differences
         Nullability n = c.nullability();
-        if (n == null) return true; // unknown => treat as nullable for safe reads
-        String name = n.name().toUpperCase(Locale.ROOT);
-        return !(name.contains("NO_NULL") || name.contains("NOT_NULL"));
+        return n == null || n == Nullability.NULLABLE || n == Nullability.UNKNOWN;
     }
 
     private static String buildInsertSql(String fqn, List<Col> cols) {
@@ -325,11 +419,7 @@ public final class DbMetaGenerator {
 
     private static String jdbcTypeExpr(int sqlType, String typeName) {
         String tn = (typeName == null) ? "" : typeName.trim().toUpperCase(Locale.ROOT);
-
-        // MSSQL UNIQUEIDENTIFIER tends to be OTHER/CHAR/VARCHAR; safest is OTHER
         if ("UNIQUEIDENTIFIER".equals(tn)) return "JDBCType.OTHER";
-
-        // MSSQL DATETIMEOFFSET often appears as TIMESTAMP_WITH_TIMEZONE; if not, still safe as OTHER
         if ("DATETIMEOFFSET".equals(tn)) return "JDBCType.TIMESTAMP_WITH_TIMEZONE";
 
         return switch (sqlType) {
@@ -348,7 +438,6 @@ public final class DbMetaGenerator {
             case Types.CHAR -> "JDBCType.CHAR";
             case Types.NCHAR -> "JDBCType.NCHAR";
 
-            case Types.VARCHAR, Types.LONGVARCHAR -> "JDBCType.VARCHAR";
             case Types.NVARCHAR, Types.LONGNVARCHAR -> "JDBCType.NVARCHAR";
 
             case Types.CLOB -> "JDBCType.CLOB";
@@ -371,7 +460,6 @@ public final class DbMetaGenerator {
     }
 
     private static String rsReadExpr(String javaType, boolean nullable, String rs, String idxVar) {
-        // For getObject(..,Class), SQL NULL returns null => fine for nullable case too.
         return switch (javaType) {
             case "Short"   -> nullable ? "Jdbc.rsShort(" + rs + ", " + idxVar + ")" : rs + ".getShort(" + idxVar + ")";
             case "Integer" -> nullable ? "Jdbc.rsInt(" + rs + ", " + idxVar + ")" : rs + ".getInt(" + idxVar + ")";
@@ -387,12 +475,15 @@ public final class DbMetaGenerator {
             case "Time"    -> rs + ".getTime(" + idxVar + ")";
             case "Timestamp" -> rs + ".getTimestamp(" + idxVar + ")";
 
-            // Cross-db TZ-aware types (Oracle + MSSQL drivers support these)
             case "OffsetDateTime" -> rs + ".getObject(" + idxVar + ", java.time.OffsetDateTime.class)";
             case "OffsetTime"     -> rs + ".getObject(" + idxVar + ", java.time.OffsetTime.class)";
             case "UUID"           -> rs + ".getObject(" + idxVar + ", java.util.UUID.class)";
 
             default -> rs + ".getObject(" + idxVar + ")";
         };
+    }
+
+    private static String nz(String s) {
+        return s == null ? "" : s;
     }
 }
