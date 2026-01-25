@@ -64,7 +64,7 @@ public record Config(
     // NEW: JDBC DAO generator defaults
     public static final String DEFAULT_JDBC_DAO_PKG = DEFAULT_SQL_DB_MAPPER_PKG + ".dao";
     public static final String DEFAULT_JDBC_DAO_CLASS_SUFFIX = "JdbcDao";
-    public static final String DEFAULT_JDBC_DAO_BASE_CLASS = "org.github.dbjo.meta.jdbc.BaseJdbcDAO";
+    public static final String DEFAULT_JDBC_DAO_BASE_CLASS = "org.github.dbjo.dao.jdbc.BaseJdbcDAO";
 
     // NEW: DB schema meta generator package (NOT Rocks schema)
     public static final String DEFAULT_DB_SCHEMA_PKG = "org.github.dbjo.generated.model.dbschema";

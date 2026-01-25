@@ -4,6 +4,7 @@ import org.github.dbjo.codegen.db.DbIntrospector;
 import org.github.dbjo.codegen.db.DbMetaGenerator;
 import org.github.dbjo.codegen.db.DbSchemaGenerator;
 import org.github.dbjo.codegen.entity.EntityGenerator;
+import org.github.dbjo.codegen.jdbc.JdbcDaoGenerator;
 import org.github.dbjo.codegen.proto.ProtoGenerator;
 import org.github.dbjo.codegen.proto.ProtocInvoker;
 import org.github.dbjo.codegen.query.QueryTermsGenerator;
@@ -115,14 +116,29 @@ public final class DbjoCodegen {
                 System.out.println();
             }
 
-            // 5) ROCKS DAOs + DB META
+            // 5) ROCKS DAOs
             if (cfg.runMode().runDao()) {
                 int n = new RocksDaoGenerator(cfg).generateAll(tables);
                 System.out.println("Generated RocksDB DAO(s): " + n);
                 System.out.println();
+            }
 
+            // 5b) JDBC DB META (DbMeta classes)
+            // Run if --run=dbmeta OR if you are already generating DAOs (historical behavior)
+            boolean wantDbMeta = cfg.runMode().runDbMeta() || cfg.runMode().runDao();
+            if (wantDbMeta) {
                 int d = new DbMetaGenerator(cfg).generateAll(tables);
                 System.out.println("Generated DbMeta: " + d);
+                System.out.println();
+            }
+
+            // 5c) JDBC DAOs (BaseJdbcDAO subclasses)
+            // Run if explicitly requested OR when producing DbMeta (typical pairing).
+            boolean wantJdbcDao = cfg.runMode().runJdbcDao() || wantDbMeta;
+            if (wantJdbcDao) {
+                int j = new JdbcDaoGenerator(cfg).generateAll(tables);
+                System.out.println("Generated JdbcDao(s): " + j + " into: " +
+                        cfg.codegenOutJava().resolve(cfg.jdbcDaoPkg().replace('.', '/')).toAbsolutePath());
                 System.out.println();
             }
 
