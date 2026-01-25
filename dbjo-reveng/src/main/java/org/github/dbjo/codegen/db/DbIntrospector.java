@@ -65,7 +65,7 @@ public final class DbIntrospector {
     }
 
     private static List<TableRef> listUserTables(DatabaseMetaData meta) throws SQLException {
-        final String product = safeUpper(safeGet(() -> meta.getDatabaseProductName()));
+        final String product = safeUpper(safeGet(meta::getDatabaseProductName));
         final String catalog = safeCatalog(meta);
 
         List<TableRef> out = new ArrayList<>();
@@ -139,7 +139,7 @@ public final class DbIntrospector {
         return pk;
     }
 
-    private static List<IndexModel> listIndexes(DatabaseMetaData meta, String schema, String table) throws SQLException {
+    private static List<IndexModel> listIndexes(DatabaseMetaData meta, String schema, String table) {
         final String catalog = safeCatalog(meta);
 
         // indexName -> (unique?, ordinal->colName)
@@ -200,7 +200,7 @@ public final class DbIntrospector {
         List<IndexModel> out = new ArrayList<>(map.size());
         for (var e : map.entrySet()) {
             List<String> cols = new ArrayList<>(e.getValue().colsByOrd.values());
-            boolean unique = e.getValue().uniqueKnown ? e.getValue().unique : false;
+            boolean unique = e.getValue().uniqueKnown && e.getValue().unique;
             out.add(new IndexModel(e.getKey(), unique, cols));
         }
 

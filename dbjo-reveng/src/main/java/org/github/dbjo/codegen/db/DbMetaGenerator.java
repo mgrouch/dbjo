@@ -1,16 +1,19 @@
 package org.github.dbjo.codegen.db;
 
 import org.github.dbjo.codegen.Config;
-import org.github.dbjo.meta.db.Col;
-import org.github.dbjo.meta.db.TableModel;
 import org.github.dbjo.codegen.types.TypeMappings;
 import org.github.dbjo.codegen.util.FilesUtil;
 import org.github.dbjo.codegen.util.Naming;
+import org.github.dbjo.meta.db.Col;
+import org.github.dbjo.meta.db.Nullability;
+import org.github.dbjo.meta.db.TableModel;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.sql.DatabaseMetaData;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.SQLType;
 import java.sql.Types;
 import java.util.*;
 
@@ -18,7 +21,7 @@ public final class DbMetaGenerator {
     private final Config cfg;
     private final EnumOverrideIndex enumOverrides; // nullable => no overrides
 
-    // ✅ keep old toolchain calls compiling
+    // keep old toolchain calls compiling
     public DbMetaGenerator(Config cfg) {
         this(cfg, null);
     }
@@ -51,7 +54,7 @@ public final class DbMetaGenerator {
         String table  = tm.table().table();
         String fqn = (schema == null || schema.isBlank()) ? table : (schema + "." + table);
 
-        List<Col> cols = tm.cols();
+        List<Col> cols = tm.cols() == null ? List.of() : tm.cols();
 
         // PK columns in stable order
         List<Col> pkCols = new ArrayList<>();
@@ -86,7 +89,7 @@ public final class DbMetaGenerator {
         if (!cfg.beanPkg().equals(cfg.dbMetaPkg())) imports.add(cfg.beanPkg() + "." + beanClass);
 
         // add type imports
-        for (Col c : cols) TypeMappings.mapSqlTypeToJava(c.sqlType(), imports);
+        for (Col c : cols) TypeMappings.mapSqlTypeToJava(c.sqlType(), c.typeName(), imports);
 
         // enum imports (for fromRow conversions)
         if (enumOverrides != null) {
@@ -135,21 +138,20 @@ public final class DbMetaGenerator {
             String prop = Naming.sanitizeJavaIdentifier(Naming.toFieldName(c.colName()));
             String cap  = Naming.capitalize(prop);
 
-            boolean nullable = c.nullable();
+            boolean nullable = isNullable(c);
 
             EnumOverrideIndex.Binding eb = (enumOverrides == null) ? null : enumOverrides.find(schema, table, c.colName());
             if (eb != null) {
                 // read raw key then convert to enum
-                TypeMappings.JavaType jt = TypeMappings.mapSqlTypeToJava(c.sqlType(), null);
+                TypeMappings.JavaType jt = TypeMappings.mapSqlTypeToJava(c.sqlType(), c.typeName(), null);
                 String rawExpr = rsReadExpr(jt.javaType(), nullable, "rs", "i");
 
-                // ✅ you don't have lookupMethod(); use whatever you already have
                 sb.append("        e.set").append(cap).append("(")
                         .append(eb.enumJavaSimple()).append(".").append(eb.lookupNullableMethod())
                         .append("(").append(rawExpr).append(")")
                         .append(");\n");
             } else {
-                TypeMappings.JavaType jt = TypeMappings.mapSqlTypeToJava(c.sqlType(), null);
+                TypeMappings.JavaType jt = TypeMappings.mapSqlTypeToJava(c.sqlType(), c.typeName(), null);
                 String readExpr = rsReadExpr(jt.javaType(), nullable, "rs", "i");
                 sb.append("        e.set").append(cap).append("(").append(readExpr).append(");\n");
             }
@@ -185,7 +187,7 @@ public final class DbMetaGenerator {
         sb.append("        return new SQLType[] {");
         for (int idx = 0; idx < insCols.size(); idx++) {
             if (idx > 0) sb.append(", ");
-            sb.append(jdbcTypeExpr(insCols.get(idx).sqlType()));
+            sb.append(jdbcTypeExpr(insCols.get(idx).sqlType(), insCols.get(idx).typeName()));
         }
         sb.append("};\n");
         sb.append("    }\n\n");
@@ -235,12 +237,12 @@ public final class DbMetaGenerator {
         for (Col c : updCols) {
             if (!first) sb.append(", ");
             first = false;
-            sb.append(jdbcTypeExpr(c.sqlType()));
+            sb.append(jdbcTypeExpr(c.sqlType(), c.typeName()));
         }
         for (Col c : pkCols) {
             if (!first) sb.append(", ");
             first = false;
-            sb.append(jdbcTypeExpr(c.sqlType()));
+            sb.append(jdbcTypeExpr(c.sqlType(), c.typeName()));
         }
         sb.append("};\n");
         sb.append("    }\n\n");
@@ -257,6 +259,14 @@ public final class DbMetaGenerator {
 
         sb.append("}\n");
         return sb.toString();
+    }
+
+    private static boolean isNullable(Col c) {
+        // robust against enum naming differences
+        Nullability n = c.nullability();
+        if (n == null) return true; // unknown => treat as nullable for safe reads
+        String name = n.name().toUpperCase(Locale.ROOT);
+        return !(name.contains("NO_NULL") || name.contains("NOT_NULL"));
     }
 
     private static String buildInsertSql(String fqn, List<Col> cols) {
@@ -313,32 +323,55 @@ public final class DbMetaGenerator {
         return s.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
-    private static String jdbcTypeExpr(int sqlType) {
+    private static String jdbcTypeExpr(int sqlType, String typeName) {
+        String tn = (typeName == null) ? "" : typeName.trim().toUpperCase(Locale.ROOT);
+
+        // MSSQL UNIQUEIDENTIFIER tends to be OTHER/CHAR/VARCHAR; safest is OTHER
+        if ("UNIQUEIDENTIFIER".equals(tn)) return "JDBCType.OTHER";
+
+        // MSSQL DATETIMEOFFSET often appears as TIMESTAMP_WITH_TIMEZONE; if not, still safe as OTHER
+        if ("DATETIMEOFFSET".equals(tn)) return "JDBCType.TIMESTAMP_WITH_TIMEZONE";
+
         return switch (sqlType) {
             case Types.TINYINT -> "JDBCType.TINYINT";
             case Types.SMALLINT -> "JDBCType.SMALLINT";
             case Types.INTEGER -> "JDBCType.INTEGER";
             case Types.BIGINT -> "JDBCType.BIGINT";
+
             case Types.FLOAT, Types.REAL -> "JDBCType.REAL";
             case Types.DOUBLE -> "JDBCType.DOUBLE";
             case Types.DECIMAL -> "JDBCType.DECIMAL";
             case Types.NUMERIC -> "JDBCType.NUMERIC";
+
             case Types.BIT, Types.BOOLEAN -> "JDBCType.BOOLEAN";
+
             case Types.CHAR -> "JDBCType.CHAR";
             case Types.NCHAR -> "JDBCType.NCHAR";
+
+            case Types.VARCHAR, Types.LONGVARCHAR -> "JDBCType.VARCHAR";
             case Types.NVARCHAR, Types.LONGNVARCHAR -> "JDBCType.NVARCHAR";
+
+            case Types.CLOB -> "JDBCType.CLOB";
+            case Types.NCLOB -> "JDBCType.NCLOB";
+            case Types.SQLXML -> "JDBCType.SQLXML";
+
             case Types.DATE -> "JDBCType.DATE";
-            case Types.TIME, Types.TIME_WITH_TIMEZONE -> "JDBCType.TIME";
-            case Types.TIMESTAMP, Types.TIMESTAMP_WITH_TIMEZONE -> "JDBCType.TIMESTAMP";
+            case Types.TIME -> "JDBCType.TIME";
+            case Types.TIME_WITH_TIMEZONE -> "JDBCType.TIME_WITH_TIMEZONE";
+            case Types.TIMESTAMP -> "JDBCType.TIMESTAMP";
+            case Types.TIMESTAMP_WITH_TIMEZONE -> "JDBCType.TIMESTAMP_WITH_TIMEZONE";
+
             case Types.BINARY -> "JDBCType.BINARY";
             case Types.VARBINARY, Types.LONGVARBINARY -> "JDBCType.VARBINARY";
             case Types.BLOB -> "JDBCType.BLOB";
+
+            case Types.OTHER -> "JDBCType.OTHER";
             default -> "JDBCType.VARCHAR";
         };
     }
 
     private static String rsReadExpr(String javaType, boolean nullable, String rs, String idxVar) {
-        // use Jdbc helpers for nullable boxed numerics/bool
+        // For getObject(..,Class), SQL NULL returns null => fine for nullable case too.
         return switch (javaType) {
             case "Short"   -> nullable ? "Jdbc.rsShort(" + rs + ", " + idxVar + ")" : rs + ".getShort(" + idxVar + ")";
             case "Integer" -> nullable ? "Jdbc.rsInt(" + rs + ", " + idxVar + ")" : rs + ".getInt(" + idxVar + ")";
@@ -346,12 +379,19 @@ public final class DbMetaGenerator {
             case "Float"   -> nullable ? "Jdbc.rsFloat(" + rs + ", " + idxVar + ")" : rs + ".getFloat(" + idxVar + ")";
             case "Double"  -> nullable ? "Jdbc.rsDouble(" + rs + ", " + idxVar + ")" : rs + ".getDouble(" + idxVar + ")";
             case "Boolean" -> nullable ? "Jdbc.rsBool(" + rs + ", " + idxVar + ")" : rs + ".getBoolean(" + idxVar + ")";
+
             case "String"  -> rs + ".getString(" + idxVar + ")";
             case "byte[]"  -> rs + ".getBytes(" + idxVar + ")";
             case "BigDecimal" -> rs + ".getBigDecimal(" + idxVar + ")";
             case "Date"    -> rs + ".getDate(" + idxVar + ")";
             case "Time"    -> rs + ".getTime(" + idxVar + ")";
             case "Timestamp" -> rs + ".getTimestamp(" + idxVar + ")";
+
+            // Cross-db TZ-aware types (Oracle + MSSQL drivers support these)
+            case "OffsetDateTime" -> rs + ".getObject(" + idxVar + ", java.time.OffsetDateTime.class)";
+            case "OffsetTime"     -> rs + ".getObject(" + idxVar + ", java.time.OffsetTime.class)";
+            case "UUID"           -> rs + ".getObject(" + idxVar + ", java.util.UUID.class)";
+
             default -> rs + ".getObject(" + idxVar + ")";
         };
     }
