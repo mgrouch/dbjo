@@ -1,7 +1,4 @@
-// File: src/main/java/org/github/dbjo/meta/jdbc/DbMetaUpsertSupport.java
 package org.github.dbjo.meta.jdbc;
-
-import java.util.Locale;
 
 public abstract class DbMetaUpsertSupport<T> implements DbMeta<T> {
 

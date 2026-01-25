@@ -1,4 +1,3 @@
-// File: src/main/java/org/github/dbjo/meta/jdbc/DbMeta.java
 package org.github.dbjo.meta.jdbc;
 
 import java.sql.ResultSet;
