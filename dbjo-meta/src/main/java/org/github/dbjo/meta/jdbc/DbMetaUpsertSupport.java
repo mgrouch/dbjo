@@ -5,23 +5,19 @@ import java.util.Locale;
 
 public abstract class DbMetaUpsertSupport<T> implements DbMeta<T> {
 
-    // ---- table-specific hooks (generated classes implement these) ----
-
+    // ---- per-dialect upsert sql (generated) ----
     protected abstract String upsertByIdSqlMssql();
     protected abstract String upsertByIdSqlSybase();
-    protected abstract String upsertByIdSqlOracle();
+    protected abstract String upsertByIdSqlOracle(); // regular Oracle MERGE (no temp)
     protected abstract String upsertByIdSqlHsql();
 
-    protected abstract String upsertTempColDefs();            // "ID BIGINT NOT NULL, EMAIL VARCHAR(255) NOT NULL, ..."
-    protected abstract String upsertTempInsertColumns();      // "ID, EMAIL, NAME, CREATED_AT"
-    protected abstract int upsertTempParamCount();            // number of '?' in temp insert row
+    // ---- temp-table batch plumbing (generated only if used) ----
+    protected abstract String upsertTempColDefs();
+    protected abstract String upsertTempInsertColumns();
+    protected abstract int upsertTempParamCount();
 
-    protected abstract String mergeFromTempTplMssql();        // contains "{TEMP}"
-    protected abstract String mergeFromTempTplSybase();
-    protected abstract String mergeFromTempTplOracle();
-    protected abstract String mergeFromTempTplHsql();
-
-    // ---- DbMeta upsert API ----
+    protected abstract String mergeFromTempTplMssql();  // contains "{TEMP}"
+    protected abstract String mergeFromTempTplSybase(); // contains "{TEMP}"
 
     @Override
     public final String upsertByIdSql(DbDialect dialect) {
@@ -35,57 +31,45 @@ public abstract class DbMetaUpsertSupport<T> implements DbMeta<T> {
     }
 
     @Override
-    public final String createUpsertTempTableSql(DbDialect dialect, String suffix) {
-        if (dialect == null) throw new IllegalArgumentException("dialect is null");
-        String tn = upsertTempName(dialect, suffix);
-        String defs = upsertTempColDefs();
+    public final boolean supportsUpsertTemp(DbDialect dialect) {
+        return dialect == DbDialect.MSSQL || dialect == DbDialect.SYBASE;
+    }
 
-        return switch (dialect) {
-            case MSSQL, SYBASE ->
-                    "CREATE TABLE " + tn + " (" + defs + ")";
-            case ORACLE, HSQL ->
-                    "CREATE GLOBAL TEMPORARY TABLE " + tn + " (" + defs + ") ON COMMIT DELETE ROWS";
-        };
+    @Override
+    public final String createUpsertTempTableSql(DbDialect dialect, String suffix) {
+        if (!supportsUpsertTemp(dialect)) return DbMeta.super.createUpsertTempTableSql(dialect, suffix);
+        String tn = upsertTempName(dialect, suffix);
+        return "CREATE TABLE " + tn + " (" + upsertTempColDefs() + ")";
     }
 
     @Override
     public final String dropUpsertTempTableSql(DbDialect dialect, String suffix) {
-        if (dialect == null) throw new IllegalArgumentException("dialect is null");
+        if (!supportsUpsertTemp(dialect)) return DbMeta.super.dropUpsertTempTableSql(dialect, suffix);
         String tn = upsertTempName(dialect, suffix);
         return "DROP TABLE " + tn;
     }
 
     @Override
     public final String insertUpsertTempSql(DbDialect dialect, String suffix) {
-        if (dialect == null) throw new IllegalArgumentException("dialect is null");
+        if (!supportsUpsertTemp(dialect)) return DbMeta.super.insertUpsertTempSql(dialect, suffix);
         String tn = upsertTempName(dialect, suffix);
-
-        // single-row insert template; runtime batch builder uses PreparedStatement batching
         return "INSERT INTO " + tn + " (" + upsertTempInsertColumns() + ") VALUES (" + qmarks(upsertTempParamCount()) + ")";
     }
 
     @Override
     public final String mergeUpsertFromTempSql(DbDialect dialect, String suffix) {
-        if (dialect == null) throw new IllegalArgumentException("dialect is null");
+        if (!supportsUpsertTemp(dialect)) return DbMeta.super.mergeUpsertFromTempSql(dialect, suffix);
         String tn = upsertTempName(dialect, suffix);
-        String tpl = switch (dialect) {
-            case MSSQL  -> mergeFromTempTplMssql();
-            case SYBASE -> mergeFromTempTplSybase();
-            case ORACLE -> mergeFromTempTplOracle();
-            case HSQL   -> mergeFromTempTplHsql();
-        };
+        String tpl = (dialect == DbDialect.MSSQL) ? mergeFromTempTplMssql() : mergeFromTempTplSybase();
         return tpl.replace("{TEMP}", tn);
     }
 
-    // ---- shared helpers (NO LONGER GENERATED PER TABLE) ----
+    // ---- shared helpers (not generated per table) ----
 
     protected final String upsertTempName(DbDialect dialect, String suffix) {
         String sfx = safeSuffix(suffix);
-        String base = table() + "_UPSERT_" + sfx;
-        return switch (dialect) {
-            case MSSQL, SYBASE -> "#" + base;
-            case ORACLE, HSQL  -> base;
-        };
+        // Local temp tables for MSSQL/Sybase
+        return "#" + table() + "_UPSERT_" + sfx;
     }
 
     protected static String safeSuffix(String suffix) {
