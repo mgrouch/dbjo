@@ -1,5 +1,9 @@
 package org.github.dbjo.codegen;
 
+import org.github.dbjo.criteria.PropertyTerm;
+import org.github.dbjo.criteria.Terms;
+import org.github.dbjo.dao.jdbc.BaseJdbcDAO;
+
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Locale;
@@ -36,8 +40,10 @@ public record Config(
     public static final String DEFAULT_META_SUFFIX = "Meta";
 
     public static final String DEFAULT_QUERY_SUFFIX = "Q";
-    public static final String DEFAULT_TERMS_FQN = "org.github.dbjo.criteria.Terms";
-    public static final String DEFAULT_PROPERTY_TERM_FQN = "org.github.dbjo.criteria.PropertyTerm";
+
+    // Use classpath (compile-time) instead of string literals:
+    public static final String DEFAULT_TERMS_FQN = Terms.class.getName();
+    public static final String DEFAULT_PROPERTY_TERM_FQN = PropertyTerm.class.getName();
 
     public static final String DEFAULT_PROTO_JAVA_PKG  = "org.github.dbjo.generated.proto";
     public static final String DEFAULT_PROTO_PKG_BASE  = "dbjo";
@@ -61,12 +67,14 @@ public record Config(
 
     public static final String DEFAULT_SQL_DB_MAPPER_PKG = "org.github.dbjo.generated.model.dbmeta";
 
-    // NEW: JDBC DAO generator defaults
+    // JDBC DAO generator defaults
     public static final String DEFAULT_JDBC_DAO_PKG = DEFAULT_SQL_DB_MAPPER_PKG + ".dao";
     public static final String DEFAULT_JDBC_DAO_CLASS_SUFFIX = "JdbcDao";
-    public static final String DEFAULT_JDBC_DAO_BASE_CLASS = "org.github.dbjo.dao.jdbc.BaseJdbcDAO";
 
-    // NEW: DB schema meta generator package (NOT Rocks schema)
+    // Use classpath (compile-time) instead of string literal:
+    public static final String DEFAULT_JDBC_DAO_BASE_CLASS = BaseJdbcDAO.class.getName();
+
+    // DB schema meta generator package (NOT Rocks schema)
     public static final String DEFAULT_DB_SCHEMA_PKG = "org.github.dbjo.generated.model.dbschema";
 
     // ---------------- sections ----------------
@@ -126,7 +134,6 @@ public record Config(
 
     public record JdbcMeta(String dbMetaPkg) {}
 
-    // NEW: generated JDBC DAO section
     public record JdbcDao(String jdbcDaoPkg, String jdbcDaoClassSuffix, String jdbcDaoBaseClass) {}
 
     public record DbSchema(String dbSchemaPkg) {}
@@ -142,12 +149,8 @@ public record Config(
         public boolean runDao()     { return this == ALL || this == DAO || this == RDB; }
         public boolean runMapper()  { return this == ALL || this == MAPPER || this == RDB; }
 
-        /** JDBC DbMeta classes (your DBMETA generator). */
         public boolean runDbMeta()  { return this == ALL || this == DBMETA; }
-
-        /** NEW: JDBC DAOs (BaseJdbcDAO subclasses). */
         public boolean runJdbcDao() { return this == ALL || this == JDBCDAO; }
-
         public boolean runSchema()  { return this == ALL || this == SCHEMA; }
 
         public static RunMode parse(String s) {
@@ -171,7 +174,6 @@ public record Config(
     }
 
     // ---------------- flat compatibility accessors ----------------
-    // Keep your codebase working while you migrate to cfg.db()/cfg.enums()/etc.
 
     // DB
     public String driver() { return db.driver(); }
@@ -228,7 +230,7 @@ public record Config(
 
     // rocks dao/schema
     public String daoPkg(){ return rocks.daoPkg(); }
-    public String schemaPkg(){ return rocks.schemaPkg(); } // Rocks schema pkg only
+    public String schemaPkg(){ return rocks.schemaPkg(); }
     public String daoClassSuffix(){ return rocks.daoClassSuffix(); }
     public String schemaClassSuffix(){ return rocks.schemaClassSuffix(); }
     public String cfConstSuffix(){ return rocks.cfConstSuffix(); }
@@ -241,12 +243,12 @@ public record Config(
     // jdbc meta
     public String dbMetaPkg(){ return jdbcMeta.dbMetaPkg(); }
 
-    // NEW: jdbc dao config
+    // jdbc dao config
     public String jdbcDaoPkg(){ return jdbcDao.jdbcDaoPkg(); }
     public String jdbcDaoClassSuffix(){ return jdbcDao.jdbcDaoClassSuffix(); }
     public String jdbcDaoBaseClass(){ return jdbcDao.jdbcDaoBaseClass(); }
 
-    // NEW: db schema meta pkg
+    // db schema meta pkg
     public String dbSchemaPkg(){ return dbSchema.dbSchemaPkg(); }
 
     // ---------------- factory ----------------
@@ -313,7 +315,6 @@ public record Config(
         String enumOverridesPath = am.get("enumOverridesFile", System.getProperty("dbjo.enumOverridesFile", ""));
         Path enumOverridesFile = (enumOverridesPath == null || enumOverridesPath.isBlank()) ? null : Paths.get(enumOverridesPath.trim());
 
-        // keep compatibility: user may pass --strictUnique or --enumStrictUnique
         boolean enumStrictUnique = am.getBool("enumStrictUnique",
                 am.getBool("strictUnique", Boolean.parseBoolean(System.getProperty("dbjo.strictUnique", "false"))));
 
@@ -332,7 +333,7 @@ public record Config(
         // SQL/JDBC meta
         String dbMetaPkg = am.get("dbMetaPkg", DEFAULT_SQL_DB_MAPPER_PKG);
 
-        // NEW: JDBC DAO settings (defaults depend on dbMetaPkg)
+        // JDBC DAO settings (defaults depend on dbMetaPkg)
         String jdbcDaoPkg = am.get("jdbcDaoPkg",
                 System.getProperty("dbjo.jdbcDaoPkg", dbMetaPkg + ".dao"));
         String jdbcDaoClassSuffix = am.get("jdbcDaoClassSuffix",
@@ -340,7 +341,7 @@ public record Config(
         String jdbcDaoBaseClass = am.get("jdbcDaoBaseClass",
                 System.getProperty("dbjo.jdbcDaoBaseClass", DEFAULT_JDBC_DAO_BASE_CLASS));
 
-        // NEW: DB schema meta package
+        // DB schema meta package
         String dbSchemaPkg = am.get("dbSchemaPkg", System.getProperty("dbjo.dbSchemaPkg", DEFAULT_DB_SCHEMA_PKG));
 
         return new Config(
