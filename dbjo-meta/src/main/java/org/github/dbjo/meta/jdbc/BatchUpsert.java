@@ -29,7 +29,7 @@ public final class BatchUpsert {
     public static final class Builder<T> {
         private final DbMeta<T> meta;
 
-        private DbMeta.DbDialect dialect;
+        private DbDialect dialect;
         private String suffix = "X";
 
         private int batchSize = 500;
@@ -58,7 +58,7 @@ public final class BatchUpsert {
             this.meta = Objects.requireNonNull(meta, "meta");
         }
 
-        public Builder<T> dialect(DbMeta.DbDialect d) { this.dialect = Objects.requireNonNull(d, "dialect"); return this; }
+        public Builder<T> dialect(DbDialect d) { this.dialect = Objects.requireNonNull(d, "dialect"); return this; }
         public Builder<T> suffix(String s) { this.suffix = (s == null || s.isBlank()) ? "X" : s; return this; }
 
         public Builder<T> batchSize(int n) {
@@ -89,7 +89,7 @@ public final class BatchUpsert {
             if (!it.hasNext()) return new Result(0, 0);
 
             boolean originalAutoCommit = con.getAutoCommit();
-            boolean needsTxnForTempRows = (dialect == DbMeta.DbDialect.ORACLE || dialect == DbMeta.DbDialect.HSQL);
+            boolean needsTxnForTempRows = (dialect == DbDialect.ORACLE || dialect == DbDialect.HSQL);
 
             // IMPORTANT:
             // If the generated GTT uses "ON COMMIT DELETE ROWS", autoCommit=true would clear temp rows
@@ -100,7 +100,7 @@ public final class BatchUpsert {
 
             boolean drop = (dropTempTable != null)
                     ? dropTempTable
-                    : (dialect == DbMeta.DbDialect.MSSQL || dialect == DbMeta.DbDialect.SYBASE);
+                    : (dialect == DbDialect.MSSQL || dialect == DbDialect.SYBASE);
 
             int inserted = 0;
             int merged;
@@ -224,7 +224,7 @@ public final class BatchUpsert {
             return false;
         }
 
-        private static String tempNameForDelete(DbMeta<?> meta, DbMeta.DbDialect dialect, String suffix) {
+        private static String tempNameForDelete(DbMeta<?> meta, DbDialect dialect, String suffix) {
             // We do not have direct access to the generated private upsertTempName().
             // So we reconstruct the convention used in the generator:
             //  - MSSQL/SYBASE: "#"+TABLE+"_UPSERT_"+suffix

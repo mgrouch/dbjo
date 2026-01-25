@@ -11,6 +11,7 @@ import org.github.dbjo.meta.db.TableModel;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.SQLType;
 import java.sql.Types;
 import java.util.*;
 
@@ -24,7 +25,7 @@ public final class DbMetaGenerator {
 
     public DbMetaGenerator(Config cfg, EnumOverrideIndex enumOverrides) {
         this.cfg = Objects.requireNonNull(cfg, "cfg");
-        this.enumOverrides = enumOverrides; // may be null
+        this.enumOverrides = enumOverrides;
     }
 
     public int generateAll(List<TableModel> tables) throws IOException {
@@ -82,18 +83,16 @@ public final class DbMetaGenerator {
 
         List<Col> cols = tm.cols() == null ? List.of() : tm.cols();
 
-        // PK columns in stable order (as they appear in cols)
+        // PK columns in stable order
         List<Col> pkCols = new ArrayList<>();
         Set<String> pkUpper = tm.pkColsUpper() == null ? Set.of() : tm.pkColsUpper();
         for (Col c : cols) {
             if (c.colName() != null && pkUpper.contains(c.colName().toUpperCase(Locale.ROOT))) pkCols.add(c);
         }
 
-        // Non-autoinc insert columns (existing behavior)
         List<Col> insCols = new ArrayList<>();
         for (Col c : cols) if (!c.autoIncrement()) insCols.add(c);
 
-        // Update columns (non-autoinc, non-PK)
         List<Col> updCols = new ArrayList<>();
         for (Col c : cols) {
             if (c.autoIncrement()) continue;
@@ -101,37 +100,28 @@ public final class DbMetaGenerator {
             updCols.add(c);
         }
 
-        // Source columns for UPSERT (must include PK for ON(), plus insertable columns)
-        List<Col> srcCols = unionByName(pkCols, insCols);
+        // columns used as source for MERGE
+        List<Col> mergeCols = buildMergeCols(pkCols, insCols, updCols);
 
         String insertSql = buildInsertSql(fqn, insCols);
         String updateSql = buildUpdateByIdSql(fqn, updCols, pkCols);
         String selectAllSql = buildSelectAllSql(fqn, cols);
 
-        // Pre-render SQL fragments for merges
-        String mergeOn = buildMergeOnClause(pkCols);
-        String mergeUpdateSet = buildMergeUpdateSetClause(updCols);
-        String mergeInsertCols = joinColNames(insCols);
-        String mergeInsertVals = joinPrefixedColNames("s", insCols);
+        // upsert SQL per dialect
+        String upsertMssql  = buildUpsertMssqlSybase(fqn, mergeCols, pkCols, updCols, insCols, true);
+        String upsertSybase = buildUpsertMssqlSybase(fqn, mergeCols, pkCols, updCols, insCols, false);
+        String upsertOracle = buildUpsertOracle(fqn, mergeCols, pkCols, updCols, insCols);
+        String upsertHsql   = buildUpsertHsql(fqn, mergeCols, pkCols, updCols, insCols);
 
-        // single-row upserts
-        String upsertMssql = buildMergeUpsertSingle_MssqlSybase(fqn, srcCols, mergeOn, mergeUpdateSet, mergeInsertCols, mergeInsertVals, true);
-        String upsertSybase = buildMergeUpsertSingle_MssqlSybase(fqn, srcCols, mergeOn, mergeUpdateSet, mergeInsertCols, mergeInsertVals, false);
-        String upsertOracle = buildMergeUpsertSingle_Oracle(fqn, srcCols, mergeOn, mergeUpdateSet, mergeInsertCols, mergeInsertVals);
-        String upsertHsql   = buildMergeUpsertSingle_Hsql(fqn, srcCols, mergeOn, mergeUpdateSet, mergeInsertCols, mergeInsertVals);
+        // temp-table defs + merge-from-temp templates
+        String tempColDefs = buildTempColDefs(mergeCols);
+        String tempInsertCols = joinColNames(mergeCols);
+        int tempParamCount = mergeCols.size();
 
-        // Temp-table column definitions (for batch upsert)
-        String tempColDefs = buildTempTableColumnDefs(srcCols);
-
-        // Temp insert SQL (same for all dialects, only table name differs at runtime)
-        String tempInsertCols = joinColNames(srcCols);
-        String tempInsertQ = repeatQ(srcCols.size());
-
-        // Merge-from-temp SQL (table name substituted at runtime)
-        String mergeFromTempMssql = buildMergeFromTemp_MssqlSybase(fqn, "{TEMP}", mergeOn, mergeUpdateSet, mergeInsertCols, mergeInsertVals, true);
-        String mergeFromTempSybase = buildMergeFromTemp_MssqlSybase(fqn, "{TEMP}", mergeOn, mergeUpdateSet, mergeInsertCols, mergeInsertVals, false);
-        String mergeFromTempOracle = buildMergeFromTemp_Oracle(fqn, "{TEMP}", mergeOn, mergeUpdateSet, mergeInsertCols, mergeInsertVals);
-        String mergeFromTempHsql   = buildMergeFromTemp_Hsql(fqn, "{TEMP}", mergeOn, mergeUpdateSet, mergeInsertCols, mergeInsertVals);
+        String mergeFromTempMssql  = buildMergeFromTempTpl(fqn, pkCols, updCols, insCols, true);
+        String mergeFromTempSybase = buildMergeFromTempTpl(fqn, pkCols, updCols, insCols, false);
+        String mergeFromTempOracle = buildMergeFromTempTplOracle(fqn, pkCols, updCols, insCols);
+        String mergeFromTempHsql   = buildMergeFromTempTplHsql(fqn, pkCols, updCols, insCols);
 
         // imports
         Set<String> imports = new TreeSet<>();
@@ -139,9 +129,8 @@ public final class DbMetaGenerator {
         imports.add("java.sql.SQLException");
         imports.add("java.sql.SQLType");
         imports.add("java.sql.JDBCType");
-        imports.add("java.util.*");
-        imports.add("org.github.dbjo.meta.jdbc.DbMeta");
-        imports.add("org.github.dbjo.meta.jdbc.Jdbc");
+        imports.add("org.github.dbjo.meta.jdbc.DbDialect");
+        imports.add("org.github.dbjo.meta.jdbc.DbMetaUpsertSupport");
 
         if (!cfg.beanPkg().equals(cfg.dbMetaPkg())) imports.add(cfg.beanPkg() + "." + beanClass);
 
@@ -162,7 +151,7 @@ public final class DbMetaGenerator {
         sb.append("\n");
 
         sb.append("public final class ").append(metaClass)
-                .append(" implements DbMeta<").append(beanClass).append("> {\n\n");
+                .append(" extends DbMetaUpsertSupport<").append(beanClass).append("> {\n\n");
 
         sb.append("    public static final String SCHEMA = ")
                 .append(schema == null ? "null" : "\"" + escape(schema) + "\"").append(";\n");
@@ -173,48 +162,82 @@ public final class DbMetaGenerator {
         sb.append("    public static final String UPDATE_BY_ID_SQL = \"").append(escape(updateSql)).append("\";\n");
         sb.append("    public static final String SELECT_ALL_SQL = \"").append(escape(selectAllSql)).append("\";\n\n");
 
-        sb.append("    // Upsert (dialect-specific)\n");
         sb.append("    private static final String UPSERT_BY_ID_SQL_MSSQL = \"").append(escape(upsertMssql)).append("\";\n");
         sb.append("    private static final String UPSERT_BY_ID_SQL_SYBASE = \"").append(escape(upsertSybase)).append("\";\n");
         sb.append("    private static final String UPSERT_BY_ID_SQL_ORACLE = \"").append(escape(upsertOracle)).append("\";\n");
         sb.append("    private static final String UPSERT_BY_ID_SQL_HSQL   = \"").append(escape(upsertHsql)).append("\";\n\n");
 
-        sb.append("    // Batch upsert via temp table (templates; {TEMP} substituted at runtime)\n");
         sb.append("    private static final String UPSERT_TEMP_COL_DEFS = \"").append(escape(tempColDefs)).append("\";\n");
+        sb.append("    private static final String UPSERT_TEMP_INSERT_COLS = \"").append(escape(tempInsertCols)).append("\";\n");
+        sb.append("    private static final int UPSERT_TEMP_PARAM_COUNT = ").append(tempParamCount).append(";\n\n");
+
         sb.append("    private static final String MERGE_FROM_TEMP_MSSQL_TPL = \"").append(escape(mergeFromTempMssql)).append("\";\n");
         sb.append("    private static final String MERGE_FROM_TEMP_SYBASE_TPL = \"").append(escape(mergeFromTempSybase)).append("\";\n");
         sb.append("    private static final String MERGE_FROM_TEMP_ORACLE_TPL = \"").append(escape(mergeFromTempOracle)).append("\";\n");
         sb.append("    private static final String MERGE_FROM_TEMP_HSQL_TPL   = \"").append(escape(mergeFromTempHsql)).append("\";\n\n");
 
-        sb.append("    public static final ").append(metaClass)
-                .append(" INSTANCE = new ").append(metaClass).append("();\n\n");
+        // param types constants
+        sb.append("    private static final SQLType[] INSERT_PARAM_TYPES = new SQLType[] {");
+        for (int i = 0; i < insCols.size(); i++) {
+            if (i > 0) sb.append(", ");
+            sb.append(jdbcTypeExpr(insCols.get(i).sqlType(), insCols.get(i).typeName()));
+        }
+        sb.append("};\n");
+
+        sb.append("    private static final SQLType[] UPDATE_BY_ID_PARAM_TYPES = new SQLType[] {");
+        boolean first = true;
+        for (Col c : updCols) {
+            if (!first) sb.append(", ");
+            first = false;
+            sb.append(jdbcTypeExpr(c.sqlType(), c.typeName()));
+        }
+        for (Col c : pkCols) {
+            if (!first) sb.append(", ");
+            first = false;
+            sb.append(jdbcTypeExpr(c.sqlType(), c.typeName()));
+        }
+        sb.append("};\n");
+
+        sb.append("    private static final SQLType[] UPSERT_BY_ID_PARAM_TYPES = new SQLType[] {");
+        for (int i = 0; i < mergeCols.size(); i++) {
+            if (i > 0) sb.append(", ");
+            sb.append(jdbcTypeExpr(mergeCols.get(i).sqlType(), mergeCols.get(i).typeName()));
+        }
+        sb.append("};\n\n");
+
+        sb.append("    public static final ").append(metaClass).append(" INSTANCE = new ").append(metaClass).append("();\n\n");
         sb.append("    private ").append(metaClass).append("() {}\n\n");
 
-        // DbMeta interface (existing)
+        // required DbMeta basics
         sb.append("    @Override public String schema() { return SCHEMA; }\n");
         sb.append("    @Override public String table()  { return TABLE; }\n");
         sb.append("    @Override public String fqn()    { return FQN; }\n\n");
+
         sb.append("    @Override public String insertSql() { return INSERT_SQL; }\n");
         sb.append("    @Override public String updateByIdSql() { return UPDATE_BY_ID_SQL; }\n");
         sb.append("    @Override public String selectAllSql() { return SELECT_ALL_SQL; }\n\n");
 
-        // upsertByIdSql(dialect)
-        sb.append("    @Override\n");
-        sb.append("    public String upsertByIdSql(DbDialect dialect) {\n");
-        sb.append("        if (dialect == null) throw new IllegalArgumentException(\"dialect is null\");\n");
-        sb.append("        return switch (dialect) {\n");
-        sb.append("            case MSSQL  -> UPSERT_BY_ID_SQL_MSSQL;\n");
-        sb.append("            case SYBASE -> UPSERT_BY_ID_SQL_SYBASE;\n");
-        sb.append("            case ORACLE -> UPSERT_BY_ID_SQL_ORACLE;\n");
-        sb.append("            case HSQL   -> UPSERT_BY_ID_SQL_HSQL;\n");
-        sb.append("        };\n");
-        sb.append("    }\n\n");
+        // dialect sql hooks for base class
+        sb.append("    @Override protected String upsertByIdSqlMssql() { return UPSERT_BY_ID_SQL_MSSQL; }\n");
+        sb.append("    @Override protected String upsertByIdSqlSybase() { return UPSERT_BY_ID_SQL_SYBASE; }\n");
+        sb.append("    @Override protected String upsertByIdSqlOracle() { return UPSERT_BY_ID_SQL_ORACLE; }\n");
+        sb.append("    @Override protected String upsertByIdSqlHsql() { return UPSERT_BY_ID_SQL_HSQL; }\n\n");
+
+        sb.append("    @Override protected String upsertTempColDefs() { return UPSERT_TEMP_COL_DEFS; }\n");
+        sb.append("    @Override protected String upsertTempInsertColumns() { return UPSERT_TEMP_INSERT_COLS; }\n");
+        sb.append("    @Override protected int upsertTempParamCount() { return UPSERT_TEMP_PARAM_COUNT; }\n\n");
+
+        sb.append("    @Override protected String mergeFromTempTplMssql() { return MERGE_FROM_TEMP_MSSQL_TPL; }\n");
+        sb.append("    @Override protected String mergeFromTempTplSybase() { return MERGE_FROM_TEMP_SYBASE_TPL; }\n");
+        sb.append("    @Override protected String mergeFromTempTplOracle() { return MERGE_FROM_TEMP_ORACLE_TPL; }\n");
+        sb.append("    @Override protected String mergeFromTempTplHsql() { return MERGE_FROM_TEMP_HSQL_TPL; }\n\n");
 
         // fromRow
         sb.append("    @Override\n");
         sb.append("    public ").append(beanClass).append(" fromRow(ResultSet rs) throws SQLException {\n");
         sb.append("        ").append(beanClass).append(" e = new ").append(beanClass).append("();\n");
         sb.append("        int i = 1;\n");
+
         for (Col c : cols) {
             String prop = Naming.sanitizeJavaIdentifier(Naming.toFieldName(c.colName()));
             String cap  = Naming.capitalize(prop);
@@ -225,7 +248,6 @@ public final class DbMetaGenerator {
             if (eb != null) {
                 TypeMappings.JavaType jt = TypeMappings.mapSqlTypeToJava(c.sqlType(), c.typeName(), null);
                 String rawExpr = rsReadExpr(jt.javaType(), nullable, "rs", "i");
-
                 sb.append("        e.set").append(cap).append("(")
                         .append(eb.enumJavaSimple()).append(".").append(eb.lookupNullableMethod())
                         .append("(").append(rawExpr).append(")")
@@ -237,149 +259,99 @@ public final class DbMetaGenerator {
             }
             sb.append("        i++;\n");
         }
+
         sb.append("        return e;\n");
         sb.append("    }\n\n");
 
-        // insert params/types (existing)
-        sb.append("    public Object[] getInsertParameters(").append(beanClass).append(" e) {\n");
+        // insert params/types
+        sb.append("    @Override\n");
+        sb.append("    public Object[] insertParams(").append(beanClass).append(" e) {\n");
         sb.append("        return new Object[] {");
         for (int idx = 0; idx < insCols.size(); idx++) {
             Col c = insCols.get(idx);
             if (idx > 0) sb.append(", ");
-            sb.append(beanGetterExpr(beanClass, c, schema, table));
+
+            String prop = Naming.sanitizeJavaIdentifier(Naming.toFieldName(c.colName()));
+            String cap = Naming.capitalize(prop);
+
+            EnumOverrideIndex.Binding eb = (enumOverrides == null) ? null : enumOverrides.find(schema, table, c.colName());
+            if (eb != null) {
+                sb.append("e.get").append(cap).append("() == null ? null : e.get")
+                        .append(cap).append("().").append(eb.keyGetterMethod()).append("()");
+            } else {
+                sb.append("e.get").append(cap).append("()");
+            }
         }
         sb.append("};\n");
         sb.append("    }\n\n");
 
-        sb.append("    public SQLType[] getInsertParameterTypes() {\n");
-        sb.append("        return new SQLType[] {");
-        for (int idx = 0; idx < insCols.size(); idx++) {
-            if (idx > 0) sb.append(", ");
-            sb.append(jdbcTypeExpr(insCols.get(idx).sqlType(), insCols.get(idx).typeName()));
-        }
-        sb.append("};\n");
-        sb.append("    }\n\n");
+        sb.append("    @Override public SQLType[] insertParamTypes() { return INSERT_PARAM_TYPES; }\n\n");
 
-        // update params/types (existing)
-        sb.append("    public Object[] getUpdateByIdParameters(").append(beanClass).append(" e) {\n");
+        // update params/types
+        sb.append("    @Override\n");
+        sb.append("    public Object[] updateByIdParams(").append(beanClass).append(" e) {\n");
         sb.append("        return new Object[] {");
-        boolean first = true;
-        for (Col c : updCols) {
-            if (!first) sb.append(", ");
-            first = false;
-            sb.append(beanGetterExpr(beanClass, c, schema, table));
-        }
-        for (Col c : pkCols) {
-            if (!first) sb.append(", ");
-            first = false;
-            sb.append(beanGetterExpr(beanClass, c, schema, table));
-        }
-        sb.append("};\n");
-        sb.append("    }\n\n");
 
-        sb.append("    public SQLType[] getUpdateByIdParameterTypes() {\n");
-        sb.append("        return new SQLType[] {");
         first = true;
         for (Col c : updCols) {
             if (!first) sb.append(", ");
             first = false;
-            sb.append(jdbcTypeExpr(c.sqlType(), c.typeName()));
+
+            String prop = Naming.sanitizeJavaIdentifier(Naming.toFieldName(c.colName()));
+            String cap = Naming.capitalize(prop);
+
+            EnumOverrideIndex.Binding eb = (enumOverrides == null) ? null : enumOverrides.find(schema, table, c.colName());
+            if (eb != null) {
+                sb.append("e.get").append(cap).append("() == null ? null : e.get")
+                        .append(cap).append("().").append(eb.keyGetterMethod()).append("()");
+            } else {
+                sb.append("e.get").append(cap).append("()");
+            }
         }
         for (Col c : pkCols) {
             if (!first) sb.append(", ");
             first = false;
-            sb.append(jdbcTypeExpr(c.sqlType(), c.typeName()));
+
+            String prop = Naming.sanitizeJavaIdentifier(Naming.toFieldName(c.colName()));
+            String cap = Naming.capitalize(prop);
+
+            EnumOverrideIndex.Binding eb = (enumOverrides == null) ? null : enumOverrides.find(schema, table, c.colName());
+            if (eb != null) {
+                sb.append("e.get").append(cap).append("() == null ? null : e.get")
+                        .append(cap).append("().").append(eb.keyGetterMethod()).append("()");
+            } else {
+                sb.append("e.get").append(cap).append("()");
+            }
         }
+
         sb.append("};\n");
         sb.append("    }\n\n");
 
-        // DbMeta methods via above (existing)
-        sb.append("    @Override public Object[] insertParams(").append(beanClass).append(" e) { return getInsertParameters(e); }\n");
-        sb.append("    @Override public SQLType[] insertParamTypes() { return getInsertParameterTypes(); }\n");
-        sb.append("    @Override public Object[] updateByIdParams(").append(beanClass).append(" e) { return getUpdateByIdParameters(e); }\n");
-        sb.append("    @Override public SQLType[] updateByIdParamTypes() { return getUpdateByIdParameterTypes(); }\n\n");
+        sb.append("    @Override public SQLType[] updateByIdParamTypes() { return UPDATE_BY_ID_PARAM_TYPES; }\n\n");
 
         // upsert params/types
         sb.append("    @Override\n");
         sb.append("    public Object[] upsertByIdParams(").append(beanClass).append(" e) {\n");
         sb.append("        return new Object[] {");
-        for (int idx = 0; idx < srcCols.size(); idx++) {
-            Col c = srcCols.get(idx);
-            if (idx > 0) sb.append(", ");
-            sb.append(beanGetterExpr(beanClass, c, schema, table));
+        for (int i = 0; i < mergeCols.size(); i++) {
+            if (i > 0) sb.append(", ");
+            Col c = mergeCols.get(i);
+
+            String prop = Naming.sanitizeJavaIdentifier(Naming.toFieldName(c.colName()));
+            String cap  = Naming.capitalize(prop);
+
+            EnumOverrideIndex.Binding eb = (enumOverrides == null) ? null : enumOverrides.find(schema, table, c.colName());
+            if (eb != null) {
+                sb.append("e.get").append(cap).append("() == null ? null : e.get")
+                        .append(cap).append("().").append(eb.keyGetterMethod()).append("()");
+            } else {
+                sb.append("e.get").append(cap).append("()");
+            }
         }
         sb.append("};\n");
         sb.append("    }\n\n");
 
-        sb.append("    @Override\n");
-        sb.append("    public SQLType[] upsertByIdParamTypes() {\n");
-        sb.append("        return new SQLType[] {");
-        for (int idx = 0; idx < srcCols.size(); idx++) {
-            if (idx > 0) sb.append(", ");
-            sb.append(jdbcTypeExpr(srcCols.get(idx).sqlType(), srcCols.get(idx).typeName()));
-        }
-        sb.append("};\n");
-        sb.append("    }\n\n");
-
-        // temp helpers
-        sb.append("    @Override\n");
-        sb.append("    public String createUpsertTempTableSql(DbDialect dialect, String suffix) {\n");
-        sb.append("        String tn = upsertTempName(dialect, suffix);\n");
-        sb.append("        return switch (dialect) {\n");
-        sb.append("            case MSSQL, SYBASE -> \"CREATE TABLE \" + tn + \" (\" + UPSERT_TEMP_COL_DEFS + \")\";\n");
-        sb.append("            case ORACLE, HSQL  -> \"CREATE GLOBAL TEMPORARY TABLE \" + tn + \" (\" + UPSERT_TEMP_COL_DEFS + \") ON COMMIT DELETE ROWS\";\n");
-        sb.append("        };\n");
-        sb.append("    }\n\n");
-
-        sb.append("    @Override\n");
-        sb.append("    public String dropUpsertTempTableSql(DbDialect dialect, String suffix) {\n");
-        sb.append("        String tn = upsertTempName(dialect, suffix);\n");
-        sb.append("        return \"DROP TABLE \" + tn;\n");
-        sb.append("    }\n\n");
-
-        sb.append("    @Override\n");
-        sb.append("    public String insertUpsertTempSql(DbDialect dialect, String suffix) {\n");
-        sb.append("        String tn = upsertTempName(dialect, suffix);\n");
-        sb.append("        return \"INSERT INTO \" + tn + \" (").append(escape(tempInsertCols)).append(") VALUES (").append(escape(tempInsertQ)).append(")\";\n");
-        sb.append("    }\n\n");
-
-        sb.append("    @Override\n");
-        sb.append("    public String mergeUpsertFromTempSql(DbDialect dialect, String suffix) {\n");
-        sb.append("        String tn = upsertTempName(dialect, suffix);\n");
-        sb.append("        String tpl = switch (dialect) {\n");
-        sb.append("            case MSSQL  -> MERGE_FROM_TEMP_MSSQL_TPL;\n");
-        sb.append("            case SYBASE -> MERGE_FROM_TEMP_SYBASE_TPL;\n");
-        sb.append("            case ORACLE -> MERGE_FROM_TEMP_ORACLE_TPL;\n");
-        sb.append("            case HSQL   -> MERGE_FROM_TEMP_HSQL_TPL;\n");
-        sb.append("        };\n");
-        sb.append("        return tpl.replace(\"{TEMP}\", tn);\n");
-        sb.append("    }\n\n");
-
-        sb.append("    public static void bind(java.sql.PreparedStatement ps, Object[] params, SQLType[] types) throws SQLException {\n");
-        sb.append("        Jdbc.bind(ps, params, types);\n");
-        sb.append("    }\n\n");
-
-        // temp name builder + suffix sanitizer (avoid SQL injection)
-        sb.append("    private static String upsertTempName(DbDialect dialect, String suffix) {\n");
-        sb.append("        String sfx = safeSuffix(suffix);\n");
-        sb.append("        return switch (dialect) {\n");
-        sb.append("            case MSSQL, SYBASE -> \"#\" + TABLE + \"_UPSERT_\" + sfx;\n");
-        sb.append("            case ORACLE, HSQL  -> TABLE + \"_UPSERT_\" + sfx;\n");
-        sb.append("        };\n");
-        sb.append("    }\n\n");
-
-        sb.append("    private static String safeSuffix(String suffix) {\n");
-        sb.append("        String s = (suffix == null) ? \"\" : suffix.trim();\n");
-        sb.append("        if (s.isEmpty()) return \"X\";\n");
-        sb.append("        StringBuilder b = new StringBuilder(s.length());\n");
-        sb.append("        for (int i = 0; i < s.length(); i++) {\n");
-        sb.append("            char ch = s.charAt(i);\n");
-        sb.append("            if ((ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || ch == '_') b.append(ch);\n");
-        sb.append("            else b.append('_');\n");
-        sb.append("        }\n");
-        sb.append("        String out = b.toString();\n");
-        sb.append("        return out.length() > 32 ? out.substring(0, 32) : out;\n");
-        sb.append("    }\n");
+        sb.append("    @Override public SQLType[] upsertByIdParamTypes() { return UPSERT_BY_ID_PARAM_TYPES; }\n");
 
         sb.append("}\n");
         return sb.toString();
@@ -390,37 +362,24 @@ public final class DbMetaGenerator {
     // ------------------------------------------------------------------
 
     private static String renderRegistry(String pkg, String cls, String metasPkg, List<String> metaClassNames) {
-        StringBuilder sb = new StringBuilder(12_000);
+        StringBuilder sb = new StringBuilder(10_000);
         sb.append("package ").append(pkg).append(";\n\n");
         sb.append("import java.util.*;\n");
         sb.append("import org.github.dbjo.meta.jdbc.DbMeta;\n");
         sb.append("import ").append(metasPkg).append(".*;\n\n");
 
-        sb.append("/**\n");
-        sb.append(" * Auto-generated registry of all DbMeta instances.\n");
-        sb.append(" *\n");
-        sb.append(" * Keys:\n");
-        sb.append(" *  - fqn: \"SCHEMA.TABLE\" when schema present, else \"TABLE\".\n");
-        sb.append(" *  - lookups are case-insensitive.\n");
-        sb.append(" */\n");
         sb.append("public final class ").append(cls).append(" {\n\n");
-
         sb.append("    private ").append(cls).append("() {}\n\n");
-
         sb.append("    public static final List<DbMeta<?>> ALL;\n");
         sb.append("    public static final Map<String, DbMeta<?>> BY_FQN;\n\n");
 
         sb.append("    static {\n");
         sb.append("        List<DbMeta<?>> a = new ArrayList<>();\n");
-        for (String m : metaClassNames) {
-            sb.append("        a.add(").append(m).append(".INSTANCE);\n");
-        }
+        for (String m : metaClassNames) sb.append("        a.add(").append(m).append(".INSTANCE);\n");
         sb.append("        ALL = Collections.unmodifiableList(a);\n\n");
 
         sb.append("        Map<String, DbMeta<?>> m = new HashMap<>();\n");
-        sb.append("        for (DbMeta<?> dm : a) {\n");
-        sb.append("            m.put(norm(dm.fqn()), dm);\n");
-        sb.append("        }\n");
+        sb.append("        for (DbMeta<?> dm : a) m.put(norm(dm.fqn()), dm);\n");
         sb.append("        BY_FQN = Collections.unmodifiableMap(m);\n");
         sb.append("    }\n\n");
 
@@ -444,16 +403,13 @@ public final class DbMetaGenerator {
         sb.append("        return findByFqn(fqn).orElseThrow(() -> new NoSuchElementException(\"Unknown fqn: \" + fqn));\n");
         sb.append("    }\n\n");
 
-        sb.append("    private static String norm(String s) {\n");
-        sb.append("        return s.trim().toLowerCase(Locale.ROOT);\n");
-        sb.append("    }\n");
-
+        sb.append("    private static String norm(String s) { return s.trim().toLowerCase(Locale.ROOT); }\n");
         sb.append("}\n");
         return sb.toString();
     }
 
     // ------------------------------------------------------------------
-    // helpers (generation-time)
+    // helpers used by generator
     // ------------------------------------------------------------------
 
     private static boolean isNullable(Col c) {
@@ -461,22 +417,57 @@ public final class DbMetaGenerator {
         return n == null || n == Nullability.NULLABLE || n == Nullability.UNKNOWN;
     }
 
-    private String beanGetterExpr(String beanClass, Col c, String schema, String table) {
-        String prop = Naming.sanitizeJavaIdentifier(Naming.toFieldName(c.colName()));
-        String cap = Naming.capitalize(prop);
-
-        EnumOverrideIndex.Binding eb = (enumOverrides == null) ? null : enumOverrides.find(schema, table, c.colName());
-        if (eb != null) {
-            return "e.get" + cap + "() == null ? null : e.get" + cap + "()." + eb.keyGetterMethod() + "()";
-        }
-        return "e.get" + cap + "()";
+    private static List<Col> buildMergeCols(List<Col> pkCols, List<Col> insCols, List<Col> updCols) {
+        // pk first, then update cols, then remaining insert cols (avoid duplicates by colName)
+        LinkedHashMap<String, Col> m = new LinkedHashMap<>();
+        for (Col c : pkCols) m.put(key(c), c);
+        for (Col c : updCols) m.putIfAbsent(key(c), c);
+        for (Col c : insCols) m.putIfAbsent(key(c), c);
+        return new ArrayList<>(m.values());
     }
 
-    private static List<Col> unionByName(List<Col> a, List<Col> b) {
-        Map<String, Col> m = new LinkedHashMap<>();
-        for (Col c : a) if (c != null && c.colName() != null) m.putIfAbsent(c.colName().toUpperCase(Locale.ROOT), c);
-        for (Col c : b) if (c != null && c.colName() != null) m.putIfAbsent(c.colName().toUpperCase(Locale.ROOT), c);
-        return new ArrayList<>(m.values());
+    private static String key(Col c) {
+        return (c == null || c.colName() == null) ? "" : c.colName().toUpperCase(Locale.ROOT);
+    }
+
+    private static String joinColNames(List<Col> cols) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < cols.size(); i++) {
+            if (i > 0) sb.append(", ");
+            sb.append(cols.get(i).colName());
+        }
+        return sb.toString();
+    }
+
+    private static String buildTempColDefs(List<Col> cols) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < cols.size(); i++) {
+            Col c = cols.get(i);
+            if (i > 0) sb.append(", ");
+            sb.append(c.colName()).append(" ").append(typeDecl(c));
+            if (c.nullability() == Nullability.NO_NULLS) sb.append(" NOT NULL");
+        }
+        return sb.toString();
+    }
+
+    private static String typeDecl(Col c) {
+        // Use TYPE_NAME + size/scale when reasonable.
+        String tn = (c.typeName() == null) ? "" : c.typeName().trim();
+        String up = tn.toUpperCase(Locale.ROOT);
+
+        int size = c.size();
+        int scale = c.scale();
+
+        if (up.contains("CHAR") || up.contains("BINARY")) {
+            if (size > 0 && !up.contains("(")) return tn + "(" + size + ")";
+        }
+        if (up.contains("DECIMAL") || up.contains("NUMERIC")) {
+            if (size > 0 && !up.contains("(")) {
+                if (scale > 0) return tn + "(" + size + "," + scale + ")";
+                return tn + "(" + size + ")";
+            }
+        }
+        return tn.isBlank() ? "VARCHAR(255)" : tn;
     }
 
     private static String buildInsertSql(String fqn, List<Col> cols) {
@@ -529,238 +520,151 @@ public final class DbMetaGenerator {
         return sb.toString();
     }
 
-    private static String buildMergeOnClause(List<Col> pkCols) {
-        if (pkCols == null || pkCols.isEmpty()) return "1=0"; // always insert if no PK
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < pkCols.size(); i++) {
-            if (i > 0) sb.append(" AND ");
-            String c = pkCols.get(i).colName();
-            sb.append("t.").append(c).append("=s.").append(c);
-        }
-        return sb.toString();
-    }
-
-    private static String buildMergeUpdateSetClause(List<Col> updCols) {
-        if (updCols == null || updCols.isEmpty()) return "";
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < updCols.size(); i++) {
-            if (i > 0) sb.append(", ");
-            String c = updCols.get(i).colName();
-            sb.append(c).append("=s.").append(c);
-        }
-        return sb.toString();
-    }
-
-    private static String joinColNames(List<Col> cols) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < cols.size(); i++) {
-            if (i > 0) sb.append(", ");
-            sb.append(cols.get(i).colName());
-        }
-        return sb.toString();
-    }
-
-    private static String joinPrefixedColNames(String prefix, List<Col> cols) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < cols.size(); i++) {
-            if (i > 0) sb.append(", ");
-            sb.append(prefix).append(".").append(cols.get(i).colName());
-        }
-        return sb.toString();
-    }
-
-    private static String repeatQ(int n) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < n; i++) {
+    private static String buildUpsertMssqlSybase(String fqn, List<Col> mergeCols, List<Col> pkCols, List<Col> updCols, List<Col> insCols, boolean mssql) {
+        // MERGE INTO <t> AS t USING (VALUES (?,...)) AS s (cols...) ON (...) WHEN MATCHED THEN UPDATE ... WHEN NOT MATCHED THEN INSERT ...
+        StringBuilder sb = new StringBuilder(2000);
+        sb.append("MERGE INTO ").append(fqn).append(" AS t USING (VALUES (");
+        for (int i = 0; i < mergeCols.size(); i++) {
             if (i > 0) sb.append(", ");
             sb.append("?");
         }
-        return sb.toString();
-    }
-
-    private static String buildMergeUpsertSingle_MssqlSybase(
-            String fqn,
-            List<Col> srcCols,
-            String onClause,
-            String updateSet,
-            String insertCols,
-            String insertVals,
-            boolean terminateSemicolon
-    ) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("MERGE INTO ").append(fqn).append(" AS t ");
-        sb.append("USING (VALUES (").append(repeatQ(srcCols.size())).append(")) AS s (").append(joinColNames(srcCols)).append(") ");
-        sb.append("ON (").append(onClause).append(") ");
-        if (updateSet != null && !updateSet.isBlank()) {
-            sb.append("WHEN MATCHED THEN UPDATE SET ").append(updateSet).append(" ");
+        sb.append(")) AS s (").append(joinColNames(mergeCols)).append(") ON (");
+        for (int i = 0; i < pkCols.size(); i++) {
+            if (i > 0) sb.append(" AND ");
+            sb.append("t.").append(pkCols.get(i).colName()).append("=s.").append(pkCols.get(i).colName());
         }
-        sb.append("WHEN NOT MATCHED THEN INSERT (").append(insertCols).append(") VALUES (").append(insertVals).append(")");
-        if (terminateSemicolon) sb.append(";");
-        return sb.toString();
-    }
-
-    private static String buildMergeUpsertSingle_Oracle(
-            String fqn,
-            List<Col> srcCols,
-            String onClause,
-            String updateSet,
-            String insertCols,
-            String insertVals
-    ) {
-        // USING (SELECT ? AS C1, ? AS C2 ... FROM dual)
-        StringBuilder using = new StringBuilder();
-        using.append("SELECT ");
-        for (int i = 0; i < srcCols.size(); i++) {
-            if (i > 0) using.append(", ");
-            using.append("? AS ").append(srcCols.get(i).colName());
-        }
-        using.append(" FROM dual");
-
-        StringBuilder sb = new StringBuilder();
-        sb.append("MERGE INTO ").append(fqn).append(" t ");
-        sb.append("USING (").append(using).append(") s ");
-        sb.append("ON (").append(onClause).append(") ");
-        if (updateSet != null && !updateSet.isBlank()) {
-            sb.append("WHEN MATCHED THEN UPDATE SET ").append(updateSet).append(" ");
-        }
-        sb.append("WHEN NOT MATCHED THEN INSERT (").append(insertCols).append(") VALUES (").append(insertVals).append(")");
-        return sb.toString();
-    }
-
-    private static String buildMergeUpsertSingle_Hsql(
-            String fqn,
-            List<Col> srcCols,
-            String onClause,
-            String updateSet,
-            String insertCols,
-            String insertVals
-    ) {
-        // HSQLDB needs explicit CAST in VALUES to avoid unknown parameter types in USING clause.
-        // We cast to the column's SQL type (best-effort from TYPE_NAME/precision/scale).
-        StringBuilder vals = new StringBuilder();
-        for (int i = 0; i < srcCols.size(); i++) {
-            if (i > 0) vals.append(", ");
-            Col c = srcCols.get(i);
-            vals.append("CAST(? AS ").append(hsqlCastType(c)).append(")");
-        }
-
-        StringBuilder sb = new StringBuilder();
-        sb.append("MERGE INTO ").append(fqn).append(" AS t ");
-        sb.append("USING (VALUES (").append(vals).append(")) AS s (").append(joinColNames(srcCols)).append(") ");
-        sb.append("ON (").append(onClause).append(") ");
-        if (updateSet != null && !updateSet.isBlank()) {
-            sb.append("WHEN MATCHED THEN UPDATE SET ").append(updateSet).append(" ");
-        }
-        sb.append("WHEN NOT MATCHED THEN INSERT (").append(insertCols).append(") VALUES (").append(insertVals).append(")");
-        return sb.toString();
-    }
-
-    private static String buildMergeFromTemp_MssqlSybase(
-            String fqn,
-            String tempNameToken,
-            String onClause,
-            String updateSet,
-            String insertCols,
-            String insertVals,
-            boolean terminateSemicolon
-    ) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("MERGE INTO ").append(fqn).append(" AS t ");
-        sb.append("USING ").append(tempNameToken).append(" AS s ");
-        sb.append("ON (").append(onClause).append(") ");
-        if (updateSet != null && !updateSet.isBlank()) {
-            sb.append("WHEN MATCHED THEN UPDATE SET ").append(updateSet).append(" ");
-        }
-        sb.append("WHEN NOT MATCHED THEN INSERT (").append(insertCols).append(") VALUES (").append(insertVals).append(")");
-        if (terminateSemicolon) sb.append(";");
-        return sb.toString();
-    }
-
-    private static String buildMergeFromTemp_Oracle(
-            String fqn,
-            String tempNameToken,
-            String onClause,
-            String updateSet,
-            String insertCols,
-            String insertVals
-    ) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("MERGE INTO ").append(fqn).append(" t ");
-        sb.append("USING ").append(tempNameToken).append(" s ");
-        sb.append("ON (").append(onClause).append(") ");
-        if (updateSet != null && !updateSet.isBlank()) {
-            sb.append("WHEN MATCHED THEN UPDATE SET ").append(updateSet).append(" ");
-        }
-        sb.append("WHEN NOT MATCHED THEN INSERT (").append(insertCols).append(") VALUES (").append(insertVals).append(")");
-        return sb.toString();
-    }
-
-    private static String buildMergeFromTemp_Hsql(
-            String fqn,
-            String tempNameToken,
-            String onClause,
-            String updateSet,
-            String insertCols,
-            String insertVals
-    ) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("MERGE INTO ").append(fqn).append(" AS t ");
-        sb.append("USING ").append(tempNameToken).append(" AS s ");
-        sb.append("ON (").append(onClause).append(") ");
-        if (updateSet != null && !updateSet.isBlank()) {
-            sb.append("WHEN MATCHED THEN UPDATE SET ").append(updateSet).append(" ");
-        }
-        sb.append("WHEN NOT MATCHED THEN INSERT (").append(insertCols).append(") VALUES (").append(insertVals).append(")");
-        return sb.toString();
-    }
-
-    private static String buildTempTableColumnDefs(List<Col> cols) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < cols.size(); i++) {
+        sb.append(") ");
+        sb.append("WHEN MATCHED THEN UPDATE SET ");
+        for (int i = 0; i < updCols.size(); i++) {
             if (i > 0) sb.append(", ");
-            Col c = cols.get(i);
-            sb.append(c.colName()).append(" ").append(sqlTypeDecl(c));
-            sb.append(isNullableForDdl(c) ? " NULL" : " NOT NULL");
+            sb.append(updCols.get(i).colName()).append("=s.").append(updCols.get(i).colName());
         }
+        sb.append(" WHEN NOT MATCHED THEN INSERT (");
+        sb.append(joinColNames(insCols)).append(") VALUES (");
+        for (int i = 0; i < insCols.size(); i++) {
+            if (i > 0) sb.append(", ");
+            sb.append("s.").append(insCols.get(i).colName());
+        }
+        sb.append(")");
+        if (mssql) sb.append(";");
         return sb.toString();
     }
 
-    private static boolean isNullableForDdl(Col c) {
-        Nullability n = c.nullability();
-        return n == null || n != Nullability.NO_NULLS;
+    private static String buildUpsertOracle(String fqn, List<Col> mergeCols, List<Col> pkCols, List<Col> updCols, List<Col> insCols) {
+        // MERGE INTO <t> t USING (SELECT ? AS C1, ? AS C2 FROM dual) s ON (...) WHEN MATCHED THEN UPDATE ... WHEN NOT MATCHED THEN INSERT ...
+        StringBuilder sb = new StringBuilder(2400);
+        sb.append("MERGE INTO ").append(fqn).append(" t USING (SELECT ");
+        for (int i = 0; i < mergeCols.size(); i++) {
+            if (i > 0) sb.append(", ");
+            sb.append("? AS ").append(mergeCols.get(i).colName());
+        }
+        sb.append(" FROM dual) s ON (");
+        for (int i = 0; i < pkCols.size(); i++) {
+            if (i > 0) sb.append(" AND ");
+            sb.append("t.").append(pkCols.get(i).colName()).append("=s.").append(pkCols.get(i).colName());
+        }
+        sb.append(") WHEN MATCHED THEN UPDATE SET ");
+        for (int i = 0; i < updCols.size(); i++) {
+            if (i > 0) sb.append(", ");
+            sb.append("t.").append(updCols.get(i).colName()).append("=s.").append(updCols.get(i).colName());
+        }
+        sb.append(" WHEN NOT MATCHED THEN INSERT (").append(joinColNames(insCols)).append(") VALUES (");
+        for (int i = 0; i < insCols.size(); i++) {
+            if (i > 0) sb.append(", ");
+            sb.append("s.").append(insCols.get(i).colName());
+        }
+        sb.append(")");
+        return sb.toString();
     }
 
-    private static String sqlTypeDecl(Col c) {
-        String tn = (c.typeName() == null) ? "" : c.typeName().trim();
-        String up = tn.toUpperCase(Locale.ROOT);
-
-        // If driver already includes precision/scale, keep it.
-        if (tn.contains("(")) return tn;
-
-        int size = c.size();
-        int scale = c.scale();
-
-        boolean wantsLen =
-                up.contains("CHAR") || up.contains("VARCHAR") || up.contains("VARBINARY") || up.contains("BINARY");
-        boolean wantsPrecScale =
-                up.contains("DECIMAL") || up.contains("NUMERIC") || up.equals("NUMBER");
-
-        if (wantsPrecScale && size > 0) {
-            if (scale > 0) return tn + "(" + size + "," + scale + ")";
-            return tn + "(" + size + ")";
+    private static String buildUpsertHsql(String fqn, List<Col> mergeCols, List<Col> pkCols, List<Col> updCols, List<Col> insCols) {
+        // Same shape as MSSQL/Sybase but with CAST(? AS <type>) for stability
+        StringBuilder sb = new StringBuilder(2600);
+        sb.append("MERGE INTO ").append(fqn).append(" AS t USING (VALUES (");
+        for (int i = 0; i < mergeCols.size(); i++) {
+            if (i > 0) sb.append(", ");
+            sb.append(hsqlCastExpr(mergeCols.get(i)));
         }
-
-        if (wantsLen && size > 0) {
-            return tn + "(" + size + ")";
+        sb.append(")) AS s (").append(joinColNames(mergeCols)).append(") ON (");
+        for (int i = 0; i < pkCols.size(); i++) {
+            if (i > 0) sb.append(" AND ");
+            sb.append("t.").append(pkCols.get(i).colName()).append("=s.").append(pkCols.get(i).colName());
         }
-
-        return tn.isEmpty() ? "VARCHAR(255)" : tn;
+        sb.append(") WHEN MATCHED THEN UPDATE SET ");
+        for (int i = 0; i < updCols.size(); i++) {
+            if (i > 0) sb.append(", ");
+            sb.append(updCols.get(i).colName()).append("=s.").append(updCols.get(i).colName());
+        }
+        sb.append(" WHEN NOT MATCHED THEN INSERT (").append(joinColNames(insCols)).append(") VALUES (");
+        for (int i = 0; i < insCols.size(); i++) {
+            if (i > 0) sb.append(", ");
+            sb.append("s.").append(insCols.get(i).colName());
+        }
+        sb.append(")");
+        return sb.toString();
     }
 
-    private static String hsqlCastType(Col c) {
-        // Cast target must be a valid HSQL type name; we reuse the best-effort decl.
-        // HSQL accepts VARCHAR(n), DECIMAL(p,s), TIMESTAMP, etc.
-        return sqlTypeDecl(c);
+    private static String hsqlCastExpr(Col c) {
+        String tn = (c.typeName() == null) ? "" : c.typeName().trim().toUpperCase(Locale.ROOT);
+        if (tn.isBlank()) return "?";
+        String castType = tn;
+
+        if ((tn.contains("CHAR") || tn.contains("BINARY")) && c.size() > 0 && !tn.contains("(")) {
+            castType = tn + "(" + c.size() + ")";
+        } else if ((tn.contains("DECIMAL") || tn.contains("NUMERIC")) && c.size() > 0 && !tn.contains("(")) {
+            if (c.scale() > 0) castType = tn + "(" + c.size() + "," + c.scale() + ")";
+            else castType = tn + "(" + c.size() + ")";
+        }
+        return "CAST(? AS " + castType + ")";
+    }
+
+    private static String buildMergeFromTempTpl(String fqn, List<Col> pkCols, List<Col> updCols, List<Col> insCols, boolean mssql) {
+        StringBuilder sb = new StringBuilder(1800);
+        sb.append("MERGE INTO ").append(fqn).append(" AS t USING {TEMP} AS s ON (");
+        for (int i = 0; i < pkCols.size(); i++) {
+            if (i > 0) sb.append(" AND ");
+            sb.append("t.").append(pkCols.get(i).colName()).append("=s.").append(pkCols.get(i).colName());
+        }
+        sb.append(") WHEN MATCHED THEN UPDATE SET ");
+        for (int i = 0; i < updCols.size(); i++) {
+            if (i > 0) sb.append(", ");
+            sb.append(updCols.get(i).colName()).append("=s.").append(updCols.get(i).colName());
+        }
+        sb.append(" WHEN NOT MATCHED THEN INSERT (").append(joinColNames(insCols)).append(") VALUES (");
+        for (int i = 0; i < insCols.size(); i++) {
+            if (i > 0) sb.append(", ");
+            sb.append("s.").append(insCols.get(i).colName());
+        }
+        sb.append(")");
+        if (mssql) sb.append(";");
+        return sb.toString();
+    }
+
+    private static String buildMergeFromTempTplOracle(String fqn, List<Col> pkCols, List<Col> updCols, List<Col> insCols) {
+        // Oracle wants: MERGE INTO t USING <table-or-subquery> s ON (...) ...
+        StringBuilder sb = new StringBuilder(1800);
+        sb.append("MERGE INTO ").append(fqn).append(" t USING {TEMP} s ON (");
+        for (int i = 0; i < pkCols.size(); i++) {
+            if (i > 0) sb.append(" AND ");
+            sb.append("t.").append(pkCols.get(i).colName()).append("=s.").append(pkCols.get(i).colName());
+        }
+        sb.append(") WHEN MATCHED THEN UPDATE SET ");
+        for (int i = 0; i < updCols.size(); i++) {
+            if (i > 0) sb.append(", ");
+            sb.append("t.").append(updCols.get(i).colName()).append("=s.").append(updCols.get(i).colName());
+        }
+        sb.append(" WHEN NOT MATCHED THEN INSERT (").append(joinColNames(insCols)).append(") VALUES (");
+        for (int i = 0; i < insCols.size(); i++) {
+            if (i > 0) sb.append(", ");
+            sb.append("s.").append(insCols.get(i).colName());
+        }
+        sb.append(")");
+        return sb.toString();
+    }
+
+    private static String buildMergeFromTempTplHsql(String fqn, List<Col> pkCols, List<Col> updCols, List<Col> insCols) {
+        // Same as generic MERGE without the trailing ';'
+        return buildMergeFromTempTpl(fqn, pkCols, updCols, insCols, false);
     }
 
     private static String escape(String s) {
@@ -777,64 +681,52 @@ public final class DbMetaGenerator {
             case Types.SMALLINT -> "JDBCType.SMALLINT";
             case Types.INTEGER -> "JDBCType.INTEGER";
             case Types.BIGINT -> "JDBCType.BIGINT";
-
             case Types.FLOAT, Types.REAL -> "JDBCType.REAL";
             case Types.DOUBLE -> "JDBCType.DOUBLE";
             case Types.DECIMAL -> "JDBCType.DECIMAL";
             case Types.NUMERIC -> "JDBCType.NUMERIC";
-
             case Types.BIT, Types.BOOLEAN -> "JDBCType.BOOLEAN";
-
             case Types.CHAR -> "JDBCType.CHAR";
             case Types.NCHAR -> "JDBCType.NCHAR";
-
             case Types.VARCHAR, Types.LONGVARCHAR -> "JDBCType.VARCHAR";
             case Types.NVARCHAR, Types.LONGNVARCHAR -> "JDBCType.NVARCHAR";
-
             case Types.CLOB -> "JDBCType.CLOB";
             case Types.NCLOB -> "JDBCType.NCLOB";
             case Types.SQLXML -> "JDBCType.SQLXML";
-
             case Types.DATE -> "JDBCType.DATE";
             case Types.TIME -> "JDBCType.TIME";
             case Types.TIME_WITH_TIMEZONE -> "JDBCType.TIME_WITH_TIMEZONE";
             case Types.TIMESTAMP -> "JDBCType.TIMESTAMP";
             case Types.TIMESTAMP_WITH_TIMEZONE -> "JDBCType.TIMESTAMP_WITH_TIMEZONE";
-
             case Types.BINARY -> "JDBCType.BINARY";
             case Types.VARBINARY, Types.LONGVARBINARY -> "JDBCType.VARBINARY";
             case Types.BLOB -> "JDBCType.BLOB";
-
             case Types.OTHER -> "JDBCType.OTHER";
             default -> "JDBCType.VARCHAR";
         };
     }
 
     private static String rsReadExpr(String javaType, boolean nullable, String rs, String idxVar) {
+        // You already have Jdbc.rsX helpers; keep using them for boxed primitives.
         return switch (javaType) {
-            case "Short"   -> nullable ? "Jdbc.rsShort(" + rs + ", " + idxVar + ")" : rs + ".getShort(" + idxVar + ")";
-            case "Integer" -> nullable ? "Jdbc.rsInt(" + rs + ", " + idxVar + ")" : rs + ".getInt(" + idxVar + ")";
-            case "Long"    -> nullable ? "Jdbc.rsLong(" + rs + ", " + idxVar + ")" : rs + ".getLong(" + idxVar + ")";
-            case "Float"   -> nullable ? "Jdbc.rsFloat(" + rs + ", " + idxVar + ")" : rs + ".getFloat(" + idxVar + ")";
-            case "Double"  -> nullable ? "Jdbc.rsDouble(" + rs + ", " + idxVar + ")" : rs + ".getDouble(" + idxVar + ")";
-            case "Boolean" -> nullable ? "Jdbc.rsBool(" + rs + ", " + idxVar + ")" : rs + ".getBoolean(" + idxVar + ")";
-
+            case "Short"   -> nullable ? "org.github.dbjo.meta.jdbc.Jdbc.rsShort(" + rs + ", " + idxVar + ")" : rs + ".getShort(" + idxVar + ")";
+            case "Integer" -> nullable ? "org.github.dbjo.meta.jdbc.Jdbc.rsInt(" + rs + ", " + idxVar + ")" : rs + ".getInt(" + idxVar + ")";
+            case "Long"    -> nullable ? "org.github.dbjo.meta.jdbc.Jdbc.rsLong(" + rs + ", " + idxVar + ")" : rs + ".getLong(" + idxVar + ")";
+            case "Float"   -> nullable ? "org.github.dbjo.meta.jdbc.Jdbc.rsFloat(" + rs + ", " + idxVar + ")" : rs + ".getFloat(" + idxVar + ")";
+            case "Double"  -> nullable ? "org.github.dbjo.meta.jdbc.Jdbc.rsDouble(" + rs + ", " + idxVar + ")" : rs + ".getDouble(" + idxVar + ")";
+            case "Boolean" -> nullable ? "org.github.dbjo.meta.jdbc.Jdbc.rsBool(" + rs + ", " + idxVar + ")" : rs + ".getBoolean(" + idxVar + ")";
             case "String"  -> rs + ".getString(" + idxVar + ")";
             case "byte[]"  -> rs + ".getBytes(" + idxVar + ")";
             case "BigDecimal" -> rs + ".getBigDecimal(" + idxVar + ")";
             case "Date"    -> rs + ".getDate(" + idxVar + ")";
             case "Time"    -> rs + ".getTime(" + idxVar + ")";
             case "Timestamp" -> rs + ".getTimestamp(" + idxVar + ")";
-
             case "OffsetDateTime" -> rs + ".getObject(" + idxVar + ", java.time.OffsetDateTime.class)";
             case "OffsetTime"     -> rs + ".getObject(" + idxVar + ", java.time.OffsetTime.class)";
             case "UUID"           -> rs + ".getObject(" + idxVar + ", java.util.UUID.class)";
-
             default -> rs + ".getObject(" + idxVar + ")";
         };
     }
 
-    private static String nz(String s) {
-        return s == null ? "" : s;
-    }
+    private static String nz(String s) { return s == null ? "" : s; }
 }
