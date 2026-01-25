@@ -1,28 +1,47 @@
 package org.github.dbjo.meta.jdbc;
 
+import java.sql.DatabaseMetaData;
+import java.sql.SQLException;
 import java.util.Locale;
 
 public enum DbDialect {
-    MSSQL,
-    SYBASE,
-    ORACLE,
-    HSQL;
+    MSSQL(128, "#"),
+    SYBASE(30, "#"),
+    ORACLE(30, null),
+    HSQL(128, null);
 
-    /** Best-effort mapping from DatabaseMetaData.getDatabaseProductName(). */
+    private final int identMaxLen;
+    private final String tempPrefix;
+
+    DbDialect(int identMaxLen, String tempPrefix) {
+        this.identMaxLen = identMaxLen;
+        this.tempPrefix = tempPrefix;
+    }
+
+    public int identMaxLen() { return identMaxLen; }
+
+    /** True for the “temp table load + single MERGE” strategy. */
+    public boolean prefersTempMergeBatch() {
+        return this == MSSQL || this == SYBASE;
+    }
+
+    public boolean supportsTempTables() { return tempPrefix != null; }
+
+    public String tempPrefix() { return tempPrefix; }
+
+    public static DbDialect from(DatabaseMetaData md) throws SQLException {
+        return fromProductName(md.getDatabaseProductName());
+    }
+
     public static DbDialect fromProductName(String productName) {
         if (productName == null) throw new IllegalArgumentException("productName is null");
-        String n = productName.toLowerCase(Locale.ROOT);
+        String s = productName.toLowerCase(Locale.ROOT);
 
-        if (n.contains("microsoft") || n.contains("sql server")) return MSSQL;
+        if (s.contains("microsoft") || s.contains("sql server")) return MSSQL;
+        if (s.contains("sybase")) return SYBASE;
+        if (s.contains("oracle")) return ORACLE;
+        if (s.contains("hsql")) return HSQL;
 
-        // Covers Adaptive Server Enterprise (ASE), SQL Anywhere, etc.
-        if (n.contains("sybase") || n.contains("adaptive server") || n.contains("ase") || n.contains("sql anywhere"))
-            return SYBASE;
-
-        if (n.contains("oracle")) return ORACLE;
-
-        if (n.contains("hsql")) return HSQL;
-
-        throw new IllegalArgumentException("Unsupported DB product: " + productName);
+        throw new IllegalArgumentException("Unknown DB dialect for productName=" + productName);
     }
 }

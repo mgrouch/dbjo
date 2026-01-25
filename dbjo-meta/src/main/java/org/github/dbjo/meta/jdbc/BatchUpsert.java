@@ -1,286 +1,199 @@
 package org.github.dbjo.meta.jdbc;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.SQLException;
-import java.sql.SQLType;
-import java.sql.Statement;
-import java.util.Iterator;
+import javax.sql.DataSource;
+import java.sql.*;
 import java.util.Objects;
 
 /**
- * Batch upsert helper.
- *
- * Strategy:
- *  - MSSQL/SYBASE: temp-table load (batched inserts) + single MERGE from temp.
- *  - ORACLE/HSQL: batch regular per-row upsert (MERGE ... USING dual / HSQL MERGE ... VALUES).
+ * Dialect-aware batch upsert:
+ *  - MSSQL/Sybase: temp-table + single MERGE (preferred)
+ *  - Oracle/HSQL: direct PreparedStatement batching of upsertByIdSql(dialect)
  */
-public final class BatchUpsert {
-    private BatchUpsert() {}
+public final class BatchUpsert<T> implements AutoCloseable {
 
-    /**
-     * For temp-table strategy:
-     *  - rowsInsertedIntoTemp: sum of insert-batch counts
-     *  - mergeAffectedRows: affected rows from MERGE FROM TEMP
-     *
-     * For direct-batch strategy (ORACLE/HSQL):
-     *  - rowsInsertedIntoTemp: 0
-     *  - mergeAffectedRows: sum of upsert-batch counts
-     */
-    public record Result(int rowsInsertedIntoTemp, int mergeAffectedRows) {}
-
-    public static <T> Builder<T> forMeta(DbMeta<T> meta) {
-        return new Builder<>(meta);
+    public static <T> Builder<T> builder(DataSource ds, DbDialect dialect, DbMetaUpsertSupport<T> meta) {
+        return new Builder<>(ds, dialect, meta);
     }
 
     public static final class Builder<T> {
-        private final DbMeta<T> meta;
+        private final DataSource ds;
+        private final DbDialect dialect;
+        private final DbMetaUpsertSupport<T> meta;
 
-        private DbDialect dialect;
         private String suffix = "X";
-
         private int batchSize = 500;
+        private boolean dropTempOnClose = true;
+        private Connection externalConn;
 
-        /** If true and dialect supports temp upsert, attempt CREATE temp table. */
-        private boolean ensureTempTable = true;
-
-        /** If true and dialect supports temp upsert, do DELETE FROM temp before loading. */
-        private boolean clearTempBeforeLoad = false;
-
-        /**
-         * Drop temp table at end (only relevant for MSSQL/SYBASE temp strategy).
-         * Default: true for MSSQL/SYBASE, false otherwise.
-         */
-        private Boolean dropTempTable = null;
-
-        /** If true, ignore create-table errors that look like "already exists". */
-        private boolean ignoreAlreadyExistsOnCreate = true;
-
-        /** Optional statement timeout (0 = driver default). */
-        private int statementTimeoutSeconds = 0;
-
-        /** Allow opting out of temp strategy even if supported (force direct batching). */
-        private boolean preferTempWhenAvailable = true;
-
-        private Builder(DbMeta<T> meta) {
+        private Builder(DataSource ds, DbDialect dialect, DbMetaUpsertSupport<T> meta) {
+            this.ds = Objects.requireNonNull(ds, "ds");
+            this.dialect = Objects.requireNonNull(dialect, "dialect");
             this.meta = Objects.requireNonNull(meta, "meta");
         }
 
-        public Builder<T> dialect(DbDialect d) { this.dialect = Objects.requireNonNull(d, "dialect"); return this; }
-        public Builder<T> suffix(String s) { this.suffix = (s == null || s.isBlank()) ? "X" : s; return this; }
+        public Builder<T> suffix(String suffix) { this.suffix = suffix; return this; }
+        public Builder<T> batchSize(int batchSize) { this.batchSize = Math.max(1, batchSize); return this; }
+        public Builder<T> dropTempOnClose(boolean drop) { this.dropTempOnClose = drop; return this; }
 
-        public Builder<T> batchSize(int n) {
-            if (n <= 0) throw new IllegalArgumentException("batchSize must be > 0");
-            this.batchSize = n;
-            return this;
+        /** Use caller-managed connection (BatchUpsert won't close it). */
+        public Builder<T> connection(Connection conn) { this.externalConn = conn; return this; }
+
+        public BatchUpsert<T> open() throws SQLException {
+            Connection c = (externalConn != null) ? externalConn : ds.getConnection();
+            boolean owns = (externalConn == null);
+            return new BatchUpsert<>(c, owns, dialect, meta, suffix, batchSize, dropTempOnClose);
+        }
+    }
+
+    private final Connection conn;
+    private final boolean ownsConn;
+    private final DbDialect dialect;
+    private final DbMetaUpsertSupport<T> meta;
+
+    private final String suffix;
+    private final int batchSize;
+    private final boolean dropTempOnClose;
+
+    private final boolean useTemp;
+
+    private PreparedStatement psDirect;
+
+    private PreparedStatement psTempIns;
+    private Statement stTempCtl;
+
+    private int queued = 0;
+
+    private BatchUpsert(Connection conn,
+                        boolean ownsConn,
+                        DbDialect dialect,
+                        DbMetaUpsertSupport<T> meta,
+                        String suffix,
+                        int batchSize,
+                        boolean dropTempOnClose) {
+        this.conn = Objects.requireNonNull(conn, "conn");
+        this.ownsConn = ownsConn;
+        this.dialect = Objects.requireNonNull(dialect, "dialect");
+        this.meta = Objects.requireNonNull(meta, "meta");
+        this.suffix = suffix;
+        this.batchSize = batchSize;
+        this.dropTempOnClose = dropTempOnClose;
+
+        // temp strategy is available only if meta supports it for this dialect
+        this.useTemp = meta.supportsUpsertTemp(dialect);
+    }
+
+    public BatchUpsert<T> add(T row) throws SQLException {
+        if (useTemp) {
+            ensureTemp();
+            Jdbc.bind(psTempIns, meta.upsertByIdParams(row), meta.upsertByIdParamTypes());
+            psTempIns.addBatch();
+        } else {
+            ensureDirect();
+            Jdbc.bind(psDirect, meta.upsertByIdParams(row), meta.upsertByIdParamTypes());
+            psDirect.addBatch();
         }
 
-        public Builder<T> ensureTempTable(boolean v) { this.ensureTempTable = v; return this; }
-        public Builder<T> clearTempBeforeLoad(boolean v) { this.clearTempBeforeLoad = v; return this; }
+        queued++;
+        if (queued >= batchSize) flush();
+        return this;
+    }
 
-        public Builder<T> dropTempTable(boolean v) { this.dropTempTable = v; return this; }
+    public int flush() throws SQLException {
+        if (queued == 0) return 0;
 
-        public Builder<T> ignoreAlreadyExistsOnCreate(boolean v) { this.ignoreAlreadyExistsOnCreate = v; return this; }
+        int affected = 0;
 
-        public Builder<T> statementTimeoutSeconds(int seconds) {
-            if (seconds < 0) throw new IllegalArgumentException("statementTimeoutSeconds must be >= 0");
-            this.statementTimeoutSeconds = seconds;
-            return this;
+        if (useTemp) {
+            int[] ins = psTempIns.executeBatch();
+            affected += sumPositive(ins);
+
+            // single MERGE from temp table
+            int merged = stTempCtl.executeUpdate(meta.mergeUpsertFromTempSql(dialect, suffix));
+            if (merged > 0) affected += merged;
+
+            // clear temp for next cycle (meta provides default or override)
+            String tn = meta.upsertTempTableName(dialect, suffix);
+            stTempCtl.executeUpdate("DELETE FROM " + tn);
+        } else {
+            int[] ups = psDirect.executeBatch();
+            affected += sumPositive(ups);
         }
 
-        /** If false, always use direct batching even on MSSQL/SYBASE. */
-        public Builder<T> preferTempWhenAvailable(boolean v) { this.preferTempWhenAvailable = v; return this; }
+        queued = 0;
+        return affected;
+    }
 
-        public Result execute(Connection con, Iterable<T> rows) throws SQLException {
-            Objects.requireNonNull(con, "con");
-            Objects.requireNonNull(rows, "rows");
-            if (dialect == null) throw new IllegalStateException("dialect not set");
+    @Override
+    public void close() throws SQLException {
+        SQLException err = null;
 
-            Iterator<T> it = rows.iterator();
-            if (!it.hasNext()) return new Result(0, 0);
+        try {
+            flush();
+        } catch (SQLException e) {
+            err = e;
+        }
 
-            // Oracle: NO temp-table strategy by design.
-            // HSQL: NO temp-table strategy by design (unless you later decide otherwise).
-            boolean canTemp = meta.supportsUpsertTemp(dialect);
-            boolean useTemp = preferTempWhenAvailable && canTemp;
-
-            if (!useTemp) {
-                int affected = batchUpsertDirect(con, it);
-                return new Result(0, affected);
-            }
-
-            boolean drop = (dropTempTable != null)
-                    ? dropTempTable
-                    : (dialect == DbDialect.MSSQL || dialect == DbDialect.SYBASE);
-
-            int inserted = 0;
-            int merged = 0;
-
+        if (useTemp && dropTempOnClose) {
             try {
-                if (ensureTempTable) {
-                    String ddl = meta.createUpsertTempTableSql(dialect, suffix);
-                    execSql(con, ddl, true);
+                // best-effort drop
+                try (Statement st = (stTempCtl != null ? stTempCtl : conn.createStatement())) {
+                    st.executeUpdate(meta.dropUpsertTempTableSql(dialect, suffix));
                 }
+            } catch (SQLException ignore) {
+                // swallow: close should not fail due to temp drop
+            }
+        }
 
-                if (clearTempBeforeLoad) {
-                    // Parse temp table name from INSERT SQL to avoid reconstructing naming rules here.
-                    String insSql = meta.insertUpsertTempSql(dialect, suffix);
-                    String tn = parseInsertIntoTableName(insSql);
-                    execSql(con, "DELETE FROM " + tn, false);
-                }
+        tryClose(psDirect);
+        tryClose(psTempIns);
+        tryClose(stTempCtl);
 
-                inserted = batchInsertTemp(con, it);
-
-                String mergeSql = meta.mergeUpsertFromTempSql(dialect, suffix);
-                merged = execUpdate(con, mergeSql);
-
-                if (drop) {
-                    String dropSql = meta.dropUpsertTempTableSql(dialect, suffix);
-                    execSql(con, dropSql, false);
-                }
-
-                return new Result(inserted, merged);
+        if (ownsConn) {
+            try {
+                conn.close();
             } catch (SQLException e) {
-                throw e;
+                if (err == null) err = e;
             }
         }
 
-        private int batchUpsertDirect(Connection con, Iterator<T> it) throws SQLException {
-            final String sql = meta.upsertByIdSql(dialect);
-            final SQLType[] types = meta.upsertByIdParamTypes();
+        if (err != null) throw err;
+    }
 
-            int affected = 0;
-            int pending = 0;
+    private void ensureDirect() throws SQLException {
+        if (psDirect != null) return;
+        psDirect = conn.prepareStatement(meta.upsertByIdSql(dialect));
+    }
 
-            try (PreparedStatement ps = con.prepareStatement(sql)) {
-                if (statementTimeoutSeconds > 0) ps.setQueryTimeout(statementTimeoutSeconds);
+    private void ensureTemp() throws SQLException {
+        if (psTempIns != null) return;
 
-                while (it.hasNext()) {
-                    T e = it.next();
-                    Object[] params = meta.upsertByIdParams(e);
+        stTempCtl = conn.createStatement();
 
-                    Jdbc.bind(ps, params, types);
-                    ps.addBatch();
-                    pending++;
+        // drop-if-exists best effort
+        try { stTempCtl.executeUpdate(meta.dropUpsertTempTableSql(dialect, suffix)); }
+        catch (SQLException ignore) {}
 
-                    if (pending >= batchSize) {
-                        affected += sumBatch(ps.executeBatch());
-                        pending = 0;
-                    }
-                }
+        stTempCtl.executeUpdate(meta.createUpsertTempTableSql(dialect, suffix));
 
-                if (pending > 0) {
-                    affected += sumBatch(ps.executeBatch());
-                }
-            }
+        psTempIns = conn.prepareStatement(meta.insertUpsertTempSql(dialect, suffix));
+    }
 
-            return affected;
+    private static int sumPositive(int[] arr) {
+        int s = 0;
+        if (arr == null) return 0;
+        for (int v : arr) {
+            // JDBC may return SUCCESS_NO_INFO (-2)
+            if (v > 0) s += v;
         }
+        return s;
+    }
 
-        private int batchInsertTemp(Connection con, Iterator<T> it) throws SQLException {
-            final String insSql = meta.insertUpsertTempSql(dialect, suffix);
-
-            // Temp rows have the same shape as upsertById (mergeCols).
-            final SQLType[] types = meta.upsertByIdParamTypes();
-
-            int inserted = 0;
-            int pending = 0;
-
-            try (PreparedStatement ps = con.prepareStatement(insSql)) {
-                if (statementTimeoutSeconds > 0) ps.setQueryTimeout(statementTimeoutSeconds);
-
-                while (it.hasNext()) {
-                    T e = it.next();
-                    Object[] params = meta.upsertByIdParams(e);
-
-                    Jdbc.bind(ps, params, types);
-                    ps.addBatch();
-                    pending++;
-
-                    if (pending >= batchSize) {
-                        inserted += sumBatch(ps.executeBatch());
-                        pending = 0;
-                    }
-                }
-
-                if (pending > 0) {
-                    inserted += sumBatch(ps.executeBatch());
-                }
-            }
-
-            return inserted;
-        }
-
-        private void execSql(Connection con, String sql, boolean isCreate) throws SQLException {
-            try (Statement st = con.createStatement()) {
-                if (statementTimeoutSeconds > 0) st.setQueryTimeout(statementTimeoutSeconds);
-                st.execute(sql);
-            } catch (SQLException e) {
-                if (isCreate && ignoreAlreadyExistsOnCreate && looksLikeAlreadyExists(e)) {
-                    return; // ignore
-                }
-                throw e;
-            }
-        }
-
-        private int execUpdate(Connection con, String sql) throws SQLException {
-            try (Statement st = con.createStatement()) {
-                if (statementTimeoutSeconds > 0) st.setQueryTimeout(statementTimeoutSeconds);
-                return st.executeUpdate(sql);
-            }
-        }
-
-        private int sumBatch(int[] counts) {
-            if (counts == null) return 0;
-            int sum = 0;
-            for (int c : counts) {
-                // JDBC can return SUCCESS_NO_INFO (-2). Count it as 1 so callers get some signal.
-                if (c == Statement.SUCCESS_NO_INFO) sum += 1;
-                else if (c > 0) sum += c;
-            }
-            return sum;
-        }
-
-        private boolean looksLikeAlreadyExists(SQLException e) {
-            String msg = (e.getMessage() == null) ? "" : e.getMessage().toLowerCase(java.util.Locale.ROOT);
-            String state = (e.getSQLState() == null) ? "" : e.getSQLState();
-
-            // Oracle: ORA-00955
-            if (msg.contains("ora-00955")) return true;
-
-            // Generic
-            if (msg.contains("already exists") || msg.contains("name is already used") || msg.contains("duplicate")) return true;
-
-            // HSQL often uses 42504 for "object name already exists" (driver-dependent).
-            if ("42504".equals(state)) return true;
-
-            return false;
-        }
-
-        /**
-         * Extract table name from SQL of the form:
-         *   INSERT INTO <table> ( ... ) VALUES ...
-         */
-        private static String parseInsertIntoTableName(String insertSql) {
-            if (insertSql == null) throw new IllegalArgumentException("insertSql is null");
-            String s = insertSql.trim();
-
-            // Case-insensitive prefix check
-            String up = s.toUpperCase(java.util.Locale.ROOT);
-            int p = up.indexOf("INSERT INTO ");
-            if (p < 0) throw new IllegalArgumentException("Not an INSERT INTO SQL: " + insertSql);
-
-            int start = p + "INSERT INTO ".length();
-            // next whitespace or '('
-            int end = start;
-            while (end < s.length()) {
-                char ch = s.charAt(end);
-                if (Character.isWhitespace(ch) || ch == '(') break;
-                end++;
-            }
-            String tn = s.substring(start, end).trim();
-            if (tn.isEmpty()) throw new IllegalArgumentException("Could not parse INSERT INTO table name: " + insertSql);
-            return tn;
+    private static void tryClose(AutoCloseable c) throws SQLException {
+        if (c == null) return;
+        try { c.close(); }
+        catch (Exception e) {
+            if (e instanceof SQLException se) throw se;
+            throw new SQLException(e);
         }
     }
 }

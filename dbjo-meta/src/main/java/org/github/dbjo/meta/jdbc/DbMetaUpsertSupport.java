@@ -63,6 +63,10 @@ public abstract class DbMetaUpsertSupport<T> implements DbMeta<T> {
 
     // ---- shared helpers (not generated per table) ----
 
+    public final String upsertTempTableName(DbDialect dialect, String suffix) {
+        return upsertTempName(dialect, suffix);
+    }
+
     protected final String upsertTempName(DbDialect dialect, String suffix) {
         String sfx = safeSuffix(suffix);
         // Local temp tables for MSSQL/Sybase
