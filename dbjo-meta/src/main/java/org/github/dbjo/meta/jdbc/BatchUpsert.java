@@ -11,6 +11,15 @@ import java.util.Objects;
  */
 public final class BatchUpsert<T> implements AutoCloseable {
 
+    /**
+     * Detailed counters from a flush().
+     * For temp-table strategies: rowsInsertedIntoTemp + mergeAffectedRows.
+     * For direct strategies: rowsInsertedIntoTemp=0 and mergeAffectedRows=batchAffectedRows.
+     */
+    public record Result(int rowsInsertedIntoTemp, int mergeAffectedRows) {
+        public int total() { return rowsInsertedIntoTemp + mergeAffectedRows; }
+    }
+
     public static <T> Builder<T> builder(DataSource ds, DbDialect dialect, DbMetaUpsertSupport<T> meta) {
         return new Builder<>(ds, dialect, meta);
     }
@@ -78,7 +87,6 @@ public final class BatchUpsert<T> implements AutoCloseable {
         this.batchSize = batchSize;
         this.dropTempOnClose = dropTempOnClose;
 
-        // temp strategy is available only if meta supports it for this dialect
         this.useTemp = meta.supportsUpsertTemp(dialect);
     }
 
@@ -98,28 +106,32 @@ public final class BatchUpsert<T> implements AutoCloseable {
         return this;
     }
 
-    public void flush() throws SQLException {
-        if (queued == 0) return;
-
-        int affected = 0;
+    public Result flushResult() throws SQLException {
+        if (queued == 0) return new Result(0, 0);
 
         if (useTemp) {
-            int[] ins = psTempIns.executeBatch();
-            affected += sumPositive(ins);
+            Jdbc.BatchCountInfo insInfo = Jdbc.analyzeBatchCounts(psTempIns.executeBatch());
+            int inserted = insInfo.sum();
 
-            // single MERGE from temp table
             int merged = stTempCtl.executeUpdate(meta.mergeUpsertFromTempSql(dialect, suffix));
-            if (merged > 0) affected += merged;
+            if (merged < 0) merged = 0;
 
-            // clear temp for next cycle (meta provides default or override)
             String tn = meta.upsertTempTableName(dialect, suffix);
             stTempCtl.executeUpdate("DELETE FROM " + tn);
-        } else {
-            int[] ups = psDirect.executeBatch();
-            affected += sumPositive(ups);
+
+            queued = 0;
+            return new Result(inserted, merged);
         }
 
+        Jdbc.BatchCountInfo directInfo = Jdbc.analyzeBatchCounts(psDirect.executeBatch());
+        int directAffected = directInfo.sum();
+
         queued = 0;
+        return new Result(0, directAffected);
+    }
+
+    public int flush() throws SQLException {
+        return flushResult().total();
     }
 
     @Override
@@ -134,12 +146,10 @@ public final class BatchUpsert<T> implements AutoCloseable {
 
         if (useTemp && dropTempOnClose) {
             try {
-                // best-effort drop
                 try (Statement st = (stTempCtl != null ? stTempCtl : conn.createStatement())) {
                     st.executeUpdate(meta.dropUpsertTempTableSql(dialect, suffix));
                 }
             } catch (SQLException ignore) {
-                // swallow: close should not fail due to temp drop
             }
         }
 
@@ -168,23 +178,12 @@ public final class BatchUpsert<T> implements AutoCloseable {
 
         stTempCtl = conn.createStatement();
 
-        // drop-if-exists best effort
         try { stTempCtl.executeUpdate(meta.dropUpsertTempTableSql(dialect, suffix)); }
         catch (SQLException ignore) {}
 
         stTempCtl.executeUpdate(meta.createUpsertTempTableSql(dialect, suffix));
 
         psTempIns = conn.prepareStatement(meta.insertUpsertTempSql(dialect, suffix));
-    }
-
-    private static int sumPositive(int[] arr) {
-        int s = 0;
-        if (arr == null) return 0;
-        for (int v : arr) {
-            // JDBC may return SUCCESS_NO_INFO (-2)
-            if (v > 0) s += v;
-        }
-        return s;
     }
 
     private static void tryClose(AutoCloseable c) throws SQLException {

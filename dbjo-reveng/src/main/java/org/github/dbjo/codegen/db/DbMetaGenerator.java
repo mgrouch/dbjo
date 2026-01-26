@@ -17,14 +17,35 @@ import java.util.*;
 public final class DbMetaGenerator {
     private final Config cfg;
     private final EnumOverrideIndex enumOverrides; // nullable => no overrides
+    private final IdentifierQuoter quoter;
 
+    /**
+     * Backwards-compatible constructor: preserves historical behavior (no identifier quoting).
+     * If you want quoting, use {@link #DbMetaGenerator(Config, EnumOverrideIndex, IdentifierQuoter)}.
+     */
     public DbMetaGenerator(Config cfg) {
-        this(cfg, null);
+        this(cfg, null, null);
     }
 
+    /**
+     * Backwards-compatible constructor: preserves historical behavior (no identifier quoting).
+     * If you want quoting, use {@link #DbMetaGenerator(Config, EnumOverrideIndex, IdentifierQuoter)}.
+     */
     public DbMetaGenerator(Config cfg, EnumOverrideIndex enumOverrides) {
+        this(cfg, enumOverrides, null);
+    }
+
+    /**
+     * Preferred constructor with identifier quoting support.
+     * Pass a non-null {@link IdentifierQuoter} to enable quoting in generated SQL.
+     */
+    public DbMetaGenerator(Config cfg, EnumOverrideIndex enumOverrides, IdentifierQuoter quoter) {
         this.cfg = Objects.requireNonNull(cfg, "cfg");
         this.enumOverrides = enumOverrides;
+        // If not provided, preserve historical output (no quoting).
+        this.quoter = (quoter != null)
+                ? quoter
+                : IdentifierQuoter.ansi(SqlQuoteMode.NONE, Set.of(), false, false, true);
     }
 
     public int generateAll(List<TableModel> tables) throws IOException {
@@ -60,7 +81,7 @@ public final class DbMetaGenerator {
 
         String regCls = "DbMetas";
         String regSrc = renderRegistry(registryPkg, regCls, cfg.dbMetaPkg(), metaClassNames);
-        Path regFile = regOutDir.resolve(regCls + ".java");
+        Path regFile = regOutDir.resolve(registryPkg.replace('.', '/')).resolve(regCls + ".java");
         FilesUtil.writeString(regFile, regSrc, cfg.overwrite());
         count++;
 
@@ -71,6 +92,9 @@ public final class DbMetaGenerator {
         String schema = tm.table().schema();
         String table  = tm.table().table();
         String fqn = (schema == null || schema.isBlank()) ? table : (schema + "." + table);
+
+        // SQL FQN uses identifier quoting as requested (or none for backwards-compat ctors)
+        String fqnSql = quoter.schemaTable(schema, table);
 
         List<Col> cols = tm.cols() == null ? List.of() : tm.cols();
 
@@ -92,22 +116,22 @@ public final class DbMetaGenerator {
 
         List<Col> mergeCols = buildMergeCols(pkCols, insCols, updCols);
 
-        String insertSql = buildInsertSql(fqn, insCols);
-        String updateSql = buildUpdateByIdSql(fqn, updCols, pkCols);
-        String selectAllSql = buildSelectAllSql(fqn, cols);
+        String insertSql = buildInsertSql(fqnSql, insCols);
+        String updateSql = buildUpdateByIdSql(fqnSql, updCols, pkCols);
+        String selectAllSql = buildSelectAllSql(fqnSql, cols);
 
-        String upsertMssql  = buildUpsertMssqlSybase(fqn, mergeCols, pkCols, updCols, insCols, true);
-        String upsertSybase = buildUpsertMssqlSybase(fqn, mergeCols, pkCols, updCols, insCols, false);
-        String upsertOracle = buildUpsertOracle(fqn, mergeCols, pkCols, updCols, insCols); // batch this for Oracle
-        String upsertHsql   = buildUpsertHsql(fqn, mergeCols, pkCols, updCols, insCols);
+        String upsertMssql  = buildUpsertMssqlSybase(fqnSql, mergeCols, pkCols, updCols, insCols, true);
+        String upsertSybase = buildUpsertMssqlSybase(fqnSql, mergeCols, pkCols, updCols, insCols, false);
+        String upsertOracle = buildUpsertOracle(fqnSql, mergeCols, pkCols, updCols, insCols); // batch this for Oracle
+        String upsertHsql   = buildUpsertHsql(fqnSql, mergeCols, pkCols, updCols, insCols);
 
         // temp-table defs (used only by MSSQL/SYBASE runtime path)
-        String tempColDefs = buildTempColDefs(mergeCols);
-        String tempInsertCols = joinColNames(mergeCols);
+        String tempColDefs = buildTempColDefsSql(mergeCols);
+        String tempInsertCols = joinColNamesSql(mergeCols);
         int tempParamCount = mergeCols.size();
 
-        String mergeFromTempMssql  = buildMergeFromTempTpl(fqn, pkCols, updCols, insCols, true);
-        String mergeFromTempSybase = buildMergeFromTempTpl(fqn, pkCols, updCols, insCols, false);
+        String mergeFromTempMssql  = buildMergeFromTempTpl(fqnSql, pkCols, updCols, insCols, true);
+        String mergeFromTempSybase = buildMergeFromTempTpl(fqnSql, pkCols, updCols, insCols, false);
 
         // imports (keep clean: no unused)
         Set<String> imports = new TreeSet<>();
@@ -376,7 +400,7 @@ public final class DbMetaGenerator {
         return sb.toString();
     }
 
-    // generator helpers
+    // ---------------- generator helpers ----------------
 
     private static boolean isNullable(Col c) {
         Nullability n = c.nullability();
@@ -395,21 +419,21 @@ public final class DbMetaGenerator {
         return (c == null || c.colName() == null) ? "" : c.colName().toUpperCase(Locale.ROOT);
     }
 
-    private static String joinColNames(List<Col> cols) {
+    private String joinColNamesSql(List<Col> cols) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < cols.size(); i++) {
             if (i > 0) sb.append(", ");
-            sb.append(cols.get(i).colName());
+            sb.append(quoter.id(cols.get(i).colName()));
         }
         return sb.toString();
     }
 
-    private static String buildTempColDefs(List<Col> cols) {
+    private String buildTempColDefsSql(List<Col> cols) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < cols.size(); i++) {
             Col c = cols.get(i);
             if (i > 0) sb.append(", ");
-            sb.append(c.colName()).append(" ").append(typeDecl(c));
+            sb.append(quoter.id(c.colName())).append(" ").append(typeDecl(c));
             if (c.nullability() == Nullability.NO_NULLS) sb.append(" NOT NULL");
         }
         return sb.toString();
@@ -434,12 +458,12 @@ public final class DbMetaGenerator {
         return tn.isBlank() ? "VARCHAR(255)" : tn;
     }
 
-    private static String buildInsertSql(String fqn, List<Col> cols) {
+    private String buildInsertSql(String fqnSql, List<Col> cols) {
         StringBuilder sb = new StringBuilder();
-        sb.append("INSERT INTO ").append(fqn).append(" (");
+        sb.append("INSERT INTO ").append(fqnSql).append(" (");
         for (int i = 0; i < cols.size(); i++) {
             if (i > 0) sb.append(", ");
-            sb.append(cols.get(i).colName());
+            sb.append(quoter.id(cols.get(i).colName()));
         }
         sb.append(") VALUES (");
         for (int i = 0; i < cols.size(); i++) {
@@ -450,124 +474,210 @@ public final class DbMetaGenerator {
         return sb.toString();
     }
 
-    private static String buildUpdateByIdSql(String fqn, List<Col> setCols, List<Col> pkCols) {
+    private String buildUpdateByIdSql(String fqnSql, List<Col> setCols, List<Col> pkCols) {
         StringBuilder sb = new StringBuilder();
-        sb.append("UPDATE ").append(fqn).append(" SET ");
+        sb.append("UPDATE ").append(fqnSql).append(" SET ");
         if (setCols.isEmpty()) {
             sb.append(pkCols.isEmpty()
                     ? "/* no columns */ 1=1"
-                    : (pkCols.get(0).colName() + "=" + pkCols.get(0).colName()));
+                    : (quoter.id(pkCols.get(0).colName()) + "=" + quoter.id(pkCols.get(0).colName())));
         } else {
             for (int i = 0; i < setCols.size(); i++) {
                 if (i > 0) sb.append(", ");
-                sb.append(setCols.get(i).colName()).append("=?");
+                sb.append(quoter.id(setCols.get(i).colName())).append("=?");
             }
         }
         if (!pkCols.isEmpty()) {
             sb.append(" WHERE ");
             for (int i = 0; i < pkCols.size(); i++) {
                 if (i > 0) sb.append(" AND ");
-                sb.append(pkCols.get(i).colName()).append("=?");
+                sb.append(quoter.id(pkCols.get(i).colName())).append("=?");
             }
         }
         return sb.toString();
     }
 
-    private static String buildSelectAllSql(String fqn, List<Col> cols) {
+    private String buildSelectAllSql(String fqnSql, List<Col> cols) {
         StringBuilder sb = new StringBuilder();
         sb.append("SELECT ");
         for (int i = 0; i < cols.size(); i++) {
             if (i > 0) sb.append(", ");
-            sb.append(cols.get(i).colName());
+            sb.append(quoter.id(cols.get(i).colName()));
         }
-        sb.append(" FROM ").append(fqn);
+        sb.append(" FROM ").append(fqnSql);
         return sb.toString();
     }
 
-    private static void appendUpdateSetOrNoop(StringBuilder sb, List<Col> updCols, List<Col> pkCols, String tAlias, String sAlias) {
+    private static String sCol(int idx0) {
+        return "c" + (idx0 + 1);
+    }
+
+    private static String joinSAliasCols(int n) {
+        StringBuilder sb = new StringBuilder(n * 4);
+        for (int i = 0; i < n; i++) {
+            if (i > 0) sb.append(", ");
+            sb.append(sCol(i));
+        }
+        return sb.toString();
+    }
+
+    private static Map<String, Integer> indexByKey(List<Col> mergeCols) {
+        HashMap<String, Integer> m = new HashMap<>();
+        for (int i = 0; i < mergeCols.size(); i++) {
+            m.put(key(mergeCols.get(i)), i);
+        }
+        return m;
+    }
+
+    private static int idxOf(Map<String, Integer> idxByKey, Col c) {
+        Integer i = idxByKey.get(key(c));
+        return i == null ? -1 : i;
+    }
+
+    private void appendUpdateSetOrNoopMapped(StringBuilder sb,
+                                             List<Col> updCols,
+                                             List<Col> pkCols,
+                                             Map<String, Integer> idxByKey,
+                                             String tAlias,
+                                             String sAlias) {
         if (!updCols.isEmpty()) {
             for (int i = 0; i < updCols.size(); i++) {
                 if (i > 0) sb.append(", ");
-                sb.append(tAlias).append(".").append(updCols.get(i).colName())
-                        .append("=").append(sAlias).append(".").append(updCols.get(i).colName());
+                Col c = updCols.get(i);
+                int idx = idxOf(idxByKey, c);
+                sb.append(tAlias).append(".").append(quoter.id(c.colName()))
+                        .append("=").append(sAlias).append(".").append(sCol(idx));
             }
             return;
         }
         // No update columns => emit a no-op assignment to keep SQL valid
         if (!pkCols.isEmpty()) {
             String c = pkCols.get(0).colName();
-            sb.append(tAlias).append(".").append(c).append("=").append(tAlias).append(".").append(c);
+            sb.append(tAlias).append(".").append(quoter.id(c)).append("=").append(tAlias).append(".").append(quoter.id(c));
         } else {
             sb.append("1=1"); // should not happen in a real MERGE, but keeps string non-empty
         }
     }
 
-    private static String buildUpsertMssqlSybase(String fqn, List<Col> mergeCols, List<Col> pkCols, List<Col> updCols, List<Col> insCols, boolean mssql) {
+    private void appendUpdateSetOrNoopTemp(StringBuilder sb,
+                                           List<Col> updCols,
+                                           List<Col> pkCols,
+                                           String tAlias,
+                                           String sAlias) {
+        if (!updCols.isEmpty()) {
+            for (int i = 0; i < updCols.size(); i++) {
+                if (i > 0) sb.append(", ");
+                String col = updCols.get(i).colName();
+                sb.append(tAlias).append(".").append(quoter.id(col))
+                        .append("=").append(sAlias).append(".").append(quoter.id(col));
+            }
+            return;
+        }
+        if (!pkCols.isEmpty()) {
+            String c = pkCols.get(0).colName();
+            sb.append(tAlias).append(".").append(quoter.id(c)).append("=").append(tAlias).append(".").append(quoter.id(c));
+        } else {
+            sb.append("1=1");
+        }
+    }
+
+    private String buildUpsertMssqlSybase(String fqnSql,
+                                          List<Col> mergeCols,
+                                          List<Col> pkCols,
+                                          List<Col> updCols,
+                                          List<Col> insCols,
+                                          boolean mssql) {
+        Map<String, Integer> idxByKey = indexByKey(mergeCols);
+
         StringBuilder sb = new StringBuilder(2000);
-        sb.append("MERGE INTO ").append(fqn).append(" AS t USING (VALUES (");
+        sb.append("MERGE INTO ").append(fqnSql).append(" AS t USING (VALUES (");
         for (int i = 0; i < mergeCols.size(); i++) {
             if (i > 0) sb.append(", ");
             sb.append("?");
         }
-        sb.append(")) AS s (").append(joinColNames(mergeCols)).append(") ON (");
+        sb.append(")) AS s (").append(joinSAliasCols(mergeCols.size())).append(") ON (");
         for (int i = 0; i < pkCols.size(); i++) {
             if (i > 0) sb.append(" AND ");
-            sb.append("t.").append(pkCols.get(i).colName()).append("=s.").append(pkCols.get(i).colName());
+            Col pk = pkCols.get(i);
+            int idx = idxOf(idxByKey, pk);
+            sb.append("t.").append(quoter.id(pk.colName())).append("=s.").append(sCol(idx));
         }
         sb.append(") WHEN MATCHED THEN UPDATE SET ");
-        appendUpdateSetOrNoop(sb, updCols, pkCols, "t", "s");
+        appendUpdateSetOrNoopMapped(sb, updCols, pkCols, idxByKey, "t", "s");
         sb.append(" WHEN NOT MATCHED THEN INSERT (");
-        sb.append(joinColNames(insCols)).append(") VALUES (");
+        sb.append(joinColNamesSql(insCols)).append(") VALUES (");
         for (int i = 0; i < insCols.size(); i++) {
             if (i > 0) sb.append(", ");
-            sb.append("s.").append(insCols.get(i).colName());
+            Col c = insCols.get(i);
+            int idx = idxOf(idxByKey, c);
+            sb.append("s.").append(sCol(idx));
         }
         sb.append(")");
         if (mssql) sb.append(";");
         return sb.toString();
     }
 
-    private static String buildUpsertOracle(String fqn, List<Col> mergeCols, List<Col> pkCols, List<Col> updCols, List<Col> insCols) {
+    private String buildUpsertOracle(String fqnSql,
+                                     List<Col> mergeCols,
+                                     List<Col> pkCols,
+                                     List<Col> updCols,
+                                     List<Col> insCols) {
+        Map<String, Integer> idxByKey = indexByKey(mergeCols);
+
         StringBuilder sb = new StringBuilder(2400);
-        sb.append("MERGE INTO ").append(fqn).append(" t USING (SELECT ");
+        sb.append("MERGE INTO ").append(fqnSql).append(" t USING (SELECT ");
         for (int i = 0; i < mergeCols.size(); i++) {
             if (i > 0) sb.append(", ");
-            sb.append("? AS ").append(mergeCols.get(i).colName());
+            sb.append("? AS ").append(sCol(i));
         }
         sb.append(" FROM dual) s ON (");
         for (int i = 0; i < pkCols.size(); i++) {
             if (i > 0) sb.append(" AND ");
-            sb.append("t.").append(pkCols.get(i).colName()).append("=s.").append(pkCols.get(i).colName());
+            Col pk = pkCols.get(i);
+            int idx = idxOf(idxByKey, pk);
+            sb.append("t.").append(quoter.id(pk.colName())).append("=s.").append(sCol(idx));
         }
         sb.append(") WHEN MATCHED THEN UPDATE SET ");
-        appendUpdateSetOrNoop(sb, updCols, pkCols, "t", "s");
-        sb.append(" WHEN NOT MATCHED THEN INSERT (").append(joinColNames(insCols)).append(") VALUES (");
+        appendUpdateSetOrNoopMapped(sb, updCols, pkCols, idxByKey, "t", "s");
+        sb.append(" WHEN NOT MATCHED THEN INSERT (").append(joinColNamesSql(insCols)).append(") VALUES (");
         for (int i = 0; i < insCols.size(); i++) {
             if (i > 0) sb.append(", ");
-            sb.append("s.").append(insCols.get(i).colName());
+            Col c = insCols.get(i);
+            int idx = idxOf(idxByKey, c);
+            sb.append("s.").append(sCol(idx));
         }
         sb.append(")");
         return sb.toString();
     }
 
-    private static String buildUpsertHsql(String fqn, List<Col> mergeCols, List<Col> pkCols, List<Col> updCols, List<Col> insCols) {
+    private String buildUpsertHsql(String fqnSql,
+                                   List<Col> mergeCols,
+                                   List<Col> pkCols,
+                                   List<Col> updCols,
+                                   List<Col> insCols) {
+        Map<String, Integer> idxByKey = indexByKey(mergeCols);
+
         StringBuilder sb = new StringBuilder(2600);
-        sb.append("MERGE INTO ").append(fqn).append(" AS t USING (VALUES (");
+        sb.append("MERGE INTO ").append(fqnSql).append(" AS t USING (VALUES (");
         for (int i = 0; i < mergeCols.size(); i++) {
             if (i > 0) sb.append(", ");
             sb.append(hsqlCastExpr(mergeCols.get(i)));
         }
-        sb.append(")) AS s (").append(joinColNames(mergeCols)).append(") ON (");
+        sb.append(")) AS s (").append(joinSAliasCols(mergeCols.size())).append(") ON (");
         for (int i = 0; i < pkCols.size(); i++) {
             if (i > 0) sb.append(" AND ");
-            sb.append("t.").append(pkCols.get(i).colName()).append("=s.").append(pkCols.get(i).colName());
+            Col pk = pkCols.get(i);
+            int idx = idxOf(idxByKey, pk);
+            sb.append("t.").append(quoter.id(pk.colName())).append("=s.").append(sCol(idx));
         }
         sb.append(") WHEN MATCHED THEN UPDATE SET ");
-        appendUpdateSetOrNoop(sb, updCols, pkCols, "t", "s");
-        sb.append(" WHEN NOT MATCHED THEN INSERT (").append(joinColNames(insCols)).append(") VALUES (");
+        appendUpdateSetOrNoopMapped(sb, updCols, pkCols, idxByKey, "t", "s");
+        sb.append(" WHEN NOT MATCHED THEN INSERT (").append(joinColNamesSql(insCols)).append(") VALUES (");
         for (int i = 0; i < insCols.size(); i++) {
             if (i > 0) sb.append(", ");
-            sb.append("s.").append(insCols.get(i).colName());
+            Col c = insCols.get(i);
+            int idx = idxOf(idxByKey, c);
+            sb.append("s.").append(sCol(idx));
         }
         sb.append(")");
         return sb.toString();
@@ -587,19 +697,24 @@ public final class DbMetaGenerator {
         return "CAST(? AS " + castType + ")";
     }
 
-    private static String buildMergeFromTempTpl(String fqn, List<Col> pkCols, List<Col> updCols, List<Col> insCols, boolean mssql) {
+    private String buildMergeFromTempTpl(String fqnSql,
+                                         List<Col> pkCols,
+                                         List<Col> updCols,
+                                         List<Col> insCols,
+                                         boolean mssql) {
         StringBuilder sb = new StringBuilder(1800);
-        sb.append("MERGE INTO ").append(fqn).append(" AS t USING {TEMP} AS s ON (");
+        sb.append("MERGE INTO ").append(fqnSql).append(" AS t USING {TEMP} AS s ON (");
         for (int i = 0; i < pkCols.size(); i++) {
             if (i > 0) sb.append(" AND ");
-            sb.append("t.").append(pkCols.get(i).colName()).append("=s.").append(pkCols.get(i).colName());
+            String col = pkCols.get(i).colName();
+            sb.append("t.").append(quoter.id(col)).append("=s.").append(quoter.id(col));
         }
         sb.append(") WHEN MATCHED THEN UPDATE SET ");
-        appendUpdateSetOrNoop(sb, updCols, pkCols, "t", "s");
-        sb.append(" WHEN NOT MATCHED THEN INSERT (").append(joinColNames(insCols)).append(") VALUES (");
+        appendUpdateSetOrNoopTemp(sb, updCols, pkCols, "t", "s");
+        sb.append(" WHEN NOT MATCHED THEN INSERT (").append(joinColNamesSql(insCols)).append(") VALUES (");
         for (int i = 0; i < insCols.size(); i++) {
             if (i > 0) sb.append(", ");
-            sb.append("s.").append(insCols.get(i).colName());
+            sb.append("s.").append(quoter.id(insCols.get(i).colName()));
         }
         sb.append(")");
         if (mssql) sb.append(";");
@@ -627,6 +742,7 @@ public final class DbMetaGenerator {
             case Types.BIT, Types.BOOLEAN -> "JDBCType.BOOLEAN";
             case Types.CHAR -> "JDBCType.CHAR";
             case Types.NCHAR -> "JDBCType.NCHAR";
+            case Types.VARCHAR, Types.LONGVARCHAR -> "JDBCType.VARCHAR";
             case Types.NVARCHAR, Types.LONGNVARCHAR -> "JDBCType.NVARCHAR";
             case Types.CLOB -> "JDBCType.CLOB";
             case Types.NCLOB -> "JDBCType.NCLOB";

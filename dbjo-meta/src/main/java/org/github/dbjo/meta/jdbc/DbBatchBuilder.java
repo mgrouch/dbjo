@@ -9,13 +9,6 @@ import java.util.Iterator;
 public final class DbBatchBuilder {
     private DbBatchBuilder() {}
 
-    /**
-     * Batch upsert:
-     * - MSSQL/SYBASE: temp table -> batch insert temp -> MERGE from temp (single statement merge)
-     * - ORACLE/HSQL: batch the regular upsertByIdSql() (no temp table for Oracle)
-     *
-     * @return rows affected (best-effort sum of JDBC batch counts)
-     */
     public static <T> int upsertAll(Connection c, DbDialect dialect, DbMeta<T> meta, Iterable<T> rows, String suffix)
             throws SQLException {
 
@@ -46,7 +39,7 @@ public final class DbBatchBuilder {
                 Jdbc.bind(ps, params, types);
                 ps.addBatch();
             }
-            total += sum(ps.executeBatch());
+            total += Jdbc.sumBatchCounts(ps.executeBatch());
         }
         return total;
     }
@@ -54,7 +47,6 @@ public final class DbBatchBuilder {
     private static <T> int upsertViaTemp(Connection c, DbDialect dialect, DbMeta<T> meta, Iterable<T> rows, String suffix)
             throws SQLException {
 
-        // temp DDL/DML are connection-scoped for MSSQL/Sybase local temp tables
         String create = meta.createUpsertTempTableSql(dialect, suffix);
         String insert = meta.insertUpsertTempSql(dialect, suffix);
         String merge  = meta.mergeUpsertFromTempSql(dialect, suffix);
@@ -74,30 +66,20 @@ public final class DbBatchBuilder {
                     Jdbc.bind(psIns, params, types);
                     psIns.addBatch();
                 }
-                total += sum(psIns.executeBatch());
+                total += Jdbc.sumBatchCounts(psIns.executeBatch());
             }
 
             try (PreparedStatement psMerge = c.prepareStatement(merge)) {
-                total += psMerge.executeUpdate();
+                int m = psMerge.executeUpdate();
+                if (m > 0) total += m;
             }
         } finally {
             try (PreparedStatement psDrop = c.prepareStatement(drop)) {
                 psDrop.execute();
             } catch (SQLException ignored) {
-                // temp table might auto-drop on connection close; don't mask original error
             }
         }
 
         return total;
-    }
-
-    private static int sum(int[] batchCounts) {
-        int s = 0;
-        for (int v : batchCounts) {
-            // SUCCESS_NO_INFO is -2; treat as 1 (best-effort)
-            if (v > 0) s += v;
-            else if (v == java.sql.Statement.SUCCESS_NO_INFO) s += 1;
-        }
-        return s;
     }
 }
