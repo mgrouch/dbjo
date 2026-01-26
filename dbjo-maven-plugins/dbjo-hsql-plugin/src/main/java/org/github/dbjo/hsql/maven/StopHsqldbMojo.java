@@ -10,8 +10,7 @@ import java.sql.Statement;
 @Mojo(
         name = "stop",
         defaultPhase = LifecyclePhase.NONE,
-        threadSafe = true,
-        requiresProject = true
+        threadSafe = true
 )
 public final class StopHsqldbMojo extends AbstractMojo {
 
@@ -24,11 +23,11 @@ public final class StopHsqldbMojo extends AbstractMojo {
     @Parameter(property = "dbjo.hsqldb.user", defaultValue = "SA")
     private String user;
 
-    @Parameter(property = "dbjo.hsqldb.pass", defaultValue = "")
+    @Parameter(property = "dbjo.hsqldb.pass")
     private String pass;
 
     /** If empty, derived from port/dbName. */
-    @Parameter(property = "dbjo.hsqldb.jdbcUrl", defaultValue = "")
+    @Parameter(property = "dbjo.hsqldb.jdbcUrl")
     private String jdbcUrl;
 
     @Override

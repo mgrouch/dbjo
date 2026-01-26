@@ -128,7 +128,7 @@ public final class ProtoGenerator {
             case Types.FLOAT, Types.REAL -> ProtoType.scalar("float");
             case Types.DOUBLE -> ProtoType.scalar("double");
 
-            case Types.DECIMAL, Types.NUMERIC, Types.CHAR, Types.VARCHAR, Types.LONGVARCHAR, Types.NCHAR, Types.NVARCHAR, Types.LONGNVARCHAR -> ProtoType.scalar("string"); // portable
+            case Types.DECIMAL, Types.NUMERIC, Types.CHAR, Types.VARCHAR, Types.LONGVARCHAR, Types.NCHAR, Types.NVARCHAR, Types.LONGNVARCHAR, Types.DATE, Types.TIME, Types.TIME_WITH_TIMEZONE -> ProtoType.scalar("string"); // portable
 
             case Types.BIT, Types.BOOLEAN -> ProtoType.scalar("bool");
 
@@ -137,8 +137,7 @@ public final class ProtoGenerator {
             case Types.TIMESTAMP, Types.TIMESTAMP_WITH_TIMEZONE ->
                     ProtoType.message("google.protobuf.Timestamp", true);
 
-            case Types.DATE, Types.TIME, Types.TIME_WITH_TIMEZONE ->
-                    ProtoType.scalar("string"); // portable
+            // portable
 
             default -> ProtoType.scalar("string");
         };

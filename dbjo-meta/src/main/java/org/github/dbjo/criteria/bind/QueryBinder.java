@@ -143,11 +143,11 @@ public final class QueryBinder {
         if (t.isInstance(o)) return (Serializable) o;
 
         // numeric widening / parsing
-        if (t == Integer.class) return (Serializable) coerceInt(o, p);
-        if (t == Long.class) return (Serializable) coerceLong(o, p);
-        if (t == Short.class) return (Serializable) coerceShort(o, p);
-        if (t == Boolean.class) return (Serializable) coerceBool(o, p);
-        if (t == String.class) return (Serializable) String.valueOf(o);
+        if (t == Integer.class) return coerceInt(o, p);
+        if (t == Long.class) return coerceLong(o, p);
+        if (t == Short.class) return coerceShort(o, p);
+        if (t == Boolean.class) return coerceBool(o, p);
+        if (t == String.class) return String.valueOf(o);
 
         // enum coercion (PK via of/ofNullable, or any unique field via by* / by*Nullable)
         if (t.isEnum()) {

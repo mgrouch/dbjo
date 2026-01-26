@@ -28,7 +28,6 @@ public enum Nullability {
         return switch (code) {
             case DatabaseMetaData.columnNoNulls -> NO_NULLS;
             case DatabaseMetaData.columnNullable -> NULLABLE;
-            case DatabaseMetaData.columnNullableUnknown -> UNKNOWN;
             default -> UNKNOWN;
         };
     }

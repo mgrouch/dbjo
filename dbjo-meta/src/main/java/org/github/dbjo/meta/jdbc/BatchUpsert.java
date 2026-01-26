@@ -98,8 +98,8 @@ public final class BatchUpsert<T> implements AutoCloseable {
         return this;
     }
 
-    public int flush() throws SQLException {
-        if (queued == 0) return 0;
+    public void flush() throws SQLException {
+        if (queued == 0) return;
 
         int affected = 0;
 
@@ -120,7 +120,6 @@ public final class BatchUpsert<T> implements AutoCloseable {
         }
 
         queued = 0;
-        return affected;
     }
 
     @Override

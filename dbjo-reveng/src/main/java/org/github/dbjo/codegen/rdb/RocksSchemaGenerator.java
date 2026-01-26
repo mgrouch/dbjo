@@ -258,7 +258,6 @@ public final class RocksSchemaGenerator {
 
     private String keyCodecExprFor(String keyType) {
         return switch (keyType) {
-            case "String" -> "KeyCodec.stringUtf8()";
             case "Integer", "Short" -> "KeyCodec.int32()";
             case "Long" -> "KeyCodec.int64()";
             case "byte[]" -> "KeyCodec.bytes()";

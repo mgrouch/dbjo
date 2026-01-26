@@ -147,11 +147,7 @@ public final class TypeMappings {
             case Types.FLOAT, Types.REAL -> ProtoType.scalar("float");
             case Types.DOUBLE -> ProtoType.scalar("double");
 
-            case Types.DECIMAL, Types.NUMERIC, Types.CHAR,
-                    Types.VARCHAR, Types.LONGVARCHAR, Types.NCHAR,
-                    Types.NVARCHAR, Types.LONGNVARCHAR, Types.CLOB,
-                    Types.NCLOB, Types.DATE, Types.TIME,
-                    Types.TIME_WITH_TIMEZONE -> ProtoType.scalar("string"); // portable
+            // portable
 
             case Types.BIT, Types.BOOLEAN -> ProtoType.scalar("bool");
 

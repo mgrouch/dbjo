@@ -11,7 +11,6 @@ import org.github.dbjo.codegen.util.Naming;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.sql.DatabaseMetaData;
 import java.util.*;
 
 public final class ProtoMapperGenerator {

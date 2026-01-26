@@ -156,6 +156,6 @@ public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
     @Override
     public void close() { /* no-op */ }
 
-    protected abstract void maintainIndexes(RocksWriteBatch batch, K key, T oldValueOrNull, T newValue) throws RocksDBException;
-    protected abstract void maintainIndexesOnDelete(RocksWriteBatch batch, K key, T oldValue) throws RocksDBException;
+    protected abstract void maintainIndexes(RocksWriteBatch batch, K key, T oldValueOrNull, T newValue);
+    protected abstract void maintainIndexesOnDelete(RocksWriteBatch batch, K key, T oldValue);
 }

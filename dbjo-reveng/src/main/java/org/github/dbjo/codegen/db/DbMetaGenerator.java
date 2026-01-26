@@ -627,7 +627,6 @@ public final class DbMetaGenerator {
             case Types.BIT, Types.BOOLEAN -> "JDBCType.BOOLEAN";
             case Types.CHAR -> "JDBCType.CHAR";
             case Types.NCHAR -> "JDBCType.NCHAR";
-            case Types.VARCHAR, Types.LONGVARCHAR -> "JDBCType.VARCHAR";
             case Types.NVARCHAR, Types.LONGNVARCHAR -> "JDBCType.NVARCHAR";
             case Types.CLOB -> "JDBCType.CLOB";
             case Types.NCLOB -> "JDBCType.NCLOB";

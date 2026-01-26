@@ -39,8 +39,7 @@ public abstract class IndexedRocksDao<T, K> extends AbstractRocksDao<T, K> {
     }
 
     @Override
-    protected final void maintainIndexes(RocksWriteBatch batch, K key, T oldValueOrNull, T newValue)
-            throws RocksDBException {
+    protected final void maintainIndexes(RocksWriteBatch batch, K key, T oldValueOrNull, T newValue) {
 
         final byte[] pk = keyCodec.encodeKey(key);
 
@@ -66,8 +65,7 @@ public abstract class IndexedRocksDao<T, K> extends AbstractRocksDao<T, K> {
     }
 
     @Override
-    protected final void maintainIndexesOnDelete(RocksWriteBatch batch, K key, T oldValue)
-            throws RocksDBException {
+    protected final void maintainIndexesOnDelete(RocksWriteBatch batch, K key, T oldValue) {
 
         final byte[] pk = keyCodec.encodeKey(key);
 

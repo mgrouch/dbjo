@@ -12,8 +12,7 @@ import java.sql.Connection;
 @Mojo(
         name = "start",
         defaultPhase = LifecyclePhase.NONE,
-        threadSafe = true,
-        requiresProject = true
+        threadSafe = true
 )
 public final class StartHsqldbMojo extends AbstractMojo {
 
@@ -29,15 +28,15 @@ public final class StartHsqldbMojo extends AbstractMojo {
     @Parameter(property = "dbjo.hsqldb.user", defaultValue = "SA")
     private String user;
 
-    @Parameter(property = "dbjo.hsqldb.pass", defaultValue = "")
+    @Parameter(property = "dbjo.hsqldb.pass")
     private String pass;
 
     /** JDBC URL used for init + stop. If empty, derived from port/dbName. */
-    @Parameter(property = "dbjo.hsqldb.jdbcUrl", defaultValue = "")
+    @Parameter(property = "dbjo.hsqldb.jdbcUrl")
     private String jdbcUrl;
 
     /** Optional script to run after server starts (schema init). */
-    @Parameter(property = "dbjo.hsqldb.initScript", defaultValue = "")
+    @Parameter(property = "dbjo.hsqldb.initScript")
     private String initScript;
 
     /** If true, waits forever; if false, returns immediately (server will die with Maven JVM). */
