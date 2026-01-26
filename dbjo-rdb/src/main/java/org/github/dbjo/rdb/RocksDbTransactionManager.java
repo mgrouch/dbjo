@@ -51,7 +51,7 @@ public final class RocksDbTransactionManager extends AbstractPlatformTransaction
             // Bind txn for the session provider (RocksSessions)
             TransactionSynchronizationManager.bindResource(Keys.TXN, txn);
 
-            // Optionally bind a shared ReadOptions if you want a single RO instance.
+            // Optionally bind a shared ReadOptions for a single RO instance.
             // RocksSession.newReadOptions() can also just create per-use ReadOptions.
             ReadOptions ro = new ReadOptions();
             Snapshot snap = txn.getSnapshot();

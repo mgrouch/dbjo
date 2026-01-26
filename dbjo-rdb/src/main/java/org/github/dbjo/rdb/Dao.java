@@ -12,7 +12,7 @@ public interface Dao<T, K> extends AutoCloseable {
 
     boolean containsKey(K key);
 
-    // Bulk defaults (override if you want multiGet/multiPut)
+    // Bulk defaults
     default Map<K, T> getAll(Collection<K> keys) {
         Map<K, T> out = new LinkedHashMap<>();
         for (K k : keys) findByKey(k).ifPresent(v -> out.put(k, v));

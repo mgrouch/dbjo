@@ -11,7 +11,7 @@ public abstract class DbMetaTempUpsertSupport<T> extends DbMetaUpsertSupport<T> 
 
     /**
      * Default temp insert uses the same params/types as single-row upsert MERGE.
-     * Override if your temp table differs from the MERGE parameter list.
+     * Override if temp table differs from the MERGE parameter list.
      */
     public Object[] upsertTempInsertParams(T e) {
         return upsertByIdParams(e);

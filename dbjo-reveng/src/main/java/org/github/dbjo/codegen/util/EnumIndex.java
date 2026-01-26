@@ -304,7 +304,7 @@ public final class EnumIndex {
                         + "(enum=" + enumInfo.schema() + "." + enumInfo.enumTableName()
                         + "). Either:\n"
                         + "  - set enumKeyColumn to the PK, or\n"
-                        + "  - teach your introspector/TableModel to expose unique columns (e.g. uniqueColsUpper()), or\n"
+                        + "  - teach introspector/TableModel to expose unique columns (e.g. uniqueColsUpper()), or\n"
                         + "  - set strictUnique=false");
             }
         }

@@ -51,7 +51,7 @@ public final class SpringRocksSessions implements RocksSessions {
 
     private static final class TxBoundSession implements RocksSession {
         @SuppressWarnings("unused")
-        private final TransactionDB db; // not strictly needed, but handy if you extend later
+        private final TransactionDB db; // not strictly needed, but handy
         private final Transaction txn;
 
         TxBoundSession(TransactionDB db, Transaction txn) {
@@ -61,7 +61,7 @@ public final class SpringRocksSessions implements RocksSessions {
 
         @Override public ReadOptions newReadOptions() {
             ReadOptions ro = new ReadOptions();
-            // If your tx manager called txn.setSnapshot() at begin, this gives repeatable reads:
+            // If tx manager called txn.setSnapshot() at begin, this gives repeatable reads:
             Snapshot snap = txn.getSnapshot();
             if (snap != null) ro.setSnapshot(snap);
             return ro;

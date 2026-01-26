@@ -36,7 +36,7 @@ public final class ConditionEvaluator {
         if (c instanceof In<B, ?> x) {
             Object v = x.prop().get(bean);
             if (v == null) return false;
-            // values list is typically small; if large you can pre-hash
+            // values list is typically small
             return x.values().contains(v);
         }
         if (c instanceof Between<B, ?> x) {

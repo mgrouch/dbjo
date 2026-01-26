@@ -41,7 +41,7 @@ public final class RocksSchemaGenerator {
     }
 
     private String renderSchema(TableModel tm, String beanClass, String schemaClass) {
-        // CF naming: match your example ("users")
+        // CF naming
         String cfName = Naming.toLowerSnake(tm.table().table());
         String cfConst = Naming.toUpperConst(cfName) + cfg.cfConstSuffix(); // USERS_CF
 
@@ -227,7 +227,7 @@ public final class RocksSchemaGenerator {
             if (needBase64) {
                 sb.append("        if (v instanceof byte[] b) return Base64.getEncoder().encodeToString(b);\n");
             } else {
-                sb.append("        if (v instanceof byte[]) return \"\"; // unreachable unless you add byte[] indexes\n");
+                sb.append("        if (v instanceof byte[]) return \"\";\n");
             }
             sb.append("        if (v instanceof java.math.BigDecimal bd) return bd.toPlainString();\n");
             sb.append("        return v.toString();\n");

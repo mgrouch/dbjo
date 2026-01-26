@@ -61,7 +61,7 @@ public final class SpecStringifier {
 
     public static String valueKey(Object v) {
         if (v == null) return "NULL";
-        // For JSON transport you’d normalize Timestamp/Instant/enums here.
+        // For JSON transport normalize Timestamp/Instant/enums here.
         return v.getClass().getName() + ":" + v;
     }
 }

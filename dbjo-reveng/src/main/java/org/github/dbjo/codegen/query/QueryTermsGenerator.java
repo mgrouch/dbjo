@@ -76,7 +76,7 @@ public final class QueryTermsGenerator {
             String prop = Naming.sanitizeJavaIdentifier(Naming.toFieldName(c.colName()));
 
             // IMPORTANT: must match Meta generator naming
-            // If your Meta generator produces PRICECENTS/CREATEDAT, use Naming.toUpperConst(prop) instead.
+            // If Meta generator produces PRICECENTS/CREATEDAT, use Naming.toUpperConst(prop) instead.
             String constName = Naming.toUpperSnake(prop);
 
             var jt = TypeMappings.mapSqlTypeToJava(c.sqlType(), null);
@@ -133,7 +133,7 @@ public final class QueryTermsGenerator {
     }
 
     /**
-     * Backwards compatible: if your Config record doesn't yet have these accessors,
+     * Backwards compatible: if Config record doesn't yet have these accessors,
      * this will just return null and we’ll use defaults/derived values.
      */
     private static String safeGet(Config cfg, String accessor) {

@@ -32,7 +32,7 @@ public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
         this.indexCfs = Map.copyOf(indexCfs);
     }
 
-    /** Convenience: matches your EntityDef-based design. */
+    /** Convenience: */
     protected AbstractRocksDao(RocksSessions sessions, EntityDef<T, K> entity, Map<String, ColumnFamilyHandle> indexCfs) {
         this(sessions, entity.primaryCf(), entity.keyCodec(), entity.valueCodec(), indexCfs);
     }

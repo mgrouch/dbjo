@@ -21,7 +21,7 @@ public final class DbMetaGenerator {
 
     /**
      * Backwards-compatible constructor: preserves historical behavior (no identifier quoting).
-     * If you want quoting, use {@link #DbMetaGenerator(Config, EnumOverrideIndex, IdentifierQuoter)}.
+     * For quoting, use {@link #DbMetaGenerator(Config, EnumOverrideIndex, IdentifierQuoter)}.
      */
     public DbMetaGenerator(Config cfg) {
         this(cfg, null, null);
@@ -29,7 +29,7 @@ public final class DbMetaGenerator {
 
     /**
      * Backwards-compatible constructor: preserves historical behavior (no identifier quoting).
-     * If you want quoting, use {@link #DbMetaGenerator(Config, EnumOverrideIndex, IdentifierQuoter)}.
+     * For quoting, use {@link #DbMetaGenerator(Config, EnumOverrideIndex, IdentifierQuoter)}.
      */
     public DbMetaGenerator(Config cfg, EnumOverrideIndex enumOverrides) {
         this(cfg, enumOverrides, null);

@@ -124,7 +124,7 @@ public final class DbjoCodegen {
             }
 
             // JDBC DB META (DbMeta classes)
-            // Run if --run=dbmeta OR if you are already generating DAOs (historical behavior)
+            // Run if --run=dbmeta OR if already generating DAOs (historical behavior)
             boolean wantDbMeta = cfg.runMode().runDbMeta() || cfg.runMode().runDao();
             if (wantDbMeta) {
                 int d = new DbMetaGenerator(cfg).generateAll(tables);

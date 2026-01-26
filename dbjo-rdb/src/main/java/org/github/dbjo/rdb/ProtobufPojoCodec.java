@@ -40,7 +40,7 @@ public final class ProtobufPojoCodec<P, M extends MessageLite> implements Codec<
 
     @Override
     public byte[] encode(P value) {
-        if (value == null) return null; // or throw, depending on your Codec contract
+        if (value == null) return null; // or throw, depending on Codec contract
         M msg = toProto.apply(value);
         if (msg == null) throw new IllegalArgumentException("toProto returned null");
         return msg.toByteArray();
@@ -48,7 +48,7 @@ public final class ProtobufPojoCodec<P, M extends MessageLite> implements Codec<
 
     @Override
     public P decode(byte[] bytes) {
-        if (bytes == null) return null; // or throw, depending on your Codec contract
+        if (bytes == null) return null; // or throw, depending on Codec contract
         try {
             @SuppressWarnings("unchecked")
             M msg = (M) defaultInstance.getParserForType().parseFrom(bytes);

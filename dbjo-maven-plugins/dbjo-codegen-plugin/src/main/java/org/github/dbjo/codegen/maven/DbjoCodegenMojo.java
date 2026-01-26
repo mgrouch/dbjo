@@ -71,7 +71,7 @@ public final class DbjoCodegenMojo extends AbstractMojo {
     private File codegenOutJava;
 
     /**
-     * Protobuf Java output directory (if you run protoc).
+     * Protobuf Java output directory.
      * Generator should honor --protoOutJava=...
      */
     @Parameter(
@@ -151,7 +151,7 @@ public final class DbjoCodegenMojo extends AbstractMojo {
         argv.add("--codegenOutJava=" + mustFile(codegenOutJava, "codegenOutJava").getAbsolutePath());
         argv.add("--protoOutJava=" + mustFile(protoOutJava, "protoOutJava").getAbsolutePath());
 
-        // NEW: pass enum override options to your generator (it must support these flags)
+        // pass enum override options to generator (it must support these flags)
         if (enumOverridesFile != null) {
             argv.add("--enumOverridesFile=" + enumOverridesFile.getAbsolutePath());
         }
@@ -197,7 +197,7 @@ public final class DbjoCodegenMojo extends AbstractMojo {
                     offline
             );
 
-            // Make your existing codegen pick it up via System properties
+            // Make existing codegen pick it up via System properties
             System.setProperty("protoc", paths.protocExe().toAbsolutePath().toString());
             System.setProperty("protoc.include", paths.includeDir().toAbsolutePath().toString());
 
