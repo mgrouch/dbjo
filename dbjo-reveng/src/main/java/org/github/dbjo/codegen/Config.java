@@ -55,7 +55,7 @@ public record Config(
     public static final boolean DEFAULT_ENUM_INCLUDE_VIEWS = false;
     public static final boolean DEFAULT_ENUM_ORDER_BY_SORT_ORDER = true;
 
-    public static final String DEFAULT_DAO_PKG = "org.github.dbjo.generated.rdb.dao";
+    public static final String DEFAULT_DAO_PKG = "org.github.dbjo.generated.model.dao.rdb";
     public static final String DEFAULT_SCHEMA_PKG = "org.github.dbjo.generated.rdb.schema";
     public static final String DEFAULT_DAO_CLASS_SUFFIX = "Dao";
     public static final String DEFAULT_SCHEMA_CLASS_SUFFIX = "Schema";
@@ -68,7 +68,7 @@ public record Config(
     public static final String DEFAULT_SQL_DB_MAPPER_PKG = "org.github.dbjo.generated.model.dbmeta";
 
     // JDBC DAO generator defaults
-    public static final String DEFAULT_JDBC_DAO_PKG = "org.github.dbjo.generated.dao.jdbc";
+    public static final String DEFAULT_JDBC_DAO_PKG = "org.github.dbjo.generated.model.dao.jdbc";
     public static final String DEFAULT_JDBC_DAO_CLASS_SUFFIX = "JdbcDao";
 
     // Use classpath (compile-time) instead of string literal:

@@ -134,7 +134,7 @@
                                 <arg>--beanPkg=org.github.dbjo.generated.model.entity</arg>
                                 <arg>--protoJavaPkg=org.github.dbjo.generated.model.proto</arg>
                                 <arg>--protoMapperPkg=org.github.dbjo.generated.model.protomap</arg>
-                                <arg>--daoPkg=org.github.dbjo.generated.model.rdb.dao</arg>
+                                <arg>--daoPkg=org.github.dbjo.generated.model.dao.rdb</arg>
                                 <arg>--schemaPkg=org.github.dbjo.generated.model.rdb.schema</arg>
                                 <arg>--dbMetaPkg=org.github.dbjo.generated.model.dbmeta</arg>
                                 <arg>--queryPkg=org.github.dbjo.generated.model.query</arg>
