@@ -95,6 +95,12 @@
             <artifactId>protobuf-java</artifactId>
         </dependency>
 
+        <dependency>
+            <groupId>org.github.dbjo</groupId>
+            <artifactId>dbjo-meta</artifactId>
+            <version>${project.parent.version}</version>
+        </dependency>
+
     </dependencies>
 
     <build>

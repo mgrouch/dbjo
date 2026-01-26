@@ -1,9 +1,13 @@
 package org.github.dbjo.rdb;
 
+import org.github.dbjo.criteria.eval.QueryEvaluator;
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.ReadOptions;
 import org.rocksdb.RocksDBException;
 
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -32,7 +36,7 @@ public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
         this.indexCfs = Map.copyOf(indexCfs);
     }
 
-    /** Convenience: */
+    /** Convenience: matches your EntityDef-based design. */
     protected AbstractRocksDao(RocksSessions sessions, EntityDef<T, K> entity, Map<String, ColumnFamilyHandle> indexCfs) {
         this(sessions, entity.primaryCf(), entity.keyCodec(), entity.valueCodec(), indexCfs);
     }
@@ -140,7 +144,7 @@ public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
         }
     }
 
-    /** Scan API (primary or index-driven) */
+    /** Your scan API (primary or index-driven) */
     public Stream<Map.Entry<K, T>> stream(Query<K> q) {
         DaoSpliterator<K, T> sp = new DaoSpliterator<>(
                 sessions.current(),
@@ -153,9 +157,58 @@ public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
         return StreamSupport.stream(sp, false).onClose(sp::close);
     }
 
+    // ----------------------------------------------------------------------
+    // Criteria API bridge (in-memory filtering)
+    // ----------------------------------------------------------------------
+
+    /**
+     * Execute a criteria {@link org.github.dbjo.criteria.Query} by streaming records
+     * from RocksDB and filtering them in-memory.
+     *
+     * <p>Currently supports {@code where}, {@code scan} (as an additional range filter)
+     * and {@code limit}. It does not (yet) translate criteria into native index scans.
+     */
+    public Stream<Map.Entry<K, T>> streamCriteria(org.github.dbjo.criteria.Query<? extends Serializable> criteria) {
+        Objects.requireNonNull(criteria, "criteria");
+
+        // Stream everything from Rocks and then filter; apply limit *after* filtering.
+        Stream<Map.Entry<K, T>> base = stream(Query.<K>builder().limit(Integer.MAX_VALUE).build());
+
+        Stream<Map.Entry<K, T>> filtered = base.filter(e -> {
+            T v = e.getValue();
+            if (v == null) return false;
+            if (!(v instanceof Serializable sv)) {
+                throw new IllegalStateException(
+                        "Criteria queries require values to implement java.io.Serializable (" +
+                                "got: " + v.getClass().getName() + ")");
+            }
+            return QueryEvaluator.test(criteria, sv);
+        });
+
+        Integer lim = criteria.limit();
+        if (lim != null && lim >= 0) filtered = filtered.limit(lim);
+        return filtered;
+    }
+
+    /** Materialize {@link #streamCriteria(org.github.dbjo.criteria.Query)} into a list of entries. */
+    public List<Map.Entry<K, T>> listCriteria(org.github.dbjo.criteria.Query<? extends Serializable> criteria) {
+        try (Stream<Map.Entry<K, T>> st = streamCriteria(criteria)) {
+            return st.toList();
+        }
+    }
+
+    /** Materialize {@link #streamCriteria(org.github.dbjo.criteria.Query)} into a list of values. */
+    public List<T> valuesCriteria(org.github.dbjo.criteria.Query<? extends Serializable> criteria) {
+        try (Stream<Map.Entry<K, T>> st = streamCriteria(criteria)) {
+            ArrayList<T> out = new ArrayList<>();
+            st.forEach(e -> out.add(e.getValue()));
+            return out;
+        }
+    }
+
     @Override
     public void close() { /* no-op */ }
 
-    protected abstract void maintainIndexes(RocksWriteBatch batch, K key, T oldValueOrNull, T newValue);
-    protected abstract void maintainIndexesOnDelete(RocksWriteBatch batch, K key, T oldValue);
+    protected abstract void maintainIndexes(RocksWriteBatch batch, K key, T oldValueOrNull, T newValue) throws RocksDBException;
+    protected abstract void maintainIndexesOnDelete(RocksWriteBatch batch, K key, T oldValue) throws RocksDBException;
 }
