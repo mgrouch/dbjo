@@ -376,7 +376,7 @@ public final class DbMetaGenerator {
         return sb.toString();
     }
 
-    // ---------------- generator helpers ----------------
+    // generator helpers
 
     private static boolean isNullable(Col c) {
         Nullability n = c.nullability();

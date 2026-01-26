@@ -80,9 +80,7 @@ public final class DbSchemaGenerator {
         return tableClassFqns.size() + 1;
     }
 
-    // ------------------------------------------------------------
     // Rendering
-    // ------------------------------------------------------------
 
     private String renderTableClass(String pkg, String cls, TableModel tm) {
         TableRef tr = tm.table();

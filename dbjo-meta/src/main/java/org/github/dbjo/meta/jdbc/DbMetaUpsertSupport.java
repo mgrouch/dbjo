@@ -2,13 +2,13 @@ package org.github.dbjo.meta.jdbc;
 
 public abstract class DbMetaUpsertSupport<T> implements DbMeta<T> {
 
-    // ---- per-dialect upsert sql (generated) ----
+    // per-dialect upsert sql
     protected abstract String upsertByIdSqlMssql();
     protected abstract String upsertByIdSqlSybase();
     protected abstract String upsertByIdSqlOracle(); // regular Oracle MERGE (no temp)
     protected abstract String upsertByIdSqlHsql();
 
-    // ---- temp-table batch plumbing (generated only if used) ----
+    // temp-table batch plumbing (generated only if used)
     protected abstract String upsertTempColDefs();
     protected abstract String upsertTempInsertColumns();
     protected abstract int upsertTempParamCount();
@@ -61,7 +61,7 @@ public abstract class DbMetaUpsertSupport<T> implements DbMeta<T> {
         return tpl.replace("{TEMP}", tn);
     }
 
-    // ---- shared helpers (not generated per table) ----
+    // shared helpers (not generated per table)
 
     public final String upsertTempTableName(DbDialect dialect, String suffix) {
         return upsertTempName(dialect, suffix);

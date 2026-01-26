@@ -16,7 +16,6 @@ public final class DaoRegistry implements AutoCloseable {
         this(db, cfByName, false);
     }
 
-    /** If you want registry.close() to also close the DB, pass closeDbOnClose=true. */
     public DaoRegistry(TransactionDB db, Map<String, ColumnFamilyHandle> cfByName, boolean closeDbOnClose) {
         this.db = Objects.requireNonNull(db, "db");
         this.cfByName = Map.copyOf(Objects.requireNonNull(cfByName, "cfByName"));

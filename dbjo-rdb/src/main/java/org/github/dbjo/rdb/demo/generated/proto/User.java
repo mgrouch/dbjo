@@ -72,7 +72,7 @@ public final class User extends AbstractMessageLite<User, User.Builder> {
     @Override public User getDefaultInstanceForType() { return DEFAULT_INSTANCE; }
     @Override public Parser<User> getParserForType() { return PARSER; }
 
-    // --- Getters ---
+    // Getters
     public String getId() { return id; }
 
     public boolean hasEmail() { return hasEmail; }
@@ -81,7 +81,7 @@ public final class User extends AbstractMessageLite<User, User.Builder> {
     public boolean hasName() { return hasName; }
     public String getName() { return name; }
 
-    // --- Serialization ---
+    // Serialization
     @Override
     public void writeTo(CodedOutputStream output) throws IOException {
         if (!id.isEmpty()) {
@@ -119,7 +119,7 @@ public final class User extends AbstractMessageLite<User, User.Builder> {
         return PARSER.parseFrom(data);
     }
 
-    // --- Basic equality (useful in tests) ---
+    // Basic equality (useful in tests)
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
@@ -155,7 +155,7 @@ public final class User extends AbstractMessageLite<User, User.Builder> {
                 '}';
     }
 
-    // --- Builder ---
+    // Builder
     public static final class Builder extends AbstractMessageLite.Builder<User, Builder> {
         private String id = "";
         private boolean hasEmail;

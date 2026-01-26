@@ -26,7 +26,7 @@ public record Config(
         JdbcDao jdbcDao,
         DbSchema dbSchema
 ) {
-    // ---------------- defaults ----------------
+    // defaults
     public static final String DEFAULT_URL    = "jdbc:hsqldb:hsql://localhost:9001/dbjo";
     public static final String DEFAULT_USER   = "SA";
     public static final String DEFAULT_PASS   = "";
@@ -77,7 +77,7 @@ public record Config(
     // DB schema meta generator package (NOT Rocks schema)
     public static final String DEFAULT_DB_SCHEMA_PKG = "org.github.dbjo.generated.model.dbschema";
 
-    // ---------------- sections ----------------
+    // sections
 
     public record Db(String driver, String url, String user, String pass) {}
 
@@ -138,7 +138,7 @@ public record Config(
 
     public record DbSchema(String dbSchemaPkg) {}
 
-    // ---------------- run mode ----------------
+    // run mode
     public enum RunMode {
         ALL, PROTO, ENUMS, ENTITY, QUERY, DAO, MAPPER, RDB, DBMETA, JDBCDAO, SCHEMA;
 

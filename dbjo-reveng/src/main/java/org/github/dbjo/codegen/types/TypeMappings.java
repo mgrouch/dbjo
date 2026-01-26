@@ -14,9 +14,7 @@ public final class TypeMappings {
         public static ProtoType message(String t, boolean ts) { return new ProtoType(t, false, ts, true); }
     }
 
-    // --------------------------------------------------------------------
     // Java mapping
-    // --------------------------------------------------------------------
 
     /** Back-compat entry point (no typeName hints). */
     public static JavaType mapSqlTypeToJava(int sqlType, Set<String> imports) {

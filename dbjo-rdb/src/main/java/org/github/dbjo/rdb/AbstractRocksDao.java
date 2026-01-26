@@ -140,7 +140,7 @@ public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
         }
     }
 
-    /** Your scan API (primary or index-driven) */
+    /** Scan API (primary or index-driven) */
     public Stream<Map.Entry<K, T>> stream(Query<K> q) {
         DaoSpliterator<K, T> sp = new DaoSpliterator<>(
                 sessions.current(),

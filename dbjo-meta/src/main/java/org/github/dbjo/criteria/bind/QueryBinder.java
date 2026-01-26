@@ -61,7 +61,7 @@ public final class QueryBinder {
         return new QuerySpec(entityId, where, scan, query.limit());
     }
 
-    // ---- binding helpers ----
+    // binding helpers
 
     private <B extends Serializable> Condition<B> bindCond(String entityId, CondSpec c) {
         if (c instanceof TrueSpec) return Conditions.trueCondition();

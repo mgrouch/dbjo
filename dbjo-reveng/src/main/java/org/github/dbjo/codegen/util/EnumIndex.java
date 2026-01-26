@@ -263,7 +263,7 @@ public final class EnumIndex {
         return resolveByColumnName(tableSchema, columnName);
     }
 
-    // ---------------- core resolution ----------------
+    // core resolution
 
     private Binding resolveOverride(OverrideSpec ov, int columnSqlType) {
         String tableSchema = ov.tableSchema();

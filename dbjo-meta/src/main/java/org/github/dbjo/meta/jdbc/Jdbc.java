@@ -108,7 +108,7 @@ public final class Jdbc {
         return true;
     }
 
-    // ---- nullable readers ----
+    // nullable readers
 
     public static Short rsShort(ResultSet rs, int i) throws SQLException {
         short v = rs.getShort(i);

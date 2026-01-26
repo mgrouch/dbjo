@@ -40,7 +40,7 @@ public final class RocksDbTransactionManager extends AbstractPlatformTransaction
             // WriteOptions is a native resource; close after beginTransaction returns.
             Transaction txn;
             try (WriteOptions wo = new WriteOptions()) {
-                // You can tune wo here (disableWAL, sync, etc.)
+                // Tune wo here (disableWAL, sync, etc.)
                 txn = txDb.beginTransaction(wo);
             }
 
@@ -52,7 +52,7 @@ public final class RocksDbTransactionManager extends AbstractPlatformTransaction
             TransactionSynchronizationManager.bindResource(Keys.TXN, txn);
 
             // Optionally bind a shared ReadOptions if you want a single RO instance.
-            // Your RocksSession.newReadOptions() can also just create per-use ReadOptions.
+            // RocksSession.newReadOptions() can also just create per-use ReadOptions.
             ReadOptions ro = new ReadOptions();
             Snapshot snap = txn.getSnapshot();
             if (snap != null) ro.setSnapshot(snap);

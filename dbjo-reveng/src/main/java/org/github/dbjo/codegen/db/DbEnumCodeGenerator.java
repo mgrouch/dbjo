@@ -61,7 +61,7 @@ public final class DbEnumCodeGenerator {
         return count;
     }
 
-    // ---------- discovery ----------
+    // discovery
 
     private static List<TableRef> discoverEnumTables(DatabaseMetaData md, String catalog, boolean includeViews) throws SQLException {
         List<TableRef> out = new ArrayList<>();
@@ -215,7 +215,7 @@ public final class DbEnumCodeGenerator {
         return out;
     }
 
-    // ---------- render ----------
+    // render
 
     private String renderEnum(Connection con, EnumTableModel m, String quote) throws SQLException {
         String qTable = qualify(m.table, quote);
@@ -398,7 +398,7 @@ public final class DbEnumCodeGenerator {
         return new Row(pkVal, vals);
     }
 
-    // ---------- naming / types ----------
+    // naming / types
 
     private static String toEnumClassName(String enumTableName) {
         String base = stripEnumSuffix(enumTableName).toLowerCase(Locale.ROOT);
@@ -529,7 +529,7 @@ public final class DbEnumCodeGenerator {
         }
     }
 
-    // ---------- models ----------
+    // models
 
     private record TableRef(String catalog, String schema, String name) {
         String key() {

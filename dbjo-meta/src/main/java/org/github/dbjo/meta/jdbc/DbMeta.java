@@ -19,12 +19,12 @@ public interface DbMeta<T> {
     Object[] updateByIdParams(T e);
     SQLType[] updateByIdParamTypes();
 
-    // --- Upsert (required for your request) ---
+    // Upsert
     String upsertByIdSql(DbDialect dialect);
     Object[] upsertByIdParams(T e);
     SQLType[] upsertByIdParamTypes();
 
-    // --- Optional temp-table batch upsert support ---
+    // Optional temp-table batch upsert support
     default boolean supportsUpsertTemp(DbDialect dialect) { return false; }
 
     default String createUpsertTempTableSql(DbDialect dialect, String suffix) {

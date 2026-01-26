@@ -10,8 +10,6 @@ public interface KeyCodec<K> {
         return KeyCodecs.stringUtf8();
     }
 
-    // --- Add these ---
-
     /** 8-byte sortable signed long (big-endian with sign-bit flip). */
     static KeyCodec<Long> int64() {
         return KeyCodecs.int64();

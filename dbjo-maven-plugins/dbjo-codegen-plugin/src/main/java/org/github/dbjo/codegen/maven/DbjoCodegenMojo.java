@@ -117,7 +117,7 @@ public final class DbjoCodegenMojo extends AbstractMojo {
     @Parameter(defaultValue = "${settings.offline}", readonly = true)
     private boolean offline;
 
-    // --- NEW: enum overrides integration (passed through to generator CLI) ---
+    // enum overrides integration (passed through to generator CLI)
 
     @Parameter(
             property = "dbjo.codegen.enumOverridesFile",

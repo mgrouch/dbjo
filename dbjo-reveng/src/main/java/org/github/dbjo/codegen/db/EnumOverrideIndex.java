@@ -118,7 +118,7 @@ public final class EnumOverrideIndex {
         return byKeyLower.get(k2);
     }
 
-    // --------------- parsing ---------------
+    // parsing
 
     // key: [schema.]table.column
     // value: table:enum_table[#by:col] or table:schema.enum_table[#by:col]
