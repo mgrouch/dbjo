@@ -6,10 +6,11 @@ import java.time.Instant;
 import java.util.List;
 
 import org.github.dbjo.criteria.*;
-import org.github.dbjo.criteria.bind.*;
+import org.github.dbjo.criteria.bind.QueryBinder;
 import org.github.dbjo.criteria.cache.*;
 import org.github.dbjo.criteria.eval.ConditionEvaluator;
 import org.github.dbjo.criteria.spec.*;
+import org.github.dbjo.meta.entity.DefaultMetaRegistry;
 import org.github.dbjo.meta.entity.EntityMeta;
 import org.github.dbjo.meta.entity.PropertyMeta;
 

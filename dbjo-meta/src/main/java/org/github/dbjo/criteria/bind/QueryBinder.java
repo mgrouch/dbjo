@@ -10,6 +10,7 @@ import java.util.Objects;
 import org.github.dbjo.criteria.*;
 import org.github.dbjo.criteria.spec.*;
 import org.github.dbjo.meta.entity.EntityMeta;
+import org.github.dbjo.meta.entity.MetaRegistry;
 import org.github.dbjo.meta.entity.PropertyMeta;
 
 public final class QueryBinder {
