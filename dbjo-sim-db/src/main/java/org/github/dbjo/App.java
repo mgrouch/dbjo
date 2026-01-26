@@ -33,6 +33,7 @@ public final class App {
     // Connect through TCP to initialize schema
     String url = "jdbc:hsqldb:hsql://localhost:9001/dbjo";
     try (Connection conn = DriverManager.getConnection(url, USER, PASS)) {
+      SqlRunner.runClasspathScript(conn, "static-data.sql");
       SqlRunner.runClasspathScript(conn, "schema.sql");
 
       try (PreparedStatement ps = conn.prepareStatement(
