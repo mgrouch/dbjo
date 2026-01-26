@@ -40,14 +40,18 @@ final class QueryBinderTest {
 
         DefaultMetaRegistry reg = new DefaultMetaRegistry().register("T", em);
 
-        QueryBinder<Bean> qb = new QueryBinder<>(reg);
+        QueryBinder qb = new QueryBinder(reg);
 
         QuerySpec spec = new QuerySpec("T", new EqSpec("id", "42"), null, null);
-        Query<Bean> q = qb.fromSpec(spec);
+        Query<?> q = qb.fromSpec(spec);
 
         Bean b = new Bean();
         b.setId(42);
 
-        assertTrue(ConditionEvaluator.test(q.where(), b));
+        // ConditionEvaluator works with the runtime bean instance even though Query<?> is raw here.
+        @SuppressWarnings("unchecked")
+        boolean ok = ConditionEvaluator.test(((Query<Bean>) q).where(), b);
+
+        assertTrue(ok);
     }
 }
