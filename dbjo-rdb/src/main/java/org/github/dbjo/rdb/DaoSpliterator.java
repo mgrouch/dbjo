@@ -8,11 +8,9 @@ import java.util.Spliterator;
 import java.util.function.Consumer;
 
 final class DaoSpliterator<K, T> implements Spliterator<Map.Entry<K, T>>, AutoCloseable {
-    private static final byte SEP = 0;
 
     private final RocksSession session;
     private final ColumnFamilyHandle primaryCf;
-    private final Map<String, ColumnFamilyHandle> indexCfs;
     private final KeyCodec<K> keyCodec;
     private final Codec<T> valueCodec;
 
@@ -49,7 +47,6 @@ final class DaoSpliterator<K, T> implements Spliterator<Map.Entry<K, T>>, AutoCl
                    Query<K> q) {
         this.session = Objects.requireNonNull(session);
         this.primaryCf = Objects.requireNonNull(primaryCf);
-        this.indexCfs = Objects.requireNonNull(indexCfs);
         this.keyCodec = Objects.requireNonNull(keyCodec);
         this.valueCodec = Objects.requireNonNull(valueCodec);
 
@@ -84,7 +81,7 @@ final class DaoSpliterator<K, T> implements Spliterator<Map.Entry<K, T>>, AutoCl
             scanCf = idxCf;
 
             if (p instanceof IndexPredicate.Eq eq) {
-                byte[] prefix = ByteArrays.concat(eq.valueBytes(), SEP);
+                byte[] prefix = IndexKeys.prefix(eq.valueBytes());
                 this.iterFrom = prefix;
                 this.iterFromInc = true;
                 this.iterTo = ByteArrays.prefixEndExclusive(prefix);
@@ -96,8 +93,8 @@ final class DaoSpliterator<K, T> implements Spliterator<Map.Entry<K, T>>, AutoCl
                 tmpEqPrefix = prefix;
 
             } else if (p instanceof IndexPredicate.Range r) {
-                byte[] fromPrefix = ByteArrays.concat(r.from(), SEP);
-                byte[] toPrefix = ByteArrays.concat(r.to(), SEP);
+                byte[] fromPrefix = IndexKeys.prefix(r.from());
+                byte[] toPrefix = IndexKeys.prefix(r.to());
 
                 this.iterFrom = fromPrefix;
                 this.iterFromInc = true;
@@ -202,13 +199,7 @@ final class DaoSpliterator<K, T> implements Spliterator<Map.Entry<K, T>>, AutoCl
                 }
 
                 byte[] idxKey = it.key();
-                int sepPos = ByteArrays.indexOf(idxKey, SEP);
-                if (sepPos <= 0 || sepPos == idxKey.length - 1) {
-                    if (!descending) it.next(); else it.prev();
-                    continue;
-                }
-
-                byte[] valuePart = java.util.Arrays.copyOfRange(idxKey, 0, sepPos);
+                byte[] valuePart = IndexKeys.escapedValuePart(idxKey); // for comparisons
 
                 if (idxValueFrom != null) {
                     int cFrom = ByteArrays.compare(valuePart, idxValueFrom);
@@ -226,7 +217,7 @@ final class DaoSpliterator<K, T> implements Spliterator<Map.Entry<K, T>>, AutoCl
                     }
                 }
 
-                byte[] pkBytes = java.util.Arrays.copyOfRange(idxKey, sepPos + 1, idxKey.length);
+                byte[] pkBytes   = IndexKeys.pkFromIndexKey(idxKey);   // for fetching
 
                 try {
                     byte[] vb = session.get(primaryCf, ro, pkBytes);
