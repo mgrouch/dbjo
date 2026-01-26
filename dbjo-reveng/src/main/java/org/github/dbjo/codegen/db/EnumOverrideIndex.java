@@ -55,7 +55,9 @@ public final class EnumOverrideIndex {
         for (String k : p.stringPropertyNames()) {
             String v = p.getProperty(k);
             if (v == null) continue;
+
             OverrideSpec spec = parseSpec(k.trim(), v.trim());
+
             EnumTableInfo enumInfo = enumInfoCache.computeIfAbsent(
                     keyTable(spec.enumSchema(), spec.enumTableName()),
                     kk -> {
@@ -82,9 +84,6 @@ public final class EnumOverrideIndex {
             String enumSimple = toEnumClassName(spec.enumTableName());
             String enumFqn = cfg.enumPkg() + "." + enumSimple;
 
-            // key getter on enum:
-            //  - PK => id()
-            //  - by column => getter derived from column name (with reserved handling)
             String keyGetter;
             String lookupMethodNullable;
             if (spec.byColumnOrNull() == null || spec.byColumnOrNull().isBlank() || by.equalsIgnoreCase(enumInfo.pkColumn())) {
@@ -108,17 +107,15 @@ public final class EnumOverrideIndex {
     }
 
     public Binding find(String tableSchema, String tableName, String columnName) {
-        // try exact schema match
         String k1 = keyColumn(tableSchema, tableName, columnName);
         Binding b = byKeyLower.get(k1);
         if (b != null) return b;
 
-        // fallback: schema-less override (any schema)
         String k2 = keyColumn("", tableName, columnName);
         return byKeyLower.get(k2);
     }
 
-    // parsing
+    // --------------- parsing ---------------
 
     // key: [schema.]table.column
     // value: table:enum_table[#by:col] or table:schema.enum_table[#by:col]
@@ -167,18 +164,26 @@ public final class EnumOverrideIndex {
         if (schema.isEmpty()) schema = nz(spec.tableSchema());
         if (schema.isEmpty()) schema = nz(System.getProperty("dbjo.defaultSchema", ""));
 
-        String table = spec.enumTableName();
+        String table = nz(spec.enumTableName());
+
+        // Normalize for metadata calls (HSQL/H2 store unquoted identifiers uppercase; Postgres lowercase, etc.)
+        String schemaMeta = schema.isEmpty() ? "" : normalizeForMeta(md, schema);
+        String tableMeta  = normalizeForMeta(md, table);
 
         // verify table exists + read PK
-        String pk = readSinglePk(md, schema, table);
+        String pk = readSinglePk(md, schemaMeta, tableMeta);
         if (pk == null) {
-            throw new SQLException("Enum override table must have single-column PK: " + schema + "." + table);
+            throw new SQLException("Enum override table must have single-column PK: " + schema + "." + spec.enumTableName());
         }
 
-        Set<String> unique = readUniqueSingleCols(md, schema, table);
+        Set<String> unique = readUniqueSingleCols(md, schemaMeta, tableMeta);
         unique.add(pk.toUpperCase(Locale.ROOT));
 
-        return new EnumTableInfo(schema, table, pk, unique);
+        // Store normalized names so later SQL generation matches JDBC names
+        String outSchema = schemaMeta.isEmpty() ? schema : schemaMeta;
+        String outTable  = tableMeta;
+
+        return new EnumTableInfo(outSchema, outTable, pk, unique);
     }
 
     private static String readSinglePk(DatabaseMetaData md, String schema, String table) throws SQLException {
@@ -194,7 +199,6 @@ public final class EnumOverrideIndex {
     }
 
     private static Set<String> readUniqueSingleCols(DatabaseMetaData md, String schema, String table) throws SQLException {
-        // include only single-column UNIQUE indexes (composites ignored)
         Map<String, List<String>> idxCols = new HashMap<>();
         Map<String, Boolean> idxUnique = new HashMap<>();
 
@@ -219,17 +223,25 @@ public final class EnumOverrideIndex {
         return out;
     }
 
+    private static String normalizeForMeta(DatabaseMetaData md, String ident) throws SQLException {
+        String z = nz(ident);
+        if (z.isEmpty()) return z;
+
+        if (md.storesUpperCaseIdentifiers()) return z.toUpperCase(Locale.ROOT);
+        if (md.storesLowerCaseIdentifiers()) return z.toLowerCase(Locale.ROOT);
+
+        // mixed-case / unknown: keep as-is
+        return z;
+    }
+
     private static String enumGetterNameForColumn(String dbCol) {
-        // DB column "NAME" -> nameInDb (avoid Enum.name())
         String field = Naming.toFieldName(dbCol);
         if ("name".equals(field)) return "nameInDb";
-        // avoid other Enum method collisions
         if (RESERVED_ENUM_METHODS.contains(field)) return field + "InDb";
         return field;
     }
 
     private static String enumLookupNullableMethodForColumn(String dbCol) {
-        // method naming is by<UpperCamelCol>Nullable (special case: NAME -> byNameNullable)
         String c = dbCol.trim().toLowerCase(Locale.ROOT);
         String suffix;
         if ("name".equals(c)) {
@@ -242,7 +254,6 @@ public final class EnumOverrideIndex {
 
     private static String toEnumClassName(String enumTableName) {
         String base = stripEnumSuffix(enumTableName);
-        // normalize casing to avoid COUNTRYEnum
         base = base.toLowerCase(Locale.ROOT);
         String cls = Naming.toClassName(base);
         if (!cls.endsWith("Enum")) cls = cls + "Enum";

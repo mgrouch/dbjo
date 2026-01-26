@@ -2,7 +2,7 @@
 -- Enums
 
 CREATE TABLE global_region_enum (
-  code VARCHAR(8) PRIMARY KEY,     -- EMEA / APAC / AMER
+  code VARCHAR(8) NOT NULL PRIMARY KEY,     -- EMEA / APAC / AMER
   name VARCHAR(64) NOT NULL,
   sort_order SMALLINT NOT NULL,
   is_active BOOLEAN NOT NULL
