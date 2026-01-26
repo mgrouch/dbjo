@@ -240,9 +240,6 @@ public final class EntityGenerator {
             }
             case Types.BIT, Types.BOOLEAN -> new JavaType("Boolean", "Boolean.class");
 
-            case Types.CHAR, Types.VARCHAR, Types.LONGVARCHAR,
-                    Types.NCHAR, Types.NVARCHAR, Types.LONGNVARCHAR -> new JavaType("String", "String.class");
-
             case Types.DATE -> {
                 if (imports != null) imports.add("java.sql.Date");
                 yield new JavaType("Date", "Date.class");

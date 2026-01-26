@@ -273,7 +273,7 @@ public final class DbSchemaGenerator {
 
     private static String safeClassPart(String raw) {
         String cls = Naming.toClassName(raw);
-        if (cls == null || cls.isBlank()) cls = "X";
+        if (cls.isBlank()) cls = "X";
         if (!Character.isJavaIdentifierStart(cls.charAt(0))) cls = "_" + cls;
 
         StringBuilder b = new StringBuilder(cls.length());

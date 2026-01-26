@@ -210,13 +210,6 @@ public record Config(
     public String beanPkg(){ return entity.beanPkg(); }
     public String metaPkg(){ return entity.metaPkg(); }
     public String baseMetaPkg(){ return entity.baseMetaPkg(); }
-    public String metaSuffix(){ return entity.metaSuffix(); }
-
-    // query
-    public String queryPkg(){ return query.queryPkg(); }
-    public String querySuffix(){ return query.querySuffix(); }
-    public String termsFqn(){ return query.termsFqn(); }
-    public String propertyTermFqn(){ return query.propertyTermFqn(); }
 
     // enums
     public boolean enumEnabled(){ return enums.enumEnabled(); }
@@ -234,7 +227,6 @@ public record Config(
     public String daoClassSuffix(){ return rocks.daoClassSuffix(); }
     public String schemaClassSuffix(){ return rocks.schemaClassSuffix(); }
     public String cfConstSuffix(){ return rocks.cfConstSuffix(); }
-    public String daoBaseClass(){ return rocks.daoBaseClass(); }
 
     // proto mapper
     public String protoMapperPkg(){ return protoMapper.protoMapperPkg(); }
@@ -333,9 +325,9 @@ public record Config(
         // SQL/JDBC meta
         String dbMetaPkg = am.get("dbMetaPkg", DEFAULT_SQL_DB_MAPPER_PKG);
 
-        // JDBC DAO settings (defaults depend on dbMetaPkg)
+        // JDBC DAO settings
         String jdbcDaoPkg = am.get("jdbcDaoPkg",
-                System.getProperty("dbjo.jdbcDaoPkg", dbMetaPkg + ".dao"));
+                System.getProperty("dbjo.jdbcDaoPkg", DEFAULT_JDBC_DAO_PKG));
         String jdbcDaoClassSuffix = am.get("jdbcDaoClassSuffix",
                 System.getProperty("dbjo.jdbcDaoClassSuffix", DEFAULT_JDBC_DAO_CLASS_SUFFIX));
         String jdbcDaoBaseClass = am.get("jdbcDaoBaseClass",

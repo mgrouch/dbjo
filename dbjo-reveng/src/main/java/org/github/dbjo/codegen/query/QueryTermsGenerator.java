@@ -151,8 +151,9 @@ public final class QueryTermsGenerator {
         if (javaType.endsWith("[]")) return;
 
         switch (javaType) {
-            case "boolean","byte","short","int","long","float","double","char" -> { return; }
-            case "String","Boolean","Byte","Short","Integer","Long","Float","Double","Character" -> { return; }
+            case "boolean","byte","short","int","long","float","double",
+                    "char", "String", "Boolean", "Byte", "Short", "Integer",
+                    "Long", "Float", "Double", "Character" -> { return; }
         }
 
         switch (javaType) {
