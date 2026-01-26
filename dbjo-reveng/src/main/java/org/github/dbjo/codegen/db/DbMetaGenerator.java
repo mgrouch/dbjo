@@ -81,7 +81,7 @@ public final class DbMetaGenerator {
 
         String regCls = "DbMetas";
         String regSrc = renderRegistry(registryPkg, regCls, cfg.dbMetaPkg(), metaClassNames);
-        Path regFile = regOutDir.resolve(registryPkg.replace('.', '/')).resolve(regCls + ".java");
+        Path regFile = regOutDir.resolve(regCls + ".java");
         FilesUtil.writeString(regFile, regSrc, cfg.overwrite());
         count++;
 
