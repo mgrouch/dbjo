@@ -28,7 +28,7 @@ public final class TypeMappings {
     public static JavaType mapSqlTypeToJava(int sqlType, String typeName, Set<String> imports) {
         String tn = norm(typeName);
 
-        // ---- Vendor/type-name hints first (most important for MSSQL/Oracle/Sybase) ----
+        // Vendor/type-name hints first (most important for MSSQL/Oracle/Sybase)
 
         // MSSQL: UNIQUEIDENTIFIER -> UUID (often Types.OTHER or CHAR/VARCHAR depending on driver)
         if (isOneOf(tn, "UNIQUEIDENTIFIER", "UUID")) {
@@ -61,7 +61,7 @@ public final class TypeMappings {
             return new JavaType("byte[]", "byte[].class");
         }
 
-        // ---- Standard JDBC Types ----
+        // Standard JDBC Types
         return switch (sqlType) {
             case Types.TINYINT, Types.SMALLINT -> new JavaType("Short", "Short.class");
             case Types.INTEGER -> new JavaType("Integer", "Integer.class");
@@ -115,9 +115,7 @@ public final class TypeMappings {
         };
     }
 
-    // --------------------------------------------------------------------
     // Proto mapping
-    // --------------------------------------------------------------------
 
     /** Back-compat entry point (no typeName hints). */
     public static ProtoType mapSqlTypeToProto(int sqlType) {
@@ -161,9 +159,7 @@ public final class TypeMappings {
         };
     }
 
-    // --------------------------------------------------------------------
     // helpers
-    // --------------------------------------------------------------------
 
     private static String norm(String s) {
         if (s == null) return "";

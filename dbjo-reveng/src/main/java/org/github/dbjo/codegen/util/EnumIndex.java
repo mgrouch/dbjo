@@ -168,7 +168,7 @@ public final class EnumIndex {
                     Collections.unmodifiableSet(uniqueColsLower)
             );
 
-            // ✅ FIX: instance fields must be accessed through idx.*
+            // instance fields must be accessed through idx.*
             idx.bySchemaAndBase.put(key(schemaKey, baseKey), info);
 
             // track uniqueness across schemas
@@ -382,7 +382,7 @@ public final class EnumIndex {
         return null;
     }
 
-    // ---------------- override parsing ----------------
+    // override parsing
 
     private static OverrideSpec parseOverrideLine(String left, String right, Path file, int lineNo) {
         String[] lp = left.split("\\.");
@@ -444,7 +444,7 @@ public final class EnumIndex {
         return s;
     }
 
-    // ---------------- naming + typing helpers ----------------
+    // naming + typing helpers
 
     public static boolean isEnumTableName(String tableName) {
         if (tableName == null) return false;

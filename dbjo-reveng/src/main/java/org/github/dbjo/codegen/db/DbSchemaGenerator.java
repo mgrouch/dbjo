@@ -259,9 +259,7 @@ public final class DbSchemaGenerator {
         return sb.toString();
     }
 
-    // ------------------------------------------------------------
     // Helpers
-    // ------------------------------------------------------------
 
     private static String tableMetaClassName(String schema, String table) {
         String s = (schema == null || schema.isBlank()) ? "" : safeClassPart(schema);

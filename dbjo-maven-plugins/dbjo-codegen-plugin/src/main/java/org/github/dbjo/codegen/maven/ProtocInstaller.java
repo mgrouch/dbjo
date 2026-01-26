@@ -123,7 +123,7 @@ public final class ProtocInstaller {
         return minor + "." + patch;
     }
 
-    // ----------------- internals -----------------
+    // internals
 
     private static void download(URI url, Path out) throws IOException, InterruptedException, MojoExecutionException {
         HttpClient client = HttpClient.newBuilder()

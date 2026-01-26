@@ -173,7 +173,7 @@ public record Config(
         }
     }
 
-    // ---------------- flat compatibility accessors ----------------
+    // flat compatibility accessors
 
     // DB
     public String driver() { return db.driver(); }
@@ -243,7 +243,7 @@ public record Config(
     // db schema meta pkg
     public String dbSchemaPkg(){ return dbSchema.dbSchemaPkg(); }
 
-    // ---------------- factory ----------------
+    // factory
     public static Config from(ArgMap am) {
         // DB
         String driver = am.get("driver", System.getProperty("db.driver", DEFAULT_DRIVER));
