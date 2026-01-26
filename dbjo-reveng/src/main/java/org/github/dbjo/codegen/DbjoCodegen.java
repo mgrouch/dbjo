@@ -57,7 +57,7 @@ public final class DbjoCodegen {
             System.out.println("Tables: " + tables.size());
             System.out.println();
 
-            // 0) DB SCHEMA (runtime metadata of tables/columns/indexes)
+            // DB SCHEMA (runtime metadata of tables/columns/indexes)
             // Runs when --run=schema or --run=all
             if (cfg.runMode().runSchema()) {
                 int n = new DbSchemaGenerator(
@@ -70,7 +70,7 @@ public final class DbjoCodegen {
                 System.out.println();
             }
 
-            // 1) PROTO
+            // PROTO
             if (cfg.runMode().runProto()) {
                 ProtoGenerator pg = new ProtoGenerator(cfg);
                 var protos = pg.generateAll(tables);
@@ -83,7 +83,7 @@ public final class DbjoCodegen {
                 System.out.println();
             }
 
-            // 2) ENTITY + META (<Entity>Meta)
+            // ENTITY + META (<Entity>Meta)
             if (cfg.runMode().runEntity()) {
                 int n = new EntityGenerator(cfg).generateAll(tables);
                 System.out.println("Generated entity/meta for " + n + " table(s) into: " + cfg.outBase().toAbsolutePath());
@@ -94,21 +94,21 @@ public final class DbjoCodegen {
                 System.out.println();
             }
 
-            // 3) QUERY TERMS (<Entity>Q) — requires <Entity>Meta, so run after entity/meta
+            // QUERY TERMS (<Entity>Q) — requires <Entity>Meta, so run after entity/meta
             if (cfg.runMode().runQuery()) {
                 int n = new QueryTermsGenerator(cfg).generateAll(tables);
                 System.out.println("Generated Query terms for " + n + " table(s) into: " + cfg.outBase().toAbsolutePath());
                 System.out.println();
             }
 
-            // 4) ROCKS SCHEMAS (needed by DAO + mapper)
+            // ROCKS SCHEMAS (needed by DAO + mapper)
             if (cfg.runMode().runDao() || cfg.runMode().runMapper()) {
                 int ns = new RocksSchemaGenerator(cfg).generateAll(tables);
                 System.out.println("Generated RocksDB Schema(s): " + ns);
                 System.out.println();
             }
 
-            // 4b) ENUM TABLES (Java enums)
+            // ENUM TABLES (Java enums)
             if (cfg.enumEnabled() && (cfg.runMode().runEntity() || cfg.runMode().runDao() || cfg.runMode().runMapper())) {
                 int en = new org.github.dbjo.codegen.db.DbEnumCodeGenerator(cfg).generateAll(conn);
                 System.out.println("Generated enum(s): " + en + " into: " +
@@ -116,14 +116,14 @@ public final class DbjoCodegen {
                 System.out.println();
             }
 
-            // 5) ROCKS DAOs
+            // ROCKS DAOs
             if (cfg.runMode().runDao()) {
                 int n = new RocksDaoGenerator(cfg).generateAll(tables);
                 System.out.println("Generated RocksDB DAO(s): " + n);
                 System.out.println();
             }
 
-            // 5b) JDBC DB META (DbMeta classes)
+            // JDBC DB META (DbMeta classes)
             // Run if --run=dbmeta OR if you are already generating DAOs (historical behavior)
             boolean wantDbMeta = cfg.runMode().runDbMeta() || cfg.runMode().runDao();
             if (wantDbMeta) {
@@ -132,7 +132,7 @@ public final class DbjoCodegen {
                 System.out.println();
             }
 
-            // 5c) JDBC DAOs (BaseJdbcDAO subclasses)
+            // JDBC DAOs (BaseJdbcDAO subclasses)
             // Run if explicitly requested OR when producing DbMeta (typical pairing).
             boolean wantJdbcDao = cfg.runMode().runJdbcDao() || wantDbMeta;
             if (wantJdbcDao) {
@@ -142,7 +142,7 @@ public final class DbjoCodegen {
                 System.out.println();
             }
 
-            // 6) PROTO MAPPERS
+            // PROTO MAPPERS
             if (cfg.runMode().runMapper()) {
                 int n = new ProtoMapperGenerator(cfg).generateAll(tables);
                 System.out.println("Generated Proto mapper(s): " + n);

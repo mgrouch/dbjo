@@ -68,7 +68,7 @@ public record Config(
     public static final String DEFAULT_SQL_DB_MAPPER_PKG = "org.github.dbjo.generated.model.dbmeta";
 
     // JDBC DAO generator defaults
-    public static final String DEFAULT_JDBC_DAO_PKG = DEFAULT_SQL_DB_MAPPER_PKG + ".dao";
+    public static final String DEFAULT_JDBC_DAO_PKG = "org.github.dbjo.generated.dao.jdbc";
     public static final String DEFAULT_JDBC_DAO_CLASS_SUFFIX = "JdbcDao";
 
     // Use classpath (compile-time) instead of string literal:
