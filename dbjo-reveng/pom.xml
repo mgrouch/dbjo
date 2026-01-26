@@ -24,19 +24,15 @@
             <artifactId>dbjo-meta</artifactId>
             <version>${project.parent.version}</version>
         </dependency>
+
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
             <version>5.10.2</version>
             <scope>test</scope>
         </dependency>
-        <dependency>
-            <groupId>org.assertj</groupId>
-            <artifactId>assertj-core</artifactId>
-            <version>3.25.3</version>
-            <scope>test</scope>
-        </dependency>
     </dependencies>
+
     <build>
         <extensions>
             <extension>
@@ -45,6 +41,17 @@
                 <version>1.7.1</version>
             </extension>
         </extensions>
+
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.5.2</version>
+                <configuration>
+                    <useModulePath>false</useModulePath>
+                </configuration>
+            </plugin>
+        </plugins>
     </build>
 
     <properties>
@@ -85,78 +92,32 @@
                                             <version>${protoc.version}</version>
                                             <classifier>${os.detected.classifier}</classifier>
                                             <type>exe</type>
-                                            <outputDirectory>${project.build.directory}/tools/protoc</outputDirectory>
+                                            <outputDirectory>${project.build.directory}/tools</outputDirectory>
                                             <destFileName>${protoc.bin}</destFileName>
                                         </artifactItem>
                                     </artifactItems>
-                                    <overWriteReleases>true</overWriteReleases>
-                                    <overWriteSnapshots>true</overWriteSnapshots>
-                                </configuration>
-                            </execution>
-
-                            <!-- 2) Optional but important if your generated protos import wrappers/timestamp -->
-                            <execution>
-                                <id>unpack-wkt-protos</id>
-                                <phase>initialize</phase>
-                                <goals><goal>unpack</goal></goals>
-                                <configuration>
-                                    <artifactItems>
-                                        <artifactItem>
-                                            <groupId>com.google.protobuf</groupId>
-                                            <artifactId>protobuf-java</artifactId>
-                                            <version>${protobuf.version}</version>
-                                            <type>jar</type>
-                                            <includes>google/protobuf/*.proto</includes>
-                                            <outputDirectory>${project.build.directory}/tools/protoc/include</outputDirectory>
-                                        </artifactItem>
-                                    </artifactItems>
+                                    <overWriteIfNewer>true</overWriteIfNewer>
                                 </configuration>
                             </execution>
                         </executions>
                     </plugin>
 
-                    <!-- 3) Run DB -> .proto -> protoc during generate-sources -->
+                    <!-- 2) Run your Java codegen AFTER protoc is downloaded -->
                     <plugin>
                         <groupId>org.codehaus.mojo</groupId>
                         <artifactId>exec-maven-plugin</artifactId>
-                        <version>3.2.0</version>
+                        <version>3.4.1</version>
                         <executions>
                             <execution>
-                                <id>dbjo-codegen</id>
-                                <phase>install</phase>
+                                <id>codegen</id>
+                                <phase>generate-sources</phase>
                                 <goals><goal>java</goal></goals>
                                 <configuration>
                                     <mainClass>org.github.dbjo.codegen.DbjoCodegen</mainClass>
-                                    <classpathScope>compile</classpathScope>
-                                    <systemProperties>
-                                        <systemProperty>
-                                            <key>protoc</key>
-                                            <value>${project.build.directory}/tools/protoc/${protoc.bin}</value>
-                                        </systemProperty>
-                                        <systemProperty>
-                                            <key>protoc.include</key>
-                                            <value>${project.build.directory}/tools/protoc/include</value>
-                                        </systemProperty>
-                                    </systemProperties>
-                                </configuration>
-                            </execution>
-                        </executions>
-                    </plugin>
-
-                    <!-- 4) Compile generated Java -->
-                    <plugin>
-                        <groupId>org.codehaus.mojo</groupId>
-                        <artifactId>build-helper-maven-plugin</artifactId>
-                        <version>3.5.0</version>
-                        <executions>
-                            <execution>
-                                <id>add-generated-sources</id>
-                                <phase>generate-sources</phase>
-                                <goals><goal>add-source</goal></goals>
-                                <configuration>
-                                    <sources>
-                                        <source>${project.build.directory}/dbjo-generated/proto-java</source>
-                                    </sources>
+                                    <arguments>
+                                        <argument>-Dprotoc.bin=${project.build.directory}/tools/${protoc.bin}</argument>
+                                    </arguments>
+                                    <classpathScope>runtime</classpathScope>
                                 </configuration>
                             </execution>
                         </executions>

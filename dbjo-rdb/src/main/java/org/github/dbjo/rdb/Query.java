@@ -11,7 +11,14 @@ public record Query<K>(
     public Query {
         if (limit <= 0) limit = Integer.MAX_VALUE;
         indexPredicates = (indexPredicates == null) ? List.of() : List.copyOf(indexPredicates);
-        keyRange = (keyRange == null) ? Optional.empty() : keyRange;
+        keyRange = (keyRange.isEmpty()) ? Optional.empty() : keyRange;
+
+        // Current DAO planning only supports a single index predicate.
+        if (indexPredicates.size() > 1) {
+            throw new IllegalArgumentException(
+                    "Only one index predicate is supported (got " + indexPredicates.size() + ")"
+            );
+        }
     }
 
     public static <K> Builder<K> builder() { return new Builder<>(); }
