@@ -146,8 +146,13 @@ public final class BatchUpsert<T> implements AutoCloseable {
 
         if (useTemp && dropTempOnClose) {
             try {
-                try (Statement st = (stTempCtl != null ? stTempCtl : conn.createStatement())) {
-                    st.executeUpdate(meta.dropUpsertTempTableSql(dialect, suffix));
+                // Avoid double-close when stTempCtl is reused (some drivers may throw on 2nd close).
+                if (stTempCtl != null) {
+                    stTempCtl.executeUpdate(meta.dropUpsertTempTableSql(dialect, suffix));
+                } else {
+                    try (Statement st = conn.createStatement()) {
+                        st.executeUpdate(meta.dropUpsertTempTableSql(dialect, suffix));
+                    }
                 }
             } catch (SQLException ignore) {
             }

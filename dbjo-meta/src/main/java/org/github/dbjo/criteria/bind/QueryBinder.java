@@ -6,6 +6,7 @@ import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.github.dbjo.criteria.*;
 import org.github.dbjo.criteria.spec.*;
@@ -198,13 +199,15 @@ public final class QueryBinder {
     private static Object coerceEnum(Class<?> enumClass, Object o, PropertyMeta<?, ?> p) {
         // already handled isInstance above
 
+        EnumCoercer c = EnumCoercer.forEnum(enumClass);
+
         // 1) ofNullable(...)
-        Object v = tryInvokeEnumStatic(enumClass, "ofNullable", o, true);
+        Object v = c.invokeOfNullable(o);
         if (v != null) return v;
 
         // 2) of(...)
         try {
-            v = tryInvokeEnumStatic(enumClass, "of", o, false);
+            v = c.invokeOf(o);
             if (v != null) return v;
         } catch (RuntimeException ex) {
             // continue to by* lookups; of(...) may throw for unknown key
@@ -212,11 +215,11 @@ public final class QueryBinder {
 
         // 3) by*Nullable(...) then by*(...)
         if (o instanceof String) {
-            Object byV = tryInvokeAnyByNullable(enumClass, o);
+            Object byV = c.invokeAnyByNullable(o);
             if (byV != null) return byV;
 
             try {
-                Object byNonNull = tryInvokeAnyByNonNull(enumClass, o);
+                Object byNonNull = c.invokeAnyByNonNull(o);
                 if (byNonNull != null) return byNonNull;
             } catch (RuntimeException ex) {
                 // ignore and try valueOf
@@ -235,70 +238,127 @@ public final class QueryBinder {
                 " (no suitable enum coercion via of/ofNullable/by*)");
     }
 
-    private static Object tryInvokeEnumStatic(Class<?> enumClass, String methodName, Object raw, boolean nullableMethod) {
-        Method[] ms = enumClass.getMethods();
-        for (Method m : ms) {
-            if (!m.getName().equals(methodName)) continue;
-            if (!Modifier.isStatic(m.getModifiers())) continue;
-            if (m.getParameterCount() != 1) continue;
-            if (!enumClass.isAssignableFrom(m.getReturnType())) continue;
+    /**
+     * Cache enum coercion entry points (of/ofNullable/by* methods) per enum class.
+     *
+     * This avoids repeated reflective scanning of enumClass.getMethods() on every bind.
+     */
+    private static final class EnumCoercer {
+        private static final ConcurrentHashMap<Class<?>, EnumCoercer> CACHE = new ConcurrentHashMap<>();
 
-            Object arg = coerceToParamType(raw, m.getParameterTypes()[0]);
-            if (arg == COERCE_FAIL) continue;
+        static EnumCoercer forEnum(Class<?> enumClass) {
+            return CACHE.computeIfAbsent(enumClass, EnumCoercer::build);
+        }
 
+        private record Invoker(Method method, Class<?> paramType) {}
+
+        private final Invoker[] ofNullable;
+        private final Invoker[] of;
+        private final Invoker[] byNullable;
+        private final Invoker[] byNonNull;
+
+        private EnumCoercer(Invoker[] ofNullable,
+                           Invoker[] of,
+                           Invoker[] byNullable,
+                           Invoker[] byNonNull) {
+            this.ofNullable = ofNullable;
+            this.of = of;
+            this.byNullable = byNullable;
+            this.byNonNull = byNonNull;
+        }
+
+        private static EnumCoercer build(Class<?> enumClass) {
+            List<Invoker> ofNullable = new ArrayList<>();
+            List<Invoker> of = new ArrayList<>();
+            List<Invoker> byNullable = new ArrayList<>();
+            List<Invoker> byNonNull = new ArrayList<>();
+
+            for (Method m : enumClass.getMethods()) {
+                if (!Modifier.isStatic(m.getModifiers())) continue;
+                if (m.getParameterCount() != 1) continue;
+                if (!enumClass.isAssignableFrom(m.getReturnType())) continue;
+
+                String n = m.getName();
+                if (n.equals("ofNullable")) { ofNullable.add(new Invoker(m, m.getParameterTypes()[0])); continue; }
+                if (n.equals("of")) { of.add(new Invoker(m, m.getParameterTypes()[0])); continue; }
+
+                if (n.startsWith("by") && n.endsWith("Nullable")) {
+                    byNullable.add(new Invoker(m, m.getParameterTypes()[0]));
+                    continue;
+                }
+                if (n.startsWith("by") && !n.endsWith("Nullable")) {
+                    byNonNull.add(new Invoker(m, m.getParameterTypes()[0]));
+                }
+            }
+
+            return new EnumCoercer(
+                    ofNullable.toArray(Invoker[]::new),
+                    of.toArray(Invoker[]::new),
+                    byNullable.toArray(Invoker[]::new),
+                    byNonNull.toArray(Invoker[]::new)
+            );
+        }
+
+        Object invokeOfNullable(Object raw) {
+            return invokeAnyNullable(ofNullable, raw);
+        }
+
+        Object invokeOf(Object raw) {
+            return invokeAnyNonNull(of, raw);
+        }
+
+        Object invokeAnyByNullable(Object raw) {
+            for (Invoker inv : byNullable) {
+                Object r = invokeStaticNullable(inv, raw);
+                if (r != null) return r;
+            }
+            return null;
+        }
+
+        Object invokeAnyByNonNull(Object raw) {
+            for (Invoker inv : byNonNull) {
+                Object r = invokeStaticNonNull(inv, raw);
+                if (r != null) return r;
+            }
+            return null;
+        }
+
+        private static Object invokeAnyNullable(Invoker[] invokers, Object raw) {
+            for (Invoker inv : invokers) {
+                Object r = invokeStaticNullable(inv, raw);
+                // Nullable methods may legitimately return null (unknown key), so we keep searching.
+                if (r != null) return r;
+            }
+            return null;
+        }
+
+        private static Object invokeAnyNonNull(Invoker[] invokers, Object raw) {
+            for (Invoker inv : invokers) {
+                Object r = invokeStaticNonNull(inv, raw);
+                if (r != null) return r;
+            }
+            return null;
+        }
+
+        private static Object invokeStaticNullable(Invoker inv, Object raw) {
+            Object arg = coerceToParamType(raw, inv.paramType);
+            if (arg == COERCE_FAIL) return null;
             try {
-                Object r = m.invoke(null, arg);
-                if (nullableMethod) return r; // may be null
-                return r;
-            } catch (ReflectiveOperationException e) {
-                // treat invocation failures as "not usable"
+                return inv.method.invoke(null, arg);
+            } catch (ReflectiveOperationException ignored) {
                 return null;
-            } catch (RuntimeException ex) {
-                // of(...) may throw IllegalArgumentException for unknown
-                throw ex;
             }
         }
-        return null;
-    }
 
-    private static Object tryInvokeAnyByNullable(Class<?> enumClass, Object raw) {
-        Method[] ms = enumClass.getMethods();
-        for (Method m : ms) {
-            String n = m.getName();
-            if (!n.startsWith("by") || !n.endsWith("Nullable")) continue;
-            if (!Modifier.isStatic(m.getModifiers())) continue;
-            if (m.getParameterCount() != 1) continue;
-            if (!enumClass.isAssignableFrom(m.getReturnType())) continue;
-
-            Object arg = coerceToParamType(raw, m.getParameterTypes()[0]);
-            if (arg == COERCE_FAIL) continue;
-
+        private static Object invokeStaticNonNull(Invoker inv, Object raw) {
+            Object arg = coerceToParamType(raw, inv.paramType);
+            if (arg == COERCE_FAIL) return null;
             try {
-                Object r = m.invoke(null, arg);
-                if (r != null) return r;
-            } catch (ReflectiveOperationException ignored) { }
+                return inv.method.invoke(null, arg);
+            } catch (ReflectiveOperationException ignored) {
+                return null;
+            }
         }
-        return null;
-    }
-
-    private static Object tryInvokeAnyByNonNull(Class<?> enumClass, Object raw) {
-        Method[] ms = enumClass.getMethods();
-        for (Method m : ms) {
-            String n = m.getName();
-            if (!n.startsWith("by") || n.endsWith("Nullable")) continue;
-            if (!Modifier.isStatic(m.getModifiers())) continue;
-            if (m.getParameterCount() != 1) continue;
-            if (!enumClass.isAssignableFrom(m.getReturnType())) continue;
-
-            Object arg = coerceToParamType(raw, m.getParameterTypes()[0]);
-            if (arg == COERCE_FAIL) continue;
-
-            try {
-                Object r = m.invoke(null, arg);
-                if (r != null) return r;
-            } catch (ReflectiveOperationException ignored) { }
-        }
-        return null;
     }
 
     private static final Object COERCE_FAIL = new Object();
