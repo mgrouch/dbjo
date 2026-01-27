@@ -104,6 +104,23 @@ try (var db = RocksDB.open(options, path)) {
 
 (Exact API depends on generated schema/dao classes.)
 
+## RocksDB criteria API
+
+```java
+// IndexedRocksDao can push down simple predicates into index scans:
+//  - Eq / Cmp / Between / Scan range
+//  - small In(...) and small OR-of-Eq
+// It still validates *full* criteria on candidates for safety.
+
+Query<Person> q = Query.from(PersonMeta._META)
+    .where(PersonQ.REGION.eq("NA")
+        .and(PersonQ.AGE.between(30, 39)))
+    .limit(100)
+    .build();
+
+List<Person> out = personDao.select(q);
+```
+
 ## Resource management
 
 RocksDB uses native resources heavily. DBJO code in this module generally assumes:
