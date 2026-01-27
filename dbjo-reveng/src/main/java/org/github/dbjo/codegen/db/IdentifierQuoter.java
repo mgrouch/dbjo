@@ -2,7 +2,6 @@ package org.github.dbjo.codegen.db;
 
 import java.sql.DatabaseMetaData;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Objects;
@@ -76,7 +75,7 @@ public final class IdentifierQuoter {
                 if (!kk.isEmpty()) kws.add(kk.toUpperCase(Locale.ROOT));
             }
         }
-        for (String k : EXTRA_KEYWORDS) kws.add(k);
+        kws.addAll(EXTRA_KEYWORDS);
 
         boolean su = safeBool(md::storesUpperCaseIdentifiers);
         boolean sl = safeBool(md::storesLowerCaseIdentifiers);
@@ -97,7 +96,7 @@ public final class IdentifierQuoter {
                 if (k != null && !k.isBlank()) kws.add(k.trim().toUpperCase(Locale.ROOT));
             }
         }
-        for (String k : EXTRA_KEYWORDS) kws.add(k);
+        kws.addAll(EXTRA_KEYWORDS);
 
         return new IdentifierQuoter(
                 mode == null ? SqlQuoteMode.AUTO : mode,

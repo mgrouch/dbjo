@@ -12,7 +12,6 @@ public enum SqlQuoteMode {
         String s = raw.trim().toLowerCase(Locale.ROOT);
         return switch (s) {
             case "none", "off", "false", "0" -> NONE;
-            case "auto", "on", "true", "1" -> AUTO;
             case "always", "force" -> ALWAYS;
             default -> AUTO;
         };

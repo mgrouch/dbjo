@@ -30,14 +30,14 @@ public final class QueryEvaluator {
         Objects.requireNonNull(q, "q");
         if (!ConditionEvaluator.test((org.github.dbjo.criteria.Condition) q.where(), bean)) return false;
 
-        Scan scan = (Scan) q.scan();
+        Scan scan = q.scan();
         if (scan == null) return true;
 
-        Range range = (Range) scan.range();
+        Range range = scan.range();
         if (range == null) return true;
         if (range.lowerBound() == Bound.UNBOUNDED && range.upperBound() == Bound.UNBOUNDED) return true;
 
-        PropertyMeta prop = (PropertyMeta) scan.prop();
+        PropertyMeta prop = scan.prop();
         Object v = prop.get(bean);
         return inRange(v, range);
     }
@@ -77,7 +77,7 @@ public final class QueryEvaluator {
             if (hi == null) return false;
             int cmp = c.compareTo(hi);
             if (cmp > 0) return false;
-            if (cmp == 0 && range.upperBound() == Bound.EXCLUSIVE) return false;
+            return cmp != 0 || range.upperBound() != Bound.EXCLUSIVE;
         }
 
         return true;

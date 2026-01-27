@@ -181,9 +181,8 @@ public final class EnumOverrideIndex {
 
         // Store normalized names so later SQL generation matches JDBC names
         String outSchema = schemaMeta.isEmpty() ? schema : schemaMeta;
-        String outTable  = tableMeta;
 
-        return new EnumTableInfo(outSchema, outTable, pk, unique);
+        return new EnumTableInfo(outSchema, tableMeta, pk, unique);
     }
 
     private static String readSinglePk(DatabaseMetaData md, String schema, String table) throws SQLException {

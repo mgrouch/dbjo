@@ -11,8 +11,6 @@ import org.junit.jupiter.api.Test;
 import javax.sql.DataSource;
 import java.io.Serializable;
 import java.sql.*;
-import java.sql.SQLType;
-import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;

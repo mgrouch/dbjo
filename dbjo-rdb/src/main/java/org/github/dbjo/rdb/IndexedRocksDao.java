@@ -1,7 +1,6 @@
 package org.github.dbjo.rdb;
 
 import org.rocksdb.ColumnFamilyHandle;
-import org.rocksdb.RocksDBException;
 
 import java.util.*;
 
