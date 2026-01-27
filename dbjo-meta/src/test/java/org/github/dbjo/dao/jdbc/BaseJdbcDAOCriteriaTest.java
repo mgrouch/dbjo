@@ -5,38 +5,42 @@ import org.github.dbjo.meta.entity.EntityMeta;
 import org.github.dbjo.meta.entity.PropertyMeta;
 import org.github.dbjo.meta.jdbc.DbDialect;
 import org.github.dbjo.meta.jdbc.DbMeta;
+import org.github.dbjo.meta.jdbc.Jdbc;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
-import java.io.PrintWriter;
 import java.io.Serializable;
-import java.lang.reflect.Proxy;
-import java.sql.Connection;
-import java.sql.ResultSet;
+import java.sql.*;
 import java.sql.SQLType;
-import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
-import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 public class BaseJdbcDAOCriteriaTest {
 
-    record Foo(Integer id, String name) implements Serializable {}
+    public static final class Foo implements Serializable {
+        private Integer id;
+        private String name;
+
+        public Integer getId() { return id; }
+        public void setId(Integer id) { this.id = id; }
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+    }
 
     private static final PropertyMeta<Foo, Integer> ID = new PropertyMeta<>(
             "id",
             Integer.class,
-            Foo::id,
-            (b, v) -> { /* unused */ }
+            Foo::getId,
+            Foo::setId
     );
 
     private static final PropertyMeta<Foo, String> NAME = new PropertyMeta<>(
             "name",
             String.class,
-            Foo::name,
-            (b, v) -> { /* unused */ }
+            Foo::getName,
+            Foo::setName
     );
 
     @SuppressWarnings({"rawtypes", "unchecked"})
@@ -51,82 +55,79 @@ public class BaseJdbcDAOCriteriaTest {
         @Override public String table()  { return "foo"; }
         @Override public String fqn()    { return "foo"; }
 
-        @Override public String insertSql() { return "/*unused*/"; }
-        @Override public String updateByIdSql() { return "/*unused*/"; }
-        @Override public String selectAllSql() { return "/*unused*/"; }
+        @Override public String insertSql() { return "INSERT INTO foo (id, name) VALUES (?, ?)"; }
+        @Override public String updateByIdSql() { return "UPDATE foo SET name=? WHERE id=?"; }
+        @Override public String selectAllSql() { return "SELECT id, name FROM foo"; }
 
-        @Override public Object[] insertParams(Foo e) { return new Object[0]; }
-        @Override public SQLType[] insertParamTypes() { return new SQLType[0]; }
+        @Override public Object[] insertParams(Foo e) { return new Object[]{ e.getId(), e.getName() }; }
+        @Override public SQLType[] insertParamTypes() { return null; } // Jdbc.bind can infer with null
+        @Override public Object[] updateByIdParams(Foo e) { return new Object[]{ e.getName(), e.getId() }; }
+        @Override public SQLType[] updateByIdParamTypes() { return null; }
 
-        @Override public Object[] updateByIdParams(Foo e) { return new Object[0]; }
-        @Override public SQLType[] updateByIdParamTypes() { return new SQLType[0]; }
-
+        // upsert not used in this test
         @Override public String upsertByIdSql(DbDialect dialect) { return "/*unused*/"; }
         @Override public Object[] upsertByIdParams(Foo e) { return new Object[0]; }
         @Override public SQLType[] upsertByIdParamTypes() { return new SQLType[0]; }
 
-        @Override public Foo fromRow(ResultSet rs) { throw new UnsupportedOperationException(); }
+        @Override public Foo fromRow(ResultSet rs) throws SQLException {
+            Foo f = new Foo();
+            f.setId(Jdbc.rsInt(rs, 1));
+            f.setName(rs.getString(2));
+            return f;
+        }
     };
 
     static final class TestDao extends BaseJdbcDAO<Foo, Integer> {
         TestDao(DataSource ds) {
             super(ds, DbDialect.HSQL, STUB_META);
         }
-
-        @Override
-        public List<Foo> selectAll(Connection c) {
-            // No DB access: just returns a stable in-memory table.
-            return List.of(
-                    new Foo(1, "a"),
-                    new Foo(2, "ok"),
-                    new Foo(3, "ok"),
-                    new Foo(4, "b")
-            );
-        }
     }
 
     @Test
-    void daoSelectCriteria_filtersAndHonorsLimit() throws SQLException {
-        DataSource ds = dummyDataSource();
+    void daoSelectCriteria_filtersAndHonorsLimit() throws Exception {
+        DataSource ds = hsqlMemDs("criteria_test");
+
+        // create schema + seed
+        try (Connection c = ds.getConnection()) {
+            try (Statement st = c.createStatement()) {
+                st.execute("DROP TABLE foo IF EXISTS");
+                st.execute("CREATE TABLE foo (id INT PRIMARY KEY, name VARCHAR(50))");
+                st.execute("INSERT INTO foo(id,name) VALUES (1,'a'), (2,'ok'), (3,'ok'), (4,'b')");
+            }
+        }
+
         var dao = new TestDao(ds);
 
         var q = Query.from(META)
-                .scan(ID, Range.closedOpen(2, 4))     // id in [2,4)
-                .where(Conditions.eq(NAME, "ok"))      // name == "ok"
+                .scan(ID, Range.closedOpen(2, 4)) // 2 <= id < 4
+                .where(Conditions.eq(NAME, "ok"))
                 .limit(1)
                 .build();
 
-        try (Connection c = dummyConnection()) {
-            var got = dao.select(c, q);
-            assertEquals(1, got.size());
-            assertEquals(2, got.get(0).id());
-            assertEquals("ok", got.get(0).name());
-        }
+        List<Foo> got = dao.select(q);
+
+        assertEquals(1, got.size());
+        assertEquals(2, got.get(0).getId());
+        assertEquals("ok", got.get(0).getName());
     }
 
-    private static DataSource dummyDataSource() {
+    private static DataSource hsqlMemDs(String dbName) {
+        // Minimal DS without extra deps; uses DriverManager under the hood.
         return new DataSource() {
-            @Override public Connection getConnection() { throw new UnsupportedOperationException(); }
-            @Override public Connection getConnection(String username, String password) { throw new UnsupportedOperationException(); }
+            @Override public Connection getConnection() throws SQLException {
+                // keep DB alive for the duration of the JVM
+                return DriverManager.getConnection("jdbc:hsqldb:mem:" + dbName + ";shutdown=false", "SA", "");
+            }
+            @Override public Connection getConnection(String username, String password) throws SQLException {
+                return DriverManager.getConnection("jdbc:hsqldb:mem:" + dbName + ";shutdown=false", username, password);
+            }
             @Override public <T> T unwrap(Class<T> iface) { throw new UnsupportedOperationException(); }
             @Override public boolean isWrapperFor(Class<?> iface) { return false; }
-            @Override public PrintWriter getLogWriter() { return null; }
-            @Override public void setLogWriter(PrintWriter out) {}
+            @Override public java.io.PrintWriter getLogWriter() { return null; }
+            @Override public void setLogWriter(java.io.PrintWriter out) {}
             @Override public void setLoginTimeout(int seconds) {}
             @Override public int getLoginTimeout() { return 0; }
-            @Override public Logger getParentLogger() { return Logger.getGlobal(); }
+            @Override public java.util.logging.Logger getParentLogger() { return java.util.logging.Logger.getGlobal(); }
         };
-    }
-
-    private static Connection dummyConnection() {
-        return (Connection) Proxy.newProxyInstance(
-                BaseJdbcDAOCriteriaTest.class.getClassLoader(),
-                new Class[]{Connection.class},
-                (p, m, a) -> {
-                    if (Objects.equals(m.getName(), "close")) return null;
-                    // This test should not call any Connection methods.
-                    throw new UnsupportedOperationException(m.getName());
-                }
-        );
     }
 }
