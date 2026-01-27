@@ -59,7 +59,7 @@ public abstract class BaseJdbcDAO<T, K> {
     }
 
     public List<T> selectAll(Connection c) throws SQLException {
-        try (PreparedStatement ps = c.prepareStatement(meta.selectAllSql());
+        try (PreparedStatement ps = c.prepareStatement(meta.selectAllBaseSql());
              ResultSet rs = ps.executeQuery()) {
 
             List<T> out = new ArrayList<>();
@@ -68,9 +68,7 @@ public abstract class BaseJdbcDAO<T, K> {
         }
     }
 
-    // ----------------------------------------------------------------------
     // Criteria -> SQL bridge (property-name based)
-    // ----------------------------------------------------------------------
 
     public List<T> select(Query<? extends Serializable> q) throws SQLException {
         try (Connection c = ds.getConnection()) {
@@ -111,7 +109,7 @@ public abstract class BaseJdbcDAO<T, K> {
     private List<T> selectAllAndFilterInMemory(Connection c, Query<? extends Serializable> q, int limit) throws SQLException {
         List<T> out = new ArrayList<>();
 
-        try (PreparedStatement ps = c.prepareStatement(meta.selectAllSql());
+        try (PreparedStatement ps = c.prepareStatement(meta.selectAllBaseSql());
              ResultSet rs = ps.executeQuery()) {
 
             while (rs.next()) {
@@ -124,8 +122,6 @@ public abstract class BaseJdbcDAO<T, K> {
         }
         return out;
     }
-
-    // ----------------------------------------------------------------------
 
     public int upsertById(T row) throws SQLException {
         DbMetaUpsertSupport<T> um = requireUpsertMeta();

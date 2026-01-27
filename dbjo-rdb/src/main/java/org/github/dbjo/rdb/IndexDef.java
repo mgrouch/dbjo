@@ -71,7 +71,7 @@ public final class IndexDef<T, V> {
         return it == null ? Collections.emptyList() : it;
     }
 
-    // ---------------- factories (backwards compatible) ----------------
+    // factories
 
     public static <T, V> IndexDef<T, V> unique(
             String name,

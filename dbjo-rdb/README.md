@@ -77,7 +77,7 @@ Wraps RocksDB iterators with:
 
 * native resources are closed
 * tx state doesn’t leak between threads
-* “read your writes” behavior inside tx
+* “read writes” behavior inside tx
 
 ## Typical usage pattern (sketch)
 
@@ -102,7 +102,7 @@ try (var db = RocksDB.open(options, path)) {
 }
 ```
 
-(Exact API depends on your generated schema/dao classes.)
+(Exact API depends on generated schema/dao classes.)
 
 ## Resource management
 

@@ -95,7 +95,7 @@ public abstract class IndexedRocksDao<T, K> extends AbstractRocksDao<T, K> {
         return out;
     }
 
-    // ---------------- index maintenance ----------------
+    // index maintenance
 
     @Override
     protected final void maintainIndexes(RocksWriteBatch batch, K key, T oldValueOrNull, T newValue) {
@@ -147,7 +147,7 @@ public abstract class IndexedRocksDao<T, K> extends AbstractRocksDao<T, K> {
         return s;
     }
 
-    // ---------------- criteria -> rocks query planning ----------------
+    // criteria -> rocks query planning
 
     private Map<String, IndexDef<T, ?>> indexByPropLower() {
         Map<String, IndexDef<T, ?>> m = indexByPropLower;
@@ -155,7 +155,7 @@ public abstract class IndexedRocksDao<T, K> extends AbstractRocksDao<T, K> {
 
         HashMap<String, IndexDef<T, ?>> tmp = new HashMap<>();
         for (IndexDef<T, ?> idx : indexes) {
-            String pn = idx.propertyName(); // <-- assumes your extended IndexDef has this
+            String pn = idx.propertyName();
             if (pn == null || pn.isBlank()) continue;
             tmp.put(pn.trim().toLowerCase(Locale.ROOT), idx);
         }
@@ -268,7 +268,7 @@ public abstract class IndexedRocksDao<T, K> extends AbstractRocksDao<T, K> {
 
         byte[] vb;
         try {
-            vb = idx.encodeAnyOrNull(value); // <-- assumes your extended IndexDef has this
+            vb = idx.encodeAnyOrNull(value);
         } catch (ClassCastException ex) {
             return null;
         }

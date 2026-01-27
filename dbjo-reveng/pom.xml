@@ -102,7 +102,7 @@
                         </executions>
                     </plugin>
 
-                    <!-- 2) Run your Java codegen AFTER protoc is downloaded -->
+                    <!-- 2) Run Java codegen AFTER protoc is downloaded -->
                     <plugin>
                         <groupId>org.codehaus.mojo</groupId>
                         <artifactId>exec-maven-plugin</artifactId>

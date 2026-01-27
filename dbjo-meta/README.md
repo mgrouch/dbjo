@@ -6,7 +6,7 @@ This module provides:
 - `DbMeta<T>` and `DbMetaUpsertSupport<T>` runtime APIs used by generated `*DbMeta` classes
 - JDBC utilities (`Jdbc` binder/helpers, batch count analysis, etc.)
 - upsert/batching helpers (`DbBatchBuilder`, `BatchUpsert`)
-- (optional) criteria / query spec binding types used by your higher-level API
+- (optional) criteria / query spec binding types used by higher-level API
 
 It is intended to be a small, dependency-light runtime shipped with applications that
 use generated metadata classes.

@@ -24,7 +24,7 @@ public class IndexedRocksDaoCriteriaIT {
     @TempDir
     Path dir;
 
-    // ---- test entity ----
+    // test entity
 
     public static final class Person implements Serializable {
         private int id;
@@ -65,7 +65,7 @@ public class IndexedRocksDaoCriteriaIT {
             List.of(Integer.class, String.class, Integer.class)
     );
 
-    // ---- codecs ----
+    // codecs
 
     private static final class PersonCodec implements Codec<Person> {
         @Override
@@ -127,7 +127,7 @@ public class IndexedRocksDaoCriteriaIT {
         return ByteBuffer.allocate(4).putInt(x).array();
     };
 
-    // ---- minimal sessions (auto-commit, no Spring) ----
+    // minimal sessions (auto-commit, no Spring)
 
     private static final class SimpleSessions implements RocksSessions {
         private final TransactionDB db;
@@ -163,7 +163,7 @@ public class IndexedRocksDaoCriteriaIT {
         }
     }
 
-    // ---- dao ----
+    // dao
 
     private static final class PersonDao extends IndexedRocksDao<Person, Integer> {
         PersonDao(RocksSessions sessions,
@@ -177,7 +177,7 @@ public class IndexedRocksDaoCriteriaIT {
                     valueCodec,
                     indexCfs,
                     List.of(
-                            // keep your IndexDef API as-is (propertyName overload etc.) if you already added it
+                            // keep IndexDef API as-is (propertyName overload etc.)
                             IndexDef.unique("idx_region", "region", IndexKeyCodec.stringUtf8(), Person::getRegion),
                             IndexDef.unique("idx_age",    "age",    INT32_ORDERED, Person::getAge)
                     )

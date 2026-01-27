@@ -41,7 +41,7 @@
                 <artifactId>exec-maven-plugin</artifactId>
                 <version>3.4.1</version>
                 <configuration>
-                    <!-- Change this to your actual demo main class -->
+                    <!-- Change this to actual demo main class -->
                     <mainClass>org.github.dbjo.criteria.demo.InMemoryCriteriaDemo</mainClass>
 
                     <!-- Optional: include project deps on the classpath -->

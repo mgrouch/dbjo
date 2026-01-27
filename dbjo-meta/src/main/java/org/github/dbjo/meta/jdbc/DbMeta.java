@@ -13,18 +13,36 @@ public interface DbMeta<T> {
     String updateByIdSql();
     String selectAllSql();
 
+    // SQL string hygiene
+
+    /**
+     * Strip a trailing semicolon, so the result is safe to append " WHERE ..." to,
+     * and safe for {@code Connection.prepareStatement(...)} across drivers.
+     */
+    static String stripTrailingSemicolon(String s) {
+        if (s == null) return "";
+        String t = s.trim();
+        if (t.endsWith(";")) t = t.substring(0, t.length() - 1).trim();
+        return t;
+    }
+
+    /** Canonical base SELECT for this meta (normalized, no trailing semicolon). */
+    default String selectAllBaseSql() {
+        return stripTrailingSemicolon(selectAllSql());
+    }
+
     Object[] insertParams(T e);
     SQLType[] insertParamTypes();
 
     Object[] updateByIdParams(T e);
     SQLType[] updateByIdParamTypes();
 
-    // --- Upsert (required for your request) ---
+    // Upsert
     String upsertByIdSql(DbDialect dialect);
     Object[] upsertByIdParams(T e);
     SQLType[] upsertByIdParamTypes();
 
-    // --- Optional temp-table batch upsert support ---
+    // Optional temp-table batch upsert support
     default boolean supportsUpsertTemp(DbDialect dialect) { return false; }
 
     default String createUpsertTempTableSql(DbDialect dialect, String suffix) {
@@ -42,9 +60,7 @@ public interface DbMeta<T> {
 
     T fromRow(ResultSet rs) throws SQLException;
 
-    // ----------------------------------------------------------------------
     // Criteria SQL support (property-name based)
-    // ----------------------------------------------------------------------
 
     /** camelCase -> snake_case by default (globalRegion -> global_region). */
     default String columnOf(String propertyName) {
@@ -69,7 +85,7 @@ public interface DbMeta<T> {
         return out.toString();
     }
 
-    /** SQL-ready column identifier (override if you need quoting/case preservation). */
+    /** SQL-ready column identifier (override if needed quoting/case preservation). */
     default String columnSql(String propertyName) {
         return columnOf(propertyName);
     }

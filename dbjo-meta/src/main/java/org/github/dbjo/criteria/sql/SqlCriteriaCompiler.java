@@ -19,7 +19,7 @@ public final class SqlCriteriaCompiler {
         Objects.requireNonNull(meta, "meta");
         Objects.requireNonNull(q, "q");
 
-        String base = stripTrailingSemicolon(meta.selectAllSql());
+        String base = meta.selectAllBaseSql();
         Builder b = new Builder(meta);
 
         if (q.scan() != null) appendScan(b, q.scan());
@@ -28,13 +28,6 @@ public final class SqlCriteriaCompiler {
         String where = b.whereSql();
         String sql = where.isEmpty() ? base : (base + " WHERE " + where);
         return new Compiled(sql, b.params.toArray());
-    }
-
-    private static String stripTrailingSemicolon(String s) {
-        if (s == null) return "";
-        String t = s.trim();
-        if (t.endsWith(";")) t = t.substring(0, t.length() - 1).trim();
-        return t;
     }
 
     private static void appendScan(Builder b, Scan<?, ? extends Serializable> scan) {

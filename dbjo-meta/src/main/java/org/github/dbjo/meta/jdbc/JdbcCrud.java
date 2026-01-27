@@ -18,7 +18,7 @@ public final class JdbcCrud {
     }
 
     public static <T> java.util.List<T> selectAll(Connection c, DbMeta<T> m) throws Exception {
-        try (var ps = c.prepareStatement(m.selectAllSql());
+        try (var ps = c.prepareStatement(m.selectAllBaseSql());
              var rs = ps.executeQuery()) {
             var out = new java.util.ArrayList<T>();
             while (rs.next()) out.add(m.fromRow(rs));

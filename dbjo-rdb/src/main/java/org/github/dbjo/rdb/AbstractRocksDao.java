@@ -40,7 +40,7 @@ public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
         this.indexCfs = Map.copyOf(indexCfs);
     }
 
-    /** Convenience: matches your EntityDef-based design. */
+    /** Convenience: matches EntityDef-based design. */
     protected AbstractRocksDao(RocksSessions sessions, EntityDef<T, K> entity, Map<String, ColumnFamilyHandle> indexCfs) {
         this(sessions, entity.primaryCf(), entity.keyCodec(), entity.valueCodec(), indexCfs);
     }
@@ -144,7 +144,7 @@ public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
      * Select values using the dbjo criteria API.
      *
      * <p>This base implementation performs a full scan and filters in Java.
-     * If your DAO is an {@link IndexedRocksDao}, it will override this and
+     * If DAO is an {@link IndexedRocksDao}, it will override this and
      * push down simple indexed predicates into RocksDB to reduce the scanned keyspace.
      */
     public List<T> select(org.github.dbjo.criteria.Query<? extends Serializable> q) {
@@ -179,7 +179,7 @@ public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
         }
     }
 
-    /** Your scan API (primary or index-driven) */
+    /** Scan API (primary or index-driven) */
     public Stream<Map.Entry<K, T>> stream(Query<K> q) {
         DaoSpliterator<K, T> sp = new DaoSpliterator<>(
                 sessions.current(),
@@ -192,9 +192,7 @@ public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
         return StreamSupport.stream(sp, false).onClose(sp::close);
     }
 
-    // ----------------------------------------------------------------------
     // Criteria API bridge (in-memory filtering)
-    // ----------------------------------------------------------------------
 
     /**
      * Execute a criteria {@link org.github.dbjo.criteria.Query} by streaming records

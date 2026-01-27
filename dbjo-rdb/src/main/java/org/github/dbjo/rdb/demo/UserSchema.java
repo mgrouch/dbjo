@@ -14,7 +14,7 @@ public final class UserSchema {
     public static EntityDef<User, String> def(ColumnFamilyHandle usersCf) {
         Codec<User> userCodec =
                 ProtobufPojoCodec.of(
-                        org.github.dbjo.rdb.demo.generated.proto.User.getDefaultInstance(), // <-- fix
+                        org.github.dbjo.rdb.demo.generated.proto.User.getDefaultInstance(),
                         new UserProtoMapper() // must implement ProtoMapper<User, generated.proto.User>
                 );
 
