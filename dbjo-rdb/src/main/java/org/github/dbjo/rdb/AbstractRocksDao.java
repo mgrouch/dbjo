@@ -14,6 +14,13 @@ import java.util.Optional;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
+import org.github.dbjo.rdb.criteria.CriteriaSupport;
+
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+
 public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
 
     private final RocksSessions sessions;
@@ -134,6 +141,37 @@ public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
         } catch (RocksDBException e) {
             throw new RocksDaoException("exists failed", e);
         }
+    }
+
+    /**
+     * Select values using the dbjo criteria API.
+     *
+     * <p>This base implementation performs a full scan and filters in Java.
+     * If your DAO is an {@link IndexedRocksDao}, it will override this and
+     * push down simple indexed predicates into RocksDB to reduce the scanned keyspace.
+     */
+    public List<T> select(org.github.dbjo.criteria.Query<? extends Serializable> q) {
+        Objects.requireNonNull(q);
+        int limit = CriteriaSupport.limitOrMax(q);
+        if (limit <= 0) return List.of();
+
+        List<T> out = new ArrayList<>(Math.min(limit, 128));
+
+        org.github.dbjo.rdb.Query<K> rocksQuery = org.github.dbjo.rdb.Query.<K>builder()
+                .limit(Integer.MAX_VALUE)
+                .build();
+
+        try (Stream<Map.Entry<K, T>> st = stream(rocksQuery)) {
+            Iterator<Map.Entry<K, T>> it = st.iterator();
+            while (it.hasNext() && out.size() < limit) {
+                T v = it.next().getValue();
+                if (CriteriaSupport.test(q, v)) {
+                    out.add(v);
+                }
+            }
+        }
+
+        return out;
     }
 
     @Override
