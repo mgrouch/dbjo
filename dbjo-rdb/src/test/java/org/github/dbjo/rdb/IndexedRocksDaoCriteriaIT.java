@@ -56,7 +56,7 @@ public class IndexedRocksDaoCriteriaIT {
             new PropertyMeta<>("region", String.class, Person::getRegion, Person::setRegion);
 
     private static final PropertyMeta<Person, Integer> P_AGE =
-            new PropertyMeta<>("age", Integer.class, p -> p.getAge(), (p, v) -> p.setAge(v == null ? 0 : v));
+            new PropertyMeta<>("age", Integer.class, Person::getAge, (p, v) -> p.setAge(v == null ? 0 : v));
 
     @SuppressWarnings({"rawtypes", "unchecked"})
     private static final EntityMeta<Person> PERSON_META = new EntityMeta(
@@ -179,7 +179,7 @@ public class IndexedRocksDaoCriteriaIT {
                     List.of(
                             // keep your IndexDef API as-is (propertyName overload etc.) if you already added it
                             IndexDef.unique("idx_region", "region", IndexKeyCodec.stringUtf8(), Person::getRegion),
-                            IndexDef.unique("idx_age",    "age",    INT32_ORDERED, p -> p.getAge())
+                            IndexDef.unique("idx_age",    "age",    INT32_ORDERED, Person::getAge)
                     )
             );
         }

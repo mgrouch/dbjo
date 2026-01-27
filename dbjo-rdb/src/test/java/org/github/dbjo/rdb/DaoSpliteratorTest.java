@@ -75,7 +75,7 @@ final class DaoSpliteratorTest {
                     ))
                     .build();
 
-            var keys = dao.stream(q).map(e -> e.getKey()).toList();
+            var keys = dao.stream(q).map(Map.Entry::getKey).toList();
             assertEquals(List.of(2L, 3L), keys);
         }
     }

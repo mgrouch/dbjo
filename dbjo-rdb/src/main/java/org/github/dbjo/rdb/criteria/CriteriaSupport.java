@@ -31,7 +31,7 @@ public final class CriteriaSupport {
         Scan scan = q.scan();
         if (scan != null) {
             Object v = scan.prop().get(s);
-            if (!within((Range) scan.range(), v)) return false;
+            return within(scan.range(), v);
         }
 
         return true;
@@ -58,7 +58,7 @@ public final class CriteriaSupport {
             Object hi = range.upper(); // guaranteed non-null by Range ctor
             int cmp = cVal.compareTo(hi);
             if (cmp > 0) return false;
-            if (cmp == 0 && range.upperBound() == Bound.EXCLUSIVE) return false;
+            return cmp != 0 || range.upperBound() != Bound.EXCLUSIVE;
         }
 
         return true;

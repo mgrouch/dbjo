@@ -79,7 +79,7 @@ public final class SpecCanonicalizer {
             for (Object v : vals) set.put(SpecStringifier.valueKey(v), v);
             var keys = new ArrayList<>(set.keySet());
             Collections.sort(keys);
-            var out = new ArrayList<Object>(keys.size());
+            var out = new ArrayList<>(keys.size());
             for (String k : keys) out.add(set.get(k));
             return new InSpec(i.property(), List.copyOf(out));
         }

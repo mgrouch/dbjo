@@ -75,7 +75,7 @@ public abstract class IndexedRocksDao<T, K> extends AbstractRocksDao<T, K> {
         ArrayList<T> out = new ArrayList<>();
         HashSet<K> seen = (plan.queries.size() > 1) ? new HashSet<>() : null;
 
-        for (org.github.dbjo.rdb.Query<K> rq : plan.queries) {
+        for (Query<K> rq : plan.queries) {
             if (out.size() >= limit) break;
 
             try (Stream<Map.Entry<K, T>> s = stream(rq)) {
@@ -170,23 +170,23 @@ public abstract class IndexedRocksDao<T, K> extends AbstractRocksDao<T, K> {
         Candidate best = better(scanCand, whereCand);
 
         if (best == null) {
-            org.github.dbjo.rdb.Query.Builder<K> b = org.github.dbjo.rdb.Query.<K>builder();
+            Query.Builder<K> b = Query.builder();
             if (cq.limit() != null) b.limit(cq.limit());
             return new Plan<>(List.of(b.build()));
         }
 
         // union case: multiple Rocks queries (each with exactly one IndexPredicate)
         if (best.unionPredicates != null && !best.unionPredicates.isEmpty()) {
-            ArrayList<org.github.dbjo.rdb.Query<K>> qs = new ArrayList<>(best.unionPredicates.size());
+            ArrayList<Query<K>> qs = new ArrayList<>(best.unionPredicates.size());
             for (IndexPredicate ip : best.unionPredicates) {
-                org.github.dbjo.rdb.Query.Builder<K> b = org.github.dbjo.rdb.Query.<K>builder().where(ip);
+                Query.Builder<K> b = Query.<K>builder().where(ip);
                 if (cq.limit() != null) b.limit(cq.limit());
                 qs.add(b.build());
             }
             return new Plan<>(qs);
         }
 
-        org.github.dbjo.rdb.Query.Builder<K> b = org.github.dbjo.rdb.Query.<K>builder().where(best.predicate);
+        Query.Builder<K> b = Query.<K>builder().where(best.predicate);
         if (cq.limit() != null) b.limit(cq.limit());
         return new Plan<>(List.of(b.build()));
     }
@@ -438,8 +438,8 @@ public abstract class IndexedRocksDao<T, K> extends AbstractRocksDao<T, K> {
     }
 
     private static final class Plan<K> {
-        final List<org.github.dbjo.rdb.Query<K>> queries;
-        Plan(List<org.github.dbjo.rdb.Query<K>> queries) {
+        final List<Query<K>> queries;
+        Plan(List<Query<K>> queries) {
             this.queries = Objects.requireNonNull(queries, "queries");
         }
     }

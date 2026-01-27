@@ -3,6 +3,7 @@ package org.github.dbjo.meta.jdbc;
 import java.sql.*;
 import java.time.OffsetDateTime;
 import java.time.OffsetTime;
+import java.util.Objects;
 import java.util.UUID;
 
 public final class Jdbc {
@@ -17,8 +18,7 @@ public final class Jdbc {
             Integer vendor = (t == null) ? null : t.getVendorTypeNumber();
 
             if (v == null) {
-                if (vendor != null) ps.setNull(i + 1, vendor);
-                else ps.setNull(i + 1, Types.NULL);
+                ps.setNull(i + 1, Objects.requireNonNullElse(vendor, Types.NULL));
                 continue;
             }
 
@@ -31,7 +31,6 @@ public final class Jdbc {
                 try {
                     ps.setObject(i + 1, v, t);
                     continue;
-                } catch (SQLFeatureNotSupportedException ignored) {
                 } catch (SQLException ignored) {
                 }
             }
