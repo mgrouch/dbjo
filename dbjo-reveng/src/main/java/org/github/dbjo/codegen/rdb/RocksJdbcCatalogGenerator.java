@@ -1,7 +1,6 @@
 package org.github.dbjo.codegen.rdb;
 
 import org.github.dbjo.codegen.Config;
-import org.github.dbjo.meta.db.Col;
 import org.github.dbjo.meta.db.IndexModel;
 import org.github.dbjo.meta.db.TableModel;
 import org.github.dbjo.codegen.util.FilesUtil;
@@ -14,10 +13,15 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * Generates a catalog for the Rocks JDBC driver so it can expose table/column metadata.
+ * Generates a Rocks JDBC catalog with rich metadata for IntelliJ/DataGrip.
  *
- * IMPORTANT: does NOT import proto message types to avoid name collisions with entity classes
- * (e.g. entity.Purchase vs proto.Purchase). Proto message types are referenced by fully-qualified name.
+ * Key points:
+ *  - Implements RocksJdbcCatalog.table(String) + requireTable(String)
+ *  - Emits RocksJdbcColumn using the *actual* record ctor:
+ *      (int ordinalPos, String colName, int dataType, String typeName, int colSize, int decDigits,
+ *       int nullable, String isAutoInc, String columnDef, String getterName)
+ *  - Avoids proto imports to prevent entity/proto name clashes; uses fully-qualified proto type in decoder.
+ *  - Uses reflection to read column fields so it works even if your Col model differs slightly across modules.
  */
 public final class RocksJdbcCatalogGenerator {
     private final Config cfg;
@@ -50,23 +54,21 @@ public final class RocksJdbcCatalogGenerator {
     }
 
     private String renderCatalog(String outPkg, String className, List<TableModel> tables) {
-        StringBuilder sb = new StringBuilder(20_000);
+        StringBuilder sb = new StringBuilder(30_000);
 
         sb.append("package ").append(outPkg).append(";\n\n");
 
-        // Imports: runtime JDBC catalog types
+        // Runtime JDBC catalog types
         sb.append("import org.github.dbjo.rdb.jdbc.catalog.RocksJdbcCatalog;\n");
         sb.append("import org.github.dbjo.rdb.jdbc.catalog.RocksJdbcColumn;\n");
         sb.append("import org.github.dbjo.rdb.jdbc.catalog.RocksJdbcDecoder;\n");
         sb.append("import org.github.dbjo.rdb.jdbc.catalog.RocksJdbcIndex;\n");
-        sb.append("import org.github.dbjo.rdb.jdbc.catalog.RocksJdbcTable;\n");
-        sb.append("\n");
+        sb.append("import org.github.dbjo.rdb.jdbc.catalog.RocksJdbcTable;\n\n");
 
         sb.append("import java.sql.SQLException;\n");
-        sb.append("import java.util.*;\n");
-        sb.append("\n");
+        sb.append("import java.util.*;\n\n");
 
-        // Entity + mapper imports only (NO proto imports)
+        // Entity + mapper imports only (NO proto imports to avoid collisions)
         Set<String> extraImports = new TreeSet<>();
         for (TableModel tm : tables) {
             String beanClass = Naming.toClassName(tm.table().table());
@@ -88,8 +90,7 @@ public final class RocksJdbcCatalogGenerator {
 
         for (int i = 0; i < tables.size(); i++) {
             String beanClass = Naming.toClassName(tables.get(i).table().table());
-            String method = "table_" + beanClass;
-            sb.append("            ").append(method).append("()");
+            sb.append("            table_").append(beanClass).append("()");
             sb.append(i < tables.size() - 1 ? ",\n" : "\n");
         }
         sb.append("    );\n\n");
@@ -101,11 +102,18 @@ public final class RocksJdbcCatalogGenerator {
         sb.append("        return TABLES;\n");
         sb.append("    }\n\n");
 
+        // REQUIRED by your interface (compile error): table(String)
+        sb.append("    @Override\n");
+        sb.append("    public RocksJdbcTable table(String name) {\n");
+        sb.append("        if (name == null) return null;\n");
+        sb.append("        String k = name.trim().toLowerCase(Locale.ROOT);\n");
+        sb.append("        if (k.isEmpty()) return null;\n");
+        sb.append("        return BY_NAME.get(k);\n");
+        sb.append("    }\n\n");
+
         sb.append("    @Override\n");
         sb.append("    public RocksJdbcTable requireTable(String name) throws SQLException {\n");
-        sb.append("        if (name == null) throw new SQLException(\"name is null\");\n");
-        sb.append("        String k = name.trim().toLowerCase(Locale.ROOT);\n");
-        sb.append("        RocksJdbcTable t = BY_NAME.get(k);\n");
+        sb.append("        RocksJdbcTable t = table(name);\n");
         sb.append("        if (t != null) return t;\n");
         sb.append("        throw new SQLException(\"Unknown table: \" + name);\n");
         sb.append("    }\n\n");
@@ -137,20 +145,26 @@ public final class RocksJdbcCatalogGenerator {
         String beanClass = Naming.toClassName(rawTable);
         String mapperClass = beanClass + cfg.protoMapperSuffix();
 
+        // SQL-visible name
         String tableName = Naming.toLowerSnake(rawTable);
+        // CF name: keep in sync with RocksSchemaGenerator convention
         String cfName = Naming.toLowerSnake(rawTable);
         String schemaName = (schema == null ? "" : schema);
 
-        List<Col> cols = new ArrayList<>(tm.cols());
-        cols.sort(Comparator.comparingInt(Col::pos));
+        // Work with cols via reflection to survive different Col models across modules
+        List<?> cols = new ArrayList<>(tm.cols());
+        cols.sort(Comparator.comparingInt(c -> intVal(c, 0, "pos", "ordinalPosition", "position")));
 
+        // PK columns in ordinal order
         List<String> pkCols = new ArrayList<>();
         Set<String> pkUpper = tm.pkColsUpper() == null ? Set.of() : tm.pkColsUpper();
-        for (Col c : cols) {
-            String up = c.colName() == null ? null : c.colName().toUpperCase(Locale.ROOT);
-            if (up != null && pkUpper.contains(up)) pkCols.add(c.colName());
+        for (Object c : cols) {
+            String cn = strVal(c, "colName", "columnName", "name");
+            if (cn == null) continue;
+            if (pkUpper.contains(cn.toUpperCase(Locale.ROOT))) pkCols.add(cn);
         }
 
+        // Indexes (skip pure PK index duplication)
         List<IndexModel> idxs = tm.indexes() == null ? List.of() : tm.indexes();
         List<IndexModel> idxFiltered = new ArrayList<>();
         for (IndexModel ix : idxs) {
@@ -161,33 +175,39 @@ public final class RocksJdbcCatalogGenerator {
 
         sb.append("    private static RocksJdbcTable table_").append(beanClass).append("() {\n");
 
+        // Columns array: IMPORTANT: match RocksJdbcColumn record ctor (10 args)
         sb.append("        RocksJdbcColumn[] cols = new RocksJdbcColumn[] {\n");
         for (int i = 0; i < cols.size(); i++) {
-            Col c = cols.get(i);
+            Object c = cols.get(i);
 
-            String colName = c.colName();
-            String prop = Naming.sanitizeJavaIdentifier(Naming.toFieldName(colName));
-            String getter = "get" + Naming.capitalize(prop);
-
-            // if your Col does not have autoInc/default, keep conservative values
-            String ai = "NO";
-            String def = null;
+            int ordinal = intVal(c, i + 1, "pos", "ordinalPosition", "position");
+            String colName = strVal(c, "colName", "columnName", "name");
+            int dataType = intVal(c, java.sql.Types.VARCHAR, "sqlType", "dataType", "jdbcType");
+            String typeName = strVal(c, "typeName", "sqlTypeName", "dbTypeName");
+            int colSize = intVal(c, 0, "size", "columnSize", "precision");
+            int decDigits = intVal(c, 0, "scale", "decimalDigits");
+            int nullable = nullableInt(c);
+            String isAutoInc = strValOr(c, "NO", "isAutoIncrement", "autoIncrement");
+            String columnDef = strVal(c, "defaultValue", "columnDef", "default");
+            String getter = toGetterName(colName);
 
             sb.append("                new RocksJdbcColumn(\n");
+            sb.append("                        ").append(ordinal).append(",\n");
             sb.append("                        ").append(jstr(colName)).append(",\n");
-            sb.append("                        ").append(c.sqlType()).append(",\n");
-            sb.append("                        ").append(jstr(c.typeName())).append(",\n");
-            sb.append("                        ").append(c.size()).append(",\n");
-            sb.append("                        ").append(c.scale()).append(",\n");
-            sb.append("                        ").append(c.nullable()).append(",\n");
-            sb.append("                        ").append(jstr(ai)).append(",\n");
-            sb.append("                        ").append(jstr(def)).append(",\n");
+            sb.append("                        ").append(dataType).append(",\n");
+            sb.append("                        ").append(jstr(typeName)).append(",\n");
+            sb.append("                        ").append(colSize).append(",\n");
+            sb.append("                        ").append(decDigits).append(",\n");
+            sb.append("                        ").append(nullable).append(",\n");
+            sb.append("                        ").append(jstr(isAutoInc)).append(",\n");
+            sb.append("                        ").append(jstr(columnDef)).append(",\n");
             sb.append("                        ").append(jstr(getter)).append("\n");
             sb.append("                )");
             sb.append(i < cols.size() - 1 ? ",\n" : "\n");
         }
         sb.append("        };\n\n");
 
+        // pk array
         sb.append("        String[] pkCols = new String[] {");
         for (int i = 0; i < pkCols.size(); i++) {
             if (i > 0) sb.append(", ");
@@ -195,6 +215,7 @@ public final class RocksJdbcCatalogGenerator {
         }
         sb.append("};\n\n");
 
+        // indexes array
         sb.append("        RocksJdbcIndex[] indexes = new RocksJdbcIndex[] {\n");
         if (idxFiltered.isEmpty()) {
             sb.append("        };\n\n");
@@ -217,7 +238,7 @@ public final class RocksJdbcCatalogGenerator {
             sb.append("        };\n\n");
         }
 
-        // decoder uses fully-qualified proto type, NO proto import
+        // decoder: use fully-qualified proto type (NO proto import)
         String protoFqn = cfg.protoJavaPkg() + "." + beanClass;
 
         sb.append("        RocksJdbcDecoder decoder = bytes -> {\n");
@@ -229,12 +250,14 @@ public final class RocksJdbcCatalogGenerator {
         sb.append("            }\n");
         sb.append("        };\n\n");
 
+        // aliases
         sb.append("        String[] names = new String[] {\n");
         sb.append("                ").append(jstr(tableName)).append(",\n");
         sb.append("                ").append(jstr(rawTable)).append(",\n");
         sb.append("                ").append(jstr(beanClass)).append("\n");
         sb.append("        };\n\n");
 
+        // RocksJdbcTable ctor (your runtime signature)
         sb.append("        return new RocksJdbcTable(\n");
         sb.append("                ").append(jstr(tableName)).append(",\n");
         sb.append("                ").append(jstr(cfName)).append(",\n");
@@ -250,6 +273,12 @@ public final class RocksJdbcCatalogGenerator {
         sb.append("    }\n\n");
     }
 
+    private static String toGetterName(String colName) {
+        if (colName == null || colName.isBlank()) return "get";
+        String prop = Naming.sanitizeJavaIdentifier(Naming.toFieldName(colName));
+        return "get" + Naming.capitalize(prop);
+    }
+
     private static boolean isPkIndex(IndexModel ix, Set<String> pkColsUpper) {
         if (pkColsUpper == null || pkColsUpper.isEmpty()) return false;
         if (ix.columnNames() == null || ix.columnNames().isEmpty()) return false;
@@ -260,6 +289,54 @@ public final class RocksJdbcCatalogGenerator {
                 .collect(Collectors.toSet());
 
         return idxCols.equals(pkColsUpper);
+    }
+
+    // --- reflection helpers to tolerate different Col models ---
+
+    private static int intVal(Object target, int def, String... methodNames) {
+        Object v = invoke0(target, methodNames);
+        if (v == null) return def;
+        if (v instanceof Integer i) return i;
+        if (v instanceof Number n) return n.intValue();
+        try { return Integer.parseInt(String.valueOf(v)); } catch (Exception ignore) { return def; }
+    }
+
+    private static String strVal(Object target, String... methodNames) {
+        Object v = invoke0(target, methodNames);
+        if (v == null) return null;
+        String s = String.valueOf(v);
+        return s.isBlank() ? null : s;
+    }
+
+    private static String strValOr(Object target, String def, String... methodNames) {
+        String s = strVal(target, methodNames);
+        return (s == null) ? def : s;
+    }
+
+    // normalize nullable into JDBC int constants:
+    // 0 = columnNoNulls, 1 = columnNullable, 2 = columnNullableUnknown
+    private static int nullableInt(Object colObj) {
+        Object v = invoke0(colObj, "nullable", "isNullable", "getNullable");
+        if (v == null) return 2;
+        if (v instanceof Integer i) return i;         // already JDBC-style int
+        if (v instanceof Boolean b) return b ? 1 : 0; // boolean -> map
+        String s = String.valueOf(v).trim();
+        if (s.equalsIgnoreCase("YES") || s.equalsIgnoreCase("Y") || s.equals("1") || s.equalsIgnoreCase("true")) return 1;
+        if (s.equalsIgnoreCase("NO") || s.equalsIgnoreCase("N") || s.equals("0") || s.equalsIgnoreCase("false")) return 0;
+        try { return Integer.parseInt(s); } catch (Exception ignore) { return 2; }
+    }
+
+    private static Object invoke0(Object target, String... methodNames) {
+        if (target == null) return null;
+        for (String mn : methodNames) {
+            try {
+                var m = target.getClass().getMethod(mn);
+                return m.invoke(target);
+            } catch (NoSuchMethodException ignored) {
+            } catch (Throwable ignored) {
+            }
+        }
+        return null;
     }
 
     private static String jstr(String s) {
