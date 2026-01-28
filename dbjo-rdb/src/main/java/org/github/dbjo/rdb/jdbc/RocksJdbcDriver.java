@@ -9,8 +9,13 @@ import java.util.logging.Logger;
 
 public final class RocksJdbcDriver implements Driver {
     static {
-        try { RocksDB.loadLibrary(); } catch (Throwable ignored) {}
-        try { DriverManager.registerDriver(new RocksJdbcDriver()); } catch (Throwable ignored) {}
+        try {
+            RocksDB.loadLibrary();
+        } catch (Throwable ignored) {}
+
+        try {
+            DriverManager.registerDriver(new RocksJdbcDriver());
+        } catch (Throwable ignored) {}
     }
 
     @Override
@@ -32,13 +37,18 @@ public final class RocksJdbcDriver implements Driver {
     public DriverPropertyInfo[] getPropertyInfo(String url, Properties info) {
         DriverPropertyInfo cat = new DriverPropertyInfo("catalog", (info == null) ? null : info.getProperty("catalog"));
         cat.required = true;
-        cat.description = "FQN of generated RocksJdbcCatalog (e.g. ...GeneratedRocksJdbcCatalog).";
+        cat.description = "FQN of generated RocksJdbcCatalog class (e.g. ...GeneratedRocksJdbcCatalog).";
         return new DriverPropertyInfo[]{ cat };
     }
 
-    @Override public int getMajorVersion() { return 0; }
-    @Override public int getMinorVersion() { return 1; }
-    @Override public boolean jdbcCompliant() { return false; }
+    @Override
+    public int getMajorVersion() { return 0; }
+
+    @Override
+    public int getMinorVersion() { return 1; }
+
+    @Override
+    public boolean jdbcCompliant() { return false; }
 
     @Override
     public Logger getParentLogger() throws SQLFeatureNotSupportedException {
