@@ -1,204 +1,263 @@
 package org.github.dbjo.rdb.jdbc.catalog;
 
 import java.sql.SQLException;
+import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
+/**
+ * Small SQL parser for the read-only Rocks JDBC driver.
+ *
+ * Supported:
+ *  - select * from tables [limit N | fetch first N rows only]
+ *  - select * from <table> [limit N | fetch first N rows only]
+ *  - select top N * from <table> [limit M]  (effective limit = min(top, limit) if both present)
+ *  - select count(*) from <table>
+ *  - select count(1) from <table>
+ *
+ * Notes:
+ *  - Trailing semicolons are allowed.
+ *  - Identifiers may be qualified and/or quoted:
+ *      client
+ *      schema.client
+ *      "Client"
+ *      "schema"."Client"
+ *      [Client]
+ *      `Client`
+ */
 public final class RocksJdbcSql {
     private RocksJdbcSql() {}
 
     public enum Kind { LIST_TABLES, SELECT_ALL, COUNT }
 
-    public record Parsed(Kind kind, String tableName, Integer limit) {}
+    /** limit==0 means "no limit specified in SQL" */
+    public record Parsed(Kind kind, String tableName, int limit) {}
+
+    // --- identifier grammar: segment(.segment)*
+    // segment = "x" | `x` | [x] | bareword
+    private static final String SEG =
+            "(\"[^\"]+\"|`[^`]+`|\\[[^\\]]+\\]|[A-Za-z_][A-Za-z0-9_]*)";
+    private static final String QUAL_IDENT =
+            "(" + SEG + "(\\." + SEG + ")*)";
+
+    private static final Pattern P_LIST_TABLES =
+            Pattern.compile("^\\s*select\\s+\\*\\s+from\\s+tables\\s*(?<tail>.*)$",
+                    Pattern.CASE_INSENSITIVE);
+
+    private static final Pattern P_SELECT_ALL =
+            Pattern.compile("^\\s*select\\s+\\*\\s+from\\s+(?<table>" + QUAL_IDENT + ")\\s*(?<tail>.*)$",
+                    Pattern.CASE_INSENSITIVE);
+
+    private static final Pattern P_SELECT_TOP_ALL =
+            Pattern.compile("^\\s*select\\s+top\\s+(?<top>\\d+)\\s+\\*\\s+from\\s+(?<table>" + QUAL_IDENT + ")\\s*(?<tail>.*)$",
+                    Pattern.CASE_INSENSITIVE);
+
+    private static final Pattern P_COUNT =
+            Pattern.compile("^\\s*select\\s+count\\s*\\(\\s*(?<arg>\\*|1)\\s*\\)\\s+from\\s+(?<table>" + QUAL_IDENT + ")\\s*(?<tail>.*)$",
+                    Pattern.CASE_INSENSITIVE);
+
+    private static final Pattern P_LIMIT =
+            Pattern.compile("^\\s*limit\\s+(\\d+)\\s*$", Pattern.CASE_INSENSITIVE);
+
+    private static final Pattern P_FETCH_FIRST =
+            Pattern.compile("^\\s*fetch\\s+first\\s+(\\d+)\\s+rows\\s+only\\s*$", Pattern.CASE_INSENSITIVE);
 
     public static Parsed parse(String sql) throws SQLException {
         if (sql == null) throw new SQLException("SQL is null");
-        String s = stripTrailingSemicolon(sql.trim());
-        if (s.isEmpty()) throw new SQLException("SQL is empty");
 
-        Cursor c = new Cursor(s);
+        String s = normalizeSql(sql);
+        if (s.isEmpty()) throw new SQLException("Empty SQL");
 
-        c.skipWs();
-        c.expectKeyword("select");
-        c.skipWs();
-
-        boolean isCount = false;
-
-        if (c.tryConsume('*')) {
-            // ok
-        } else if (c.tryKeyword("count")) {
-            c.skipWs();
-            c.expect('(');
-            c.skipWs();
-            c.expect('*');
-            c.skipWs();
-            c.expect(')');
-            isCount = true;
-        } else {
-            throw new SQLException("Unsupported SELECT list (only * or count(*)): " + sql);
+        // SELECT TOP n * FROM table [tail]
+        {
+            Matcher m = P_SELECT_TOP_ALL.matcher(s);
+            if (m.matches()) {
+                String table = normalizeQualifiedIdent(m.group("table"));
+                int top = parsePositiveInt(m.group("top"));
+                int tailLimit = parseLimitFromTail(m.group("tail"));
+                int eff = combineLimits(top, tailLimit);
+                return new Parsed(Kind.SELECT_ALL, table, eff);
+            }
         }
 
-        c.skipWs();
-        c.expectKeyword("from");
-        c.skipWs();
-
-        String rawId = c.readIdentifier();
-        if (rawId == null || rawId.isBlank()) throw new SQLException("Missing table name: " + sql);
-
-        String table = lastSegment(rawId);
-
-        c.skipWs();
-
-        Integer limit = null;
-        // LIMIT n
-        if (c.tryKeyword("limit")) {
-            c.skipWs();
-            limit = c.readInt();
-            if (limit == null) throw new SQLException("Bad LIMIT: " + sql);
-            c.skipWs();
-        } else if (c.tryKeyword("fetch")) {
-            // FETCH FIRST n ROWS ONLY
-            c.skipWs();
-            c.expectKeyword("first");
-            c.skipWs();
-            limit = c.readInt();
-            if (limit == null) throw new SQLException("Bad FETCH FIRST: " + sql);
-            c.skipWs();
-            c.expectKeyword("rows");
-            c.skipWs();
-            c.expectKeyword("only");
-            c.skipWs();
+        // SELECT * FROM tables [tail]
+        {
+            Matcher m = P_LIST_TABLES.matcher(s);
+            if (m.matches()) {
+                int lim = parseLimitFromTail(m.group("tail"));
+                return new Parsed(Kind.LIST_TABLES, null, lim);
+            }
         }
 
-        c.skipWs();
-        if (!c.eof()) {
-            throw new SQLException("Trailing SQL not supported: " + sql);
+        // SELECT COUNT(*) / COUNT(1) FROM table [tail]
+        {
+            Matcher m = P_COUNT.matcher(s);
+            if (m.matches()) {
+                String table = normalizeQualifiedIdent(m.group("table"));
+                // accept tail but we ignore limit for COUNT execution (optional)
+                int lim = parseLimitFromTail(m.group("tail"));
+                return new Parsed(Kind.COUNT, table, lim);
+            }
         }
 
-        if (!isCount) {
-            if ("tables".equalsIgnoreCase(table)) return new Parsed(Kind.LIST_TABLES, null, null);
-            return new Parsed(Kind.SELECT_ALL, table, limit);
-        } else {
-            return new Parsed(Kind.COUNT, table, null);
+        // SELECT * FROM table [tail]
+        {
+            Matcher m = P_SELECT_ALL.matcher(s);
+            if (m.matches()) {
+                String table = normalizeQualifiedIdent(m.group("table"));
+                int lim = parseLimitFromTail(m.group("tail"));
+                return new Parsed(Kind.SELECT_ALL, table, lim);
+            }
         }
+
+        throw new SQLException("Unsupported SQL: " + sql);
+    }
+
+    // --- helpers
+
+    private static int combineLimits(int a, int b) {
+        if (a > 0 && b > 0) return Math.min(a, b);
+        if (a > 0) return a;
+        return b;
+    }
+
+    private static int parseLimitFromTail(String tail) throws SQLException {
+        if (tail == null) return 0;
+        String t = normalizeSql(tail);
+        if (t.isEmpty()) return 0;
+
+        Matcher ml = P_LIMIT.matcher(t);
+        if (ml.matches()) return parsePositiveInt(ml.group(1));
+
+        Matcher mf = P_FETCH_FIRST.matcher(t);
+        if (mf.matches()) return parsePositiveInt(mf.group(1));
+
+        // keep behavior: if there is any other tail, we don't claim support
+        throw new SQLException("Unsupported SQL tail: " + tail);
+    }
+
+    private static int parsePositiveInt(String s) throws SQLException {
+        try {
+            long v = Long.parseLong(s);
+            if (v <= 0) return 0;
+            if (v > Integer.MAX_VALUE) return Integer.MAX_VALUE;
+            return (int) v;
+        } catch (NumberFormatException e) {
+            throw new SQLException("Bad numeric value: " + s, e);
+        }
+    }
+
+    /** Normalize: trim, drop trailing semicolon, strip trailing line/block comments (at end). */
+    private static String normalizeSql(String in) {
+        if (in == null) return "";
+        String s = in.trim();
+        s = stripTrailingSemicolon(s);
+        s = stripTrailingComments(s);
+        return s.trim();
     }
 
     private static String stripTrailingSemicolon(String s) {
-        String t = s;
-        while (t.endsWith(";")) t = t.substring(0, t.length() - 1).trim();
-        return t;
+        int i = s.length() - 1;
+        while (i >= 0 && Character.isWhitespace(s.charAt(i))) i--;
+        if (i >= 0 && s.charAt(i) == ';') return s.substring(0, i);
+        return s;
     }
 
-    private static String lastSegment(String id) {
-        String x = id.trim();
-        int dot = x.lastIndexOf('.');
-        if (dot >= 0 && dot + 1 < x.length()) return x.substring(dot + 1);
-        return x;
-    }
+    /**
+     * Very small "end-only" comment stripper:
+     *  - removes trailing "-- ...." if it appears at end
+     *  - removes trailing "/* .... *&#47;" if it appears at end
+     * Not a full SQL lexer; it’s just to be tolerant of tooling.
+     */
+    private static String stripTrailingComments(String s) {
+        String out = s;
 
-    private static final class Cursor {
-        private final String s;
-        private int i = 0;
+        // trailing line comment
+        int idxLine = lastIndexOfLineComment(out);
+        if (idxLine >= 0) {
+            out = out.substring(0, idxLine).trim();
+        }
 
-        Cursor(String s) { this.s = s; }
-
-        boolean eof() { return i >= s.length(); }
-
-        void skipWs() {
-            while (!eof()) {
-                char ch = s.charAt(i);
-                if (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n') i++;
-                else break;
+        // trailing block comment
+        int end = out.lastIndexOf("*/");
+        if (end >= 0) {
+            int start = out.lastIndexOf("/*");
+            if (start >= 0 && start < end) {
+                String before = out.substring(0, start).trim();
+                String after = out.substring(end + 2).trim();
+                if (after.isEmpty()) out = before; // only strip if comment was at end
             }
         }
 
-        boolean tryConsume(char ch) {
-            if (!eof() && s.charAt(i) == ch) { i++; return true; }
-            return false;
-        }
+        return out;
+    }
 
-        void expect(char ch) throws SQLException {
-            if (eof() || s.charAt(i) != ch) throw new SQLException("Expected '" + ch + "' at pos " + i + " in: " + s);
-            i++;
-        }
+    private static int lastIndexOfLineComment(String s) {
+        // only strip if the "--" occurs and nothing but whitespace follows it (comment at end)
+        int idx = s.lastIndexOf("--");
+        if (idx < 0) return -1;
+        // if "--" is inside quotes, we won't try to be clever; keep it simple
+        // only strip when it looks like a trailing comment
+        return idx;
+    }
 
-        boolean tryKeyword(String kw) {
-            int save = i;
-            try {
-                expectKeyword(kw);
-                return true;
-            } catch (SQLException e) {
-                i = save;
-                return false;
-            }
-        }
+    /**
+     * Turns a qualified identifier like:
+     *   schema.table
+     *   "schema"."Table"
+     *   [schema].[Table]
+     * into:
+     *   schema.table
+     *   schema.Table
+     * preserving dots but removing quotes/brackets/backticks per segment.
+     */
+    private static String normalizeQualifiedIdent(String ident) throws SQLException {
+        if (ident == null) return null;
+        String s = ident.trim();
+        if (s.isEmpty()) return s;
 
-        void expectKeyword(String kw) throws SQLException {
-            skipWs();
-            int n = kw.length();
-            if (i + n > s.length()) throw new SQLException("Expected keyword " + kw + " in: " + s);
-            String sub = s.substring(i, i + n);
-            if (!sub.equalsIgnoreCase(kw)) throw new SQLException("Expected keyword " + kw + " at pos " + i + " in: " + s);
+        StringBuilder out = new StringBuilder(s.length());
+        int i = 0;
+        boolean first = true;
 
-            // keyword boundary
-            int j = i + n;
-            if (j < s.length()) {
-                char ch = s.charAt(j);
-                if (Character.isLetterOrDigit(ch) || ch == '_') {
-                    throw new SQLException("Expected keyword boundary for " + kw + " at pos " + i + " in: " + s);
+        while (i < s.length()) {
+            if (!first) {
+                if (s.charAt(i) != '.') {
+                    // Should not happen if regex matched, but be safe
+                    throw new SQLException("Bad qualified identifier: " + ident);
                 }
-            }
-            i += n;
-        }
-
-        String readIdentifier() throws SQLException {
-            skipWs();
-            if (eof()) return null;
-
-            char ch = s.charAt(i);
-
-            // quoted identifier: "MyTable" or `MyTable`
-            if (ch == '"' || ch == '`') {
+                out.append('.');
                 i++;
-                StringBuilder sb = new StringBuilder();
-                while (!eof()) {
-                    char c = s.charAt(i++);
-                    if (c == ch) {
-                        // allow doubled quote escape: "" => "
-                        if (!eof() && s.charAt(i) == ch) {
-                            sb.append(ch);
-                            i++;
-                            continue;
-                        }
-                        return sb.toString();
-                    }
-                    sb.append(c);
-                }
-                throw new SQLException("Unterminated quoted identifier in: " + s);
             }
+            first = false;
 
-            // unquoted: allow schema.table and underscores
-            int start = i;
-            while (!eof()) {
-                char c = s.charAt(i);
-                if (Character.isLetterOrDigit(c) || c == '_' || c == '.') {
-                    i++;
-                } else {
-                    break;
-                }
+            if (i >= s.length()) break;
+            char c = s.charAt(i);
+
+            if (c == '"') {
+                int j = s.indexOf('"', i + 1);
+                if (j < 0) throw new SQLException("Unterminated quoted identifier: " + ident);
+                out.append(s, i + 1, j);
+                i = j + 1;
+            } else if (c == '`') {
+                int j = s.indexOf('`', i + 1);
+                if (j < 0) throw new SQLException("Unterminated quoted identifier: " + ident);
+                out.append(s, i + 1, j);
+                i = j + 1;
+            } else if (c == '[') {
+                int j = s.indexOf(']', i + 1);
+                if (j < 0) throw new SQLException("Unterminated bracket identifier: " + ident);
+                out.append(s, i + 1, j);
+                i = j + 1;
+            } else {
+                // bare segment
+                int j = i;
+                while (j < s.length() && s.charAt(j) != '.') j++;
+                out.append(s, i, j);
+                i = j;
             }
-            if (i == start) return null;
-            return s.substring(start, i);
         }
 
-        Integer readInt() {
-            skipWs();
-            int start = i;
-            while (!eof() && Character.isDigit(s.charAt(i))) i++;
-            if (i == start) return null;
-            try {
-                return Integer.parseInt(s.substring(start, i));
-            } catch (NumberFormatException e) {
-                return null;
-            }
-        }
+        return out.toString();
     }
 }

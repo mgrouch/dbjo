@@ -107,29 +107,37 @@ public final class RocksJdbcConnection implements Connection {
         return h;
     }
 
-    public ResultSet runQuery(String sql, int stmtMaxRows) throws SQLException {
+    public ResultSet runQuery(String sql, int maxRows) throws SQLException {
         ensureOpen();
-
         RocksJdbcSql.Parsed p = RocksJdbcSql.parse(sql);
 
-        int limit = 0;
-        if (stmtMaxRows > 0) limit = stmtMaxRows;
-        if (p.limit() != null && p.limit() > 0) limit = (limit == 0) ? p.limit() : Math.min(limit, p.limit());
+        int effMax = applyLimit(maxRows, p.limit());
 
         return switch (p.kind()) {
-            case LIST_TABLES -> queryTables();
-            case SELECT_ALL -> querySelectAll(p.tableName(), limit);
-            case COUNT -> queryCount(p.tableName());
+            case LIST_TABLES -> queryTables(effMax);
+            case SELECT_ALL -> querySelectAll(p.tableName(), effMax);
+            case COUNT -> queryCount(p.tableName()); // limit accepted by parser but ignored for count
         };
     }
 
-    private ResultSet queryTables() throws SQLException {
+    private static int applyLimit(int stmtMaxRows, int sqlLimit) {
+        if (sqlLimit > 0) {
+            if (stmtMaxRows <= 0) return sqlLimit;
+            return Math.min(stmtMaxRows, sqlLimit);
+        }
+        return stmtMaxRows;
+    }
+
+    private ResultSet queryTables(int maxRows) throws SQLException {
         String[] cols = { "table_name", "cf_name", "column_count" };
         int[] types = { Types.VARCHAR, Types.VARCHAR, Types.INTEGER };
 
         List<Object[]> rows = new ArrayList<>();
+        int n = 0;
         for (RocksJdbcTable t : catalog.tables()) {
-            rows.add(new Object[]{ t.tableName(), t.cfName(), t.columns().length });
+            rows.add(new Object[]{ t.tableName(), t.cfName(), t.columnNames().length });
+            n++;
+            if (maxRows > 0 && n >= maxRows) break;
         }
         return RocksJdbcResultSets.of(cols, types, rows);
     }
