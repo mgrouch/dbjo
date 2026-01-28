@@ -35,7 +35,6 @@ public final class RocksJdbcConnection implements Connection {
         Objects.requireNonNull(dbPath, "dbPath");
         Objects.requireNonNull(catalog, "catalog");
 
-        // list column families
         List<byte[]> cfs;
         try (Options opts = new Options()) {
             cfs = RocksDB.listColumnFamilies(opts, dbPath);
@@ -53,9 +52,7 @@ public final class RocksJdbcConnection implements Connection {
         if (cfs.isEmpty()) {
             desc.add(new ColumnFamilyDescriptor(RocksDB.DEFAULT_COLUMN_FAMILY, cfo));
         } else {
-            for (byte[] name : cfs) {
-                desc.add(new ColumnFamilyDescriptor(name, cfo));
-            }
+            for (byte[] name : cfs) desc.add(new ColumnFamilyDescriptor(name, cfo));
         }
 
         List<ColumnFamilyHandle> handles = new ArrayList<>(desc.size());
@@ -117,7 +114,7 @@ public final class RocksJdbcConnection implements Connection {
 
         return switch (p.kind()) {
             case LIST_TABLES -> queryTables(effMaxRows);
-            case SELECT_ALL -> querySelectAll(p.tableName(), p.whereSql(), effMaxRows);
+            case SELECT -> querySelect(p.tableName(), p.whereSql(), effMaxRows, p.projection());
             case COUNT -> queryCount(p.tableName(), p.whereSql());
         };
     }
@@ -148,19 +145,23 @@ public final class RocksJdbcConnection implements Connection {
         RocksJdbcTable t = catalog.requireTable(tableName);
         ColumnFamilyHandle cf = cfHandle(t.cfName());
 
-        String[] colNames = t.columnNames();
-        RocksJdbcWhere.Predicate pred = RocksJdbcWhere.compile(whereSql, colNames);
+        String[] allColNames = t.columnNames();
+        RocksJdbcWhere.Predicate pred = RocksJdbcWhere.compile(whereSql, allColNames);
 
         MethodGetterCache getters = getterCache.computeIfAbsent(t, MethodGetterCache::new);
 
         long count = 0;
-        try (RocksIterator it = db.newIterator(cf)) {
+        RocksIterator it = null;
+        try {
+            it = db.newIterator(cf);
             it.seekToFirst();
             while (it.isValid()) {
                 Object rowObj = t.decoder().decode(it.value());
                 if (pred.test(idx -> getters.get(rowObj, idx))) count++;
                 it.next();
             }
+        } finally {
+            if (it != null) it.close();
         }
 
         String[] cols = { "count" };
@@ -168,29 +169,67 @@ public final class RocksJdbcConnection implements Connection {
         return RocksJdbcResultSets.of(cols, types, java.util.Collections.singletonList(new Object[]{ count }));
     }
 
-    private ResultSet querySelectAll(String tableName, String whereSql, int maxRows) throws SQLException {
+    private ResultSet querySelect(String tableName, String whereSql, int maxRows, RocksJdbcSql.SelectedCol[] projection) throws SQLException {
         RocksJdbcTable t = catalog.requireTable(tableName);
         ColumnFamilyHandle cf = cfHandle(t.cfName());
 
-        String[] colNames = t.columnNames();
-        int[] colTypes = t.columnSqlTypes();
+        String[] allColNames = t.columnNames();
+        int[] allColTypes = t.columnSqlTypes();
 
-        RocksJdbcWhere.Predicate pred = RocksJdbcWhere.compile(whereSql, colNames);
+        // WHERE predicate always uses full-table column indexes
+        RocksJdbcWhere.Predicate pred = RocksJdbcWhere.compile(whereSql, allColNames);
 
         MethodGetterCache getters = getterCache.computeIfAbsent(t, MethodGetterCache::new);
+
+        // Resolve projection to selected column indexes (or all)
+        final int[] selIdx;
+        final String[] outNames;
+        final int[] outTypes;
+
+        if (projection == null) {
+            selIdx = null; // means "all"
+            outNames = allColNames;
+            outTypes = allColTypes;
+        } else {
+            selIdx = new int[projection.length];
+            outNames = new String[projection.length];
+            outTypes = new int[projection.length];
+
+            for (int i = 0; i < projection.length; i++) {
+                String source = projection[i].sourceName();
+                int idx = resolveColumnIndex(allColNames, source);
+                selIdx[i] = idx;
+
+                outNames[i] = projection[i].label() != null && !projection[i].label().isBlank()
+                        ? projection[i].label()
+                        : allColNames[idx];
+
+                outTypes[i] = allColTypes[idx];
+            }
+        }
 
         List<Object[]> rows = new ArrayList<>();
         int emitted = 0;
 
-        try (RocksIterator it = db.newIterator(cf)) {
+        RocksIterator it = null;
+        try {
+            it = db.newIterator(cf);
             it.seekToFirst();
 
             while (it.isValid()) {
                 Object rowObj = t.decoder().decode(it.value());
 
                 if (pred.test(idx -> getters.get(rowObj, idx))) {
-                    Object[] out = new Object[colNames.length];
-                    getters.fill(rowObj, out);
+                    Object[] out;
+                    if (selIdx == null) {
+                        out = new Object[allColNames.length];
+                        getters.fill(rowObj, out);
+                    } else {
+                        out = new Object[selIdx.length];
+                        for (int k = 0; k < selIdx.length; k++) {
+                            out[k] = getters.get(rowObj, selIdx[k]);
+                        }
+                    }
                     rows.add(out);
 
                     emitted++;
@@ -199,9 +238,22 @@ public final class RocksJdbcConnection implements Connection {
 
                 it.next();
             }
+        } finally {
+            if (it != null) it.close();
         }
 
-        return RocksJdbcResultSets.of(colNames, colTypes, rows);
+        return RocksJdbcResultSets.of(outNames, outTypes, rows);
+    }
+
+    private static int resolveColumnIndex(String[] allColNames, String col) throws SQLException {
+        if (col == null) throw new SQLException("Bad projection column: null");
+        String want = col.trim();
+        if (want.isEmpty()) throw new SQLException("Bad projection column: empty");
+
+        for (int i = 0; i < allColNames.length; i++) {
+            if (allColNames[i] != null && allColNames[i].equalsIgnoreCase(want)) return i;
+        }
+        throw new SQLException("Unknown column in projection: " + col);
     }
 
     private void ensureOpen() throws SQLException {
@@ -220,7 +272,8 @@ public final class RocksJdbcConnection implements Connection {
             case "getDriverMajorVersion" -> 0;
             case "getDriverMinorVersion" -> 1;
             case "isReadOnly" -> true;
-            case "supportsTransactions", "supportsBatchUpdates" -> false;
+            case "supportsTransactions" -> false;
+            case "supportsBatchUpdates" -> false;
 
             case "getTables" -> metaGetTables();
             case "getColumns" -> metaGetColumns(args);
@@ -259,7 +312,6 @@ public final class RocksJdbcConnection implements Connection {
     }
 
     private ResultSet metaGetColumns(Object[] args) throws SQLException {
-        // signature: getColumns(String catalog, String schemaPattern, String tableNamePattern, String columnNamePattern)
         String tablePattern = (args != null && args.length >= 3) ? (String) args[2] : null;
 
         String[] cols = {
@@ -280,7 +332,6 @@ public final class RocksJdbcConnection implements Connection {
         for (RocksJdbcTable t : catalog.tables()) {
             if (tablePattern != null && !tablePattern.isBlank()) {
                 boolean match = t.tableName().equalsIgnoreCase(tablePattern);
-
                 List<String> aliases = t.names();
                 if (!match && aliases != null) {
                     match = aliases.stream().anyMatch(n -> n != null && n.equalsIgnoreCase(tablePattern));
@@ -349,14 +400,10 @@ public final class RocksJdbcConnection implements Connection {
     }
 
     @Override
-    public boolean isClosed() {
-        return closed;
-    }
+    public boolean isClosed() { return closed; }
 
     @Override
-    public boolean isReadOnly() {
-        return true;
-    }
+    public boolean isReadOnly() { return true; }
 
     @Override
     public void setReadOnly(boolean readOnly) throws SQLException {
@@ -455,9 +502,7 @@ public final class RocksJdbcConnection implements Connection {
 
         void fill(Object rowObj, Object[] out) throws SQLException {
             try {
-                for (int i = 0; i < methods.length; i++) {
-                    out[i] = methods[i].invoke(rowObj);
-                }
+                for (int i = 0; i < methods.length; i++) out[i] = methods[i].invoke(rowObj);
             } catch (Throwable e) {
                 throw new SQLException("Failed to read row getters", e);
             }

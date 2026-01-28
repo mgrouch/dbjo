@@ -1,39 +1,53 @@
 package org.github.dbjo.rdb.jdbc.catalog;
 
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * Small SQL parser for the read-only Rocks JDBC driver.
+ *
+ * Supported:
+ *  - select * from tables [limit N | fetch first N rows only]
+ *  - select * from <table> [where <expr>] [limit N | fetch first N rows only]
+ *  - select top N <projection> from <table> [where <expr>] [limit M]   (effective limit = min(top, limit) if both)
+ *  - select <projection> from <table> [where <expr>] [limit N | fetch first N rows only]
+ *  - select count(*) from <table> [where <expr>]
+ *  - select count(1) from <table> [where <expr>]
+ *
+ * Projection:
+ *  - "*" OR "col1, col2, ..." (each col can be qualified and/or quoted)
+ *  - optional alias: "col as alias" OR "col alias"
+ */
 public final class RocksJdbcSql {
     private RocksJdbcSql() {}
 
-    public enum Kind { LIST_TABLES, SELECT_ALL, COUNT }
+    public enum Kind { LIST_TABLES, SELECT, COUNT }
 
-    /** limit==0 means "no SQL limit" */
-    public record Parsed(Kind kind, String tableName, String whereSql, int limit) {}
+    public record SelectedCol(String sourceName, String label) {}
 
+    /** limit==0 means "no SQL limit"; projection==null means "*" */
+    public record Parsed(Kind kind, String tableName, String whereSql, int limit, SelectedCol[] projection) {}
+
+    // segment = "x" | `x` | [x] | bareword; allow qualified seg(.seg)*
     private static final String SEG =
-            "(\"[^\"]+\"|`[^`]+`|\\[[^]]+]|[A-Za-z_]\\w*)";
+            "(\"[^\"]+\"|`[^`]+`|\\[[^\\]]+\\]|[A-Za-z_][A-Za-z0-9_]*)";
     private static final String QUAL_IDENT =
             "(" + SEG + "(\\." + SEG + ")*)";
 
+    // allow quoted "tables" too so tooling can query it
     private static final String TABLES_IDENT =
-            "(tables|\"tables\"|`tables`|\\[tables])";
+            "(tables|\"tables\"|`tables`|\\[tables\\])";
 
     private static final Pattern P_LIST_TABLES =
             Pattern.compile("^\\s*select\\s+\\*\\s+from\\s+" + TABLES_IDENT + "\\s*(?<tail>.*)$",
                     Pattern.CASE_INSENSITIVE);
 
-    private static final Pattern P_SELECT_TOP_ALL =
-            Pattern.compile("^\\s*select\\s+top\\s+(?<top>\\d+)\\s+\\*\\s+from\\s+(?<table>" + QUAL_IDENT + ")\\s*(?<tail>.*)$",
-                    Pattern.CASE_INSENSITIVE);
-
     private static final Pattern P_COUNT =
-            Pattern.compile("^\\s*select\\s+count\\s*\\(\\s*(?<arg>[*1])\\s*\\)\\s+from\\s+(?<table>" + QUAL_IDENT + ")\\s*(?<tail>.*)$",
-                    Pattern.CASE_INSENSITIVE);
-
-    private static final Pattern P_SELECT_ALL =
-            Pattern.compile("^\\s*select\\s+\\*\\s+from\\s+(?<table>" + QUAL_IDENT + ")\\s*(?<tail>.*)$",
+            Pattern.compile("^\\s*select\\s+count\\s*\\(\\s*(?<arg>\\*|1)\\s*\\)\\s+from\\s+(?<table>" + QUAL_IDENT + ")\\s*(?<tail>.*)$",
                     Pattern.CASE_INSENSITIVE);
 
     private static final Pattern P_LIMIT =
@@ -48,19 +62,6 @@ public final class RocksJdbcSql {
         String s = normalizeSql(sql);
         if (s.isEmpty()) throw new SQLException("Empty SQL");
 
-        // SELECT TOP n * FROM table ...
-        {
-            Matcher m = P_SELECT_TOP_ALL.matcher(s);
-            if (m.matches()) {
-                String table = normalizeTableRef(m.group("table"));
-                int top = parsePositiveInt(m.group("top"));
-                TailParts tp = splitWhereAndTail(m.group("tail"));
-                int tailLimit = parseLimitFromTail(tp.tailSql);
-                int eff = combineLimits(top, tailLimit);
-                return new Parsed(Kind.SELECT_ALL, table, tp.whereSql, eff);
-            }
-        }
-
         // SELECT * FROM tables ...
         {
             Matcher m = P_LIST_TABLES.matcher(s);
@@ -68,45 +69,135 @@ public final class RocksJdbcSql {
                 TailParts tp = splitWhereAndTail(m.group("tail"));
                 if (tp.whereSql != null) throw new SQLException("WHERE not supported for pseudo-table TABLES");
                 int lim = parseLimitFromTail(tp.tailSql);
-                return new Parsed(Kind.LIST_TABLES, null, null, lim);
+                return new Parsed(Kind.LIST_TABLES, null, null, lim, null);
             }
         }
 
-        // SELECT COUNT(*) FROM table ...
+        // SELECT COUNT(*) / COUNT(1) FROM table ...
         {
             Matcher m = P_COUNT.matcher(s);
             if (m.matches()) {
                 String table = normalizeTableRef(m.group("table"));
                 TailParts tp = splitWhereAndTail(m.group("tail"));
-                int lim = parseLimitFromTail(tp.tailSql);
-                return new Parsed(Kind.COUNT, table, tp.whereSql, lim);
+                int lim = parseLimitFromTail(tp.tailSql); // accepted (ignored by execution)
+                return new Parsed(Kind.COUNT, table, tp.whereSql, lim, null);
             }
         }
 
-        // SELECT * FROM table ...
-        {
-            Matcher m = P_SELECT_ALL.matcher(s);
-            if (m.matches()) {
-                String table = normalizeTableRef(m.group("table"));
-                TailParts tp = splitWhereAndTail(m.group("tail"));
-                int lim = parseLimitFromTail(tp.tailSql);
-                return new Parsed(Kind.SELECT_ALL, table, tp.whereSql, lim);
-            }
-        }
-
-        throw new SQLException("Unsupported SQL: " + sql);
+        // SELECT [TOP n] <projection> FROM <table> ...
+        return parseSelectWithProjection(s);
     }
 
-    /**
-     * @param whereSql may be null
-     * @param tailSql  may be ""
-     */ // -------- tail parsing: [WHERE ...] [LIMIT/FETCH ...]
-        private record TailParts(String whereSql, String tailSql) {
-            private TailParts(String whereSql, String tailSql) {
-                this.whereSql = (whereSql == null || whereSql.isBlank()) ? null : whereSql.trim();
-                this.tailSql = (tailSql == null) ? "" : tailSql.trim();
-            }
+    private static Parsed parseSelectWithProjection(String sql) throws SQLException {
+        String s = sql.trim();
+        if (!startsWithWord(s, "select")) throw new SQLException("Unsupported SQL: " + sql);
+        int pos = skipWord(s, 0, "select");
+        pos = skipWs(s, pos);
+
+        // Optional TOP n
+        int topLimit = 0;
+        if (startsWithWordAt(s, pos, "top")) {
+            pos = skipWord(s, pos, "top");
+            pos = skipWs(s, pos);
+            int j = pos;
+            while (j < s.length() && Character.isDigit(s.charAt(j))) j++;
+            if (j == pos) throw new SQLException("TOP without number");
+            topLimit = parsePositiveInt(s.substring(pos, j));
+            pos = skipWs(s, j);
         }
+
+        // Find FROM keyword outside quotes
+        int fromPos = findKeywordOutsideQuotes(s, pos, "from");
+        if (fromPos < 0) throw new SQLException("Missing FROM");
+        String selectPart = s.substring(pos, fromPos).trim();
+        if (selectPart.isEmpty()) throw new SQLException("Missing projection in SELECT");
+
+        int afterFrom = skipWord(s, fromPos, "from");
+        afterFrom = skipWs(s, afterFrom);
+
+        // Parse table identifier token
+        IdentTok tableTok = readQualifiedIdentToken(s, afterFrom);
+        String table = normalizeTableRef(tableTok.text);
+
+        String tail = s.substring(tableTok.end).trim();
+
+        TailParts tp = splitWhereAndTail(tail);
+        int tailLimit = parseLimitFromTail(tp.tailSql);
+        int effLimit = combineLimits(topLimit, tailLimit);
+
+        SelectedCol[] proj = parseProjection(selectPart);
+
+        return new Parsed(Kind.SELECT, table, tp.whereSql, effLimit, proj);
+    }
+
+    private static SelectedCol[] parseProjection(String selectPart) throws SQLException {
+        String p = selectPart.trim();
+        if (p.equals("*")) return null;
+
+        // split by commas outside quotes/brackets/strings
+        List<String> items = splitCsvOutsideQuotes(p);
+        List<SelectedCol> out = new ArrayList<>();
+
+        for (String raw : items) {
+            String it = raw.trim();
+            if (it.isEmpty()) continue;
+
+            ColWithAlias ca = parseColWithOptionalAlias(it);
+
+            String sourceNorm = normalizeQualifiedIdent(ca.colIdent);
+            String base = baseName(sourceNorm);
+
+            String label;
+            if (ca.aliasIdent != null && !ca.aliasIdent.isBlank()) {
+                label = unquoteIdent(ca.aliasIdent.trim());
+            } else {
+                label = base;
+            }
+
+            out.add(new SelectedCol(base, label));
+        }
+
+        if (out.isEmpty()) throw new SQLException("Empty projection list");
+        return out.toArray(new SelectedCol[0]);
+    }
+
+    private record ColWithAlias(String colIdent, String aliasIdent) {}
+
+    private static ColWithAlias parseColWithOptionalAlias(String item) throws SQLException {
+        // Parse: <ident> [AS] <alias>
+        // Where <ident> can be qualified/quoted, and alias is single ident token (quoted ok).
+        IdentTok col = readQualifiedIdentToken(item, 0);
+        int pos = skipWs(item, col.end);
+        if (pos >= item.length()) return new ColWithAlias(col.text, null);
+
+        // Optional AS
+        if (startsWithWordAt(item, pos, "as")) {
+            pos = skipWord(item, pos, "as");
+            pos = skipWs(item, pos);
+        }
+
+        if (pos >= item.length()) throw new SQLException("Bad alias in projection: " + item);
+
+        IdentTok alias = readSingleIdentToken(item, pos);
+        pos = skipWs(item, alias.end);
+
+        if (pos != item.length()) {
+            // extra tokens => not supported (keeps it strict)
+            throw new SQLException("Unsupported projection item: " + item);
+        }
+
+        return new ColWithAlias(col.text, alias.text);
+    }
+
+    // -------- tail parsing: [WHERE ...] [LIMIT/FETCH ...]
+    private static final class TailParts {
+        final String whereSql; // may be null
+        final String tailSql;  // may be ""
+        TailParts(String whereSql, String tailSql) {
+            this.whereSql = (whereSql == null || whereSql.isBlank()) ? null : whereSql.trim();
+            this.tailSql = (tailSql == null) ? "" : tailSql.trim();
+        }
+    }
 
     private static TailParts splitWhereAndTail(String tail) throws SQLException {
         if (tail == null) return new TailParts(null, "");
@@ -191,11 +282,23 @@ public final class RocksJdbcSql {
         }
     }
 
-    // -------- identifiers
+    // -------- identifiers (normalize + keep last segment only for tables)
     private static String normalizeTableRef(String ident) throws SQLException {
         String q = normalizeQualifiedIdent(ident);
-        int dot = q.lastIndexOf('.');
-        return (dot >= 0) ? q.substring(dot + 1) : q;
+        return baseName(q);
+    }
+
+    private static String baseName(String qualified) {
+        int dot = qualified.lastIndexOf('.');
+        return (dot >= 0) ? qualified.substring(dot + 1) : qualified;
+    }
+
+    private static String unquoteIdent(String ident) {
+        String s = ident.trim();
+        if (s.startsWith("\"") && s.endsWith("\"") && s.length() >= 2) return s.substring(1, s.length() - 1);
+        if (s.startsWith("`") && s.endsWith("`") && s.length() >= 2) return s.substring(1, s.length() - 1);
+        if (s.startsWith("[") && s.endsWith("]") && s.length() >= 2) return s.substring(1, s.length() - 1);
+        return s;
     }
 
     private static String normalizeQualifiedIdent(String ident) throws SQLException {
@@ -244,10 +347,8 @@ public final class RocksJdbcSql {
         return out.toString();
     }
 
-    // -------- keywords
-    private static boolean startsWithWord(String s, String word) {
-        return startsWithWordAt(s, 0, word);
-    }
+    // -------- keyword scanning / helpers
+    private static boolean startsWithWord(String s, String word) { return startsWithWordAt(s, 0, word); }
 
     private static boolean startsWithWordAt(String s, int pos, String word) {
         int n = s.length();
@@ -266,6 +367,127 @@ public final class RocksJdbcSql {
     private static int skipWord(String s, int pos, String word) throws SQLException {
         if (!startsWithWordAt(s, pos, word)) throw new SQLException("Expected keyword: " + word);
         return pos + word.length();
+    }
+
+    private static int skipWs(String s, int pos) {
+        int i = pos;
+        while (i < s.length() && Character.isWhitespace(s.charAt(i))) i++;
+        return i;
+    }
+
+    private static int findKeywordOutsideQuotes(String s, int start, String word) {
+        boolean inSingle = false;
+        boolean inDouble = false;
+        boolean inBacktick = false;
+        boolean inBracket = false;
+
+        for (int i = start; i < s.length(); i++) {
+            char c = s.charAt(i);
+
+            if (!inDouble && !inBacktick && !inBracket && c == '\'') {
+                if (inSingle && i + 1 < s.length() && s.charAt(i + 1) == '\'') { i++; continue; }
+                inSingle = !inSingle; continue;
+            }
+            if (!inSingle && !inBacktick && !inBracket && c == '"') { inDouble = !inDouble; continue; }
+            if (!inSingle && !inDouble && !inBracket && c == '`') { inBacktick = !inBacktick; continue; }
+            if (!inSingle && !inDouble && !inBacktick) {
+                if (c == '[') { inBracket = true; continue; }
+                if (c == ']') { inBracket = false; continue; }
+            }
+
+            if (inSingle || inDouble || inBacktick || inBracket) continue;
+
+            if (startsWithWordAt(s, i, word)) return i;
+        }
+        return -1;
+    }
+
+    // -------- CSV splitting for projection list
+    private static List<String> splitCsvOutsideQuotes(String s) {
+        List<String> out = new ArrayList<>();
+        boolean inSingle = false, inDouble = false, inBacktick = false, inBracket = false;
+        int last = 0;
+
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+
+            if (!inDouble && !inBacktick && !inBracket && c == '\'') {
+                if (inSingle && i + 1 < s.length() && s.charAt(i + 1) == '\'') { i++; continue; }
+                inSingle = !inSingle; continue;
+            }
+            if (!inSingle && !inBacktick && !inBracket && c == '"') { inDouble = !inDouble; continue; }
+            if (!inSingle && !inDouble && !inBracket && c == '`') { inBacktick = !inBacktick; continue; }
+            if (!inSingle && !inDouble && !inBacktick) {
+                if (c == '[') { inBracket = true; continue; }
+                if (c == ']') { inBracket = false; continue; }
+            }
+
+            if (inSingle || inDouble || inBacktick || inBracket) continue;
+
+            if (c == ',') {
+                out.add(s.substring(last, i));
+                last = i + 1;
+            }
+        }
+        out.add(s.substring(last));
+        return out;
+    }
+
+    // -------- reading identifier tokens
+    private record IdentTok(String text, int end) {}
+
+    private static IdentTok readQualifiedIdentToken(String s, int start) throws SQLException {
+        int i = skipWs(s, start);
+        if (i >= s.length()) throw new SQLException("Expected identifier");
+
+        StringBuilder out = new StringBuilder();
+        IdentTok seg = readSingleIdentToken(s, i);
+        out.append(seg.text);
+        i = seg.end;
+
+        while (true) {
+            i = skipWs(s, i);
+            if (i < s.length() && s.charAt(i) == '.') {
+                out.append('.');
+                i++;
+                IdentTok seg2 = readSingleIdentToken(s, i);
+                out.append(seg2.text);
+                i = seg2.end;
+            } else break;
+        }
+        return new IdentTok(out.toString(), i);
+    }
+
+    private static IdentTok readSingleIdentToken(String s, int start) throws SQLException {
+        int i = skipWs(s, start);
+        if (i >= s.length()) throw new SQLException("Expected identifier");
+
+        char c = s.charAt(i);
+
+        if (c == '"') {
+            int j = s.indexOf('"', i + 1);
+            if (j < 0) throw new SQLException("Unterminated quoted identifier");
+            return new IdentTok(s.substring(i, j + 1), j + 1);
+        }
+        if (c == '`') {
+            int j = s.indexOf('`', i + 1);
+            if (j < 0) throw new SQLException("Unterminated quoted identifier");
+            return new IdentTok(s.substring(i, j + 1), j + 1);
+        }
+        if (c == '[') {
+            int j = s.indexOf(']', i + 1);
+            if (j < 0) throw new SQLException("Unterminated bracket identifier");
+            return new IdentTok(s.substring(i, j + 1), j + 1);
+        }
+
+        int j = i;
+        while (j < s.length()) {
+            char x = s.charAt(j);
+            if (Character.isLetterOrDigit(x) || x == '_') j++;
+            else break;
+        }
+        if (j == i) throw new SQLException("Bad identifier token");
+        return new IdentTok(s.substring(i, j), j);
     }
 
     // -------- normalization
