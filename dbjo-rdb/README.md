@@ -176,11 +176,7 @@ Create a new **Data Source** using the driver above and set the JDBC URL.
 
 Example URL format:
 
-```text
-jdbc:rocksdb:/absolute/path/to/rocksdb
-```
-
-If your driver supports passing the generated catalog as a parameter, use:
+The driver must support passing the generated catalog as a parameter, use:
 
 ```text
 jdbc:rocksdb:/absolute/path/to/rocksdb?catalog=org.github.dbjo.generated.model.rdb.jdbc.GeneratedRocksJdbcCatalog
