@@ -3,24 +3,22 @@ package org.github.dbjo.rdb.jdbc.catalog;
 import org.github.dbjo.criteria.Condition;
 import org.github.dbjo.criteria.PropertyTerm;
 
-import javax.sql.rowset.CachedRowSet;
-import javax.sql.rowset.RowSetProvider;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Types;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 
 /**
  * Default planner/executor runtime:
- *  - chooses access path via RocksJdbcPlanner
- *  - executes via scanTable/scanIndex* hooks
- *  - applies WHERE (AST evaluation) and projection and limit
+ *  - executes a RocksJdbcPlan via scanTable/scanIndex* hooks
+ *  - applies WHERE (AST evaluation), projection, and limit
  *  - (optional) validates WHERE via Criteria compiler (RocksJdbcWhereCompiler)
  *
  * Extend this and implement scanTable() and tableMeta().
  * Override scanIndex*() to actually use secondary indexes.
+ *
+ * NOTE: This class is intentionally portable: it does NOT use CachedRowSet or com.sun.rowset.
  */
 public abstract class AbstractRocksJdbcCatalog implements RocksJdbcCatalog {
 
@@ -73,25 +71,13 @@ public abstract class AbstractRocksJdbcCatalog implements RocksJdbcCatalog {
     private ResultSet executeListTables(RocksJdbcPlan.ListTables lt) throws SQLException {
         List<String> tables = new ArrayList<>(listTables());
         Integer lim = lt.limit();
-        if (lim != null && lim >= 0 && tables.size() > lim) {
-            tables = tables.subList(0, lim);
-        }
+        if (lim != null && lim >= 0 && tables.size() > lim) tables = tables.subList(0, lim);
 
-        CachedRowSet rs = RowSetProvider.newFactory().createCachedRowSet();
-        var md = new com.sun.rowset.RowSetMetaDataImpl();
-        md.setColumnCount(1);
-        md.setColumnName(1, "TABLE_NAME");
-        md.setColumnType(1, Types.VARCHAR);
-        rs.setMetaData(md);
+        List<String> cols = List.of("TABLE_NAME");
+        List<Map<String, Object>> rows = new ArrayList<>(tables.size());
+        for (String t : tables) rows.add(Map.of("TABLE_NAME", t));
 
-        for (String t : tables) {
-            rs.moveToInsertRow();
-            rs.updateString(1, t);
-            rs.insertRow();
-            rs.moveToCurrentRow();
-        }
-        rs.beforeFirst();
-        return rs;
+        return RocksJdbcResultSets.fromRows(cols, rows);
     }
 
     private ResultSet executeSelect(RocksJdbcPlan.Select sel) throws SQLException {
@@ -107,37 +93,24 @@ public abstract class AbstractRocksJdbcCatalog implements RocksJdbcCatalog {
         // Determine projection columns
         List<String> projCols = normalizeProjection(sel.projection(), meta);
 
-        Iterable<Map<String, Object>> rows = rowsForAccessPath(table, sel.accessPath());
+        Iterable<Map<String, Object>> rowsIt = rowsForAccessPath(table, sel.accessPath());
 
-        CachedRowSet rs = RowSetProvider.newFactory().createCachedRowSet();
-        var md = new com.sun.rowset.RowSetMetaDataImpl();
-        md.setColumnCount(projCols.size());
-        for (int i = 0; i < projCols.size(); i++) {
-            md.setColumnName(i + 1, projCols.get(i));
-            md.setColumnType(i + 1, Types.JAVA_OBJECT);
-        }
-        rs.setMetaData(md);
-
+        List<Map<String, Object>> out = new ArrayList<>();
         int outCount = 0;
         Integer lim = sel.limit();
 
-        for (Map<String, Object> row : rows) {
+        for (Map<String, Object> row : rowsIt) {
             if (whereAst != null && !eval(whereAst, row)) continue;
 
-            rs.moveToInsertRow();
-            for (int i = 0; i < projCols.size(); i++) {
-                Object v = getCol(row, projCols.get(i));
-                rs.updateObject(i + 1, v);
-            }
-            rs.insertRow();
-            rs.moveToCurrentRow();
+            LinkedHashMap<String, Object> projRow = new LinkedHashMap<>();
+            for (String c : projCols) projRow.put(c, getCol(row, c));
+            out.add(projRow);
 
             outCount++;
             if (lim != null && lim >= 0 && outCount >= lim) break;
         }
 
-        rs.beforeFirst();
-        return rs;
+        return RocksJdbcResultSets.fromRows(projCols, out);
     }
 
     private ResultSet executeCount(RocksJdbcPlan.Count cnt) throws SQLException {
@@ -146,29 +119,20 @@ public abstract class AbstractRocksJdbcCatalog implements RocksJdbcCatalog {
 
         tryCompileCriteriaWhere(table, cnt.whereSql());
 
-        Iterable<Map<String, Object>> rows = rowsForAccessPath(table, cnt.accessPath());
+        Iterable<Map<String, Object>> rowsIt = rowsForAccessPath(table, cnt.accessPath());
 
         long n = 0;
         Integer lim = cnt.limit();
-        for (Map<String, Object> row : rows) {
+        for (Map<String, Object> row : rowsIt) {
             if (whereAst != null && !eval(whereAst, row)) continue;
             n++;
             if (lim != null && lim >= 0 && n >= lim) break;
         }
 
-        CachedRowSet rs = RowSetProvider.newFactory().createCachedRowSet();
-        var md = new com.sun.rowset.RowSetMetaDataImpl();
-        md.setColumnCount(1);
-        md.setColumnName(1, "COUNT");
-        md.setColumnType(1, Types.BIGINT);
-        rs.setMetaData(md);
-
-        rs.moveToInsertRow();
-        rs.updateLong(1, n);
-        rs.insertRow();
-        rs.moveToCurrentRow();
-        rs.beforeFirst();
-        return rs;
+        return RocksJdbcResultSets.fromRows(
+                List.of("COUNT"),
+                List.of(Map.of("COUNT", n))
+        );
     }
 
     private Iterable<Map<String, Object>> rowsForAccessPath(String table, RocksJdbcPlan.AccessPath ap) throws SQLException {
@@ -181,15 +145,17 @@ public abstract class AbstractRocksJdbcCatalog implements RocksJdbcCatalog {
 
     private void tryCompileCriteriaWhere(String table, String whereSql) throws SQLException {
         if (whereSql == null || whereSql.isBlank()) return;
+
         Map<?, ?> terms = termsByColumnLowerUnchecked(table);
-        if (terms == null) return;
+        if (terms == null || terms.isEmpty()) return;
 
         // Compile for validation + to keep Criteria layer active (even if execution uses AST evaluation here)
         @SuppressWarnings({"rawtypes", "unchecked"})
         Map<String, PropertyTerm<java.io.Serializable, ? extends java.io.Serializable>> casted = (Map) terms;
 
         @SuppressWarnings({"rawtypes", "unchecked"})
-        Condition<java.io.Serializable> ignored = (Condition) RocksJdbcWhereCompiler.compile(whereSql, (Map) casted);
+        Condition<java.io.Serializable> ignored =
+                (Condition) RocksJdbcWhereCompiler.compile(whereSql, (Map) casted);
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
@@ -224,7 +190,7 @@ public abstract class AbstractRocksJdbcCatalog implements RocksJdbcCatalog {
 
     private static boolean eval(RocksJdbcWhere.Expr e, Map<String, Object> row) throws SQLException {
         if (e instanceof RocksJdbcWhere.And a) return eval(a.left(), row) && eval(a.right(), row);
-        if (e instanceof RocksJdbcWhere.Or o) return eval(o.left(), row) || eval(o.right(), row);
+        if (e instanceof RocksJdbcWhere.Or o)  return eval(o.left(), row) || eval(o.right(), row);
         if (e instanceof RocksJdbcWhere.Not n) return !eval(n.inner(), row);
 
         if (e instanceof RocksJdbcWhere.IsNull p) {
@@ -267,11 +233,9 @@ public abstract class AbstractRocksJdbcCatalog implements RocksJdbcCatalog {
         if (row == null) return null;
         String col = normalizeKey(colIdent);
 
-        // Fast path: exact key
         if (row.containsKey(colIdent)) return row.get(colIdent);
         if (row.containsKey(col)) return row.get(col);
 
-        // Case-insensitive scan
         for (Map.Entry<String, Object> e : row.entrySet()) {
             if (e.getKey() != null && e.getKey().equalsIgnoreCase(col)) return e.getValue();
         }
@@ -302,7 +266,6 @@ public abstract class AbstractRocksJdbcCatalog implements RocksJdbcCatalog {
         b = normalizeCompare(b);
         if (a == null || b == null) throw new SQLException("Cannot compare NULL");
 
-        // Numeric comparisons: coerce to BigDecimal
         if (a instanceof Number && b instanceof Number) {
             java.math.BigDecimal da = new java.math.BigDecimal(a.toString());
             java.math.BigDecimal db = new java.math.BigDecimal(b.toString());
@@ -313,12 +276,10 @@ public abstract class AbstractRocksJdbcCatalog implements RocksJdbcCatalog {
             return ((Comparable) a).compareTo(b);
         }
 
-        // Try timestamp/date comparisons if mixed types slipped through
         if (a instanceof java.util.Date && b instanceof java.util.Date) {
             return Long.compare(((java.util.Date) a).getTime(), ((java.util.Date) b).getTime());
         }
 
-        // Last resort: compare string forms
         return a.toString().compareTo(b.toString());
     }
 }
