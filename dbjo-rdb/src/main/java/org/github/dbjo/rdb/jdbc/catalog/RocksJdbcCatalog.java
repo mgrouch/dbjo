@@ -161,8 +161,6 @@ public interface RocksJdbcCatalog {
             Constructor<T> ctor = rc.getDeclaredConstructor(ptypes);
             ctor.setAccessible(true);
             return ctor.newInstance(args);
-        } catch (SQLException e) {
-            throw e;
         } catch (ReflectiveOperationException e) {
             throw new SQLException("Failed to construct record " + rc.getName() + " with values " + values.keySet(), e);
         }
