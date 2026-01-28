@@ -24,7 +24,11 @@
             <artifactId>dbjo-meta</artifactId>
             <version>${project.parent.version}</version>
         </dependency>
-
+        <dependency>
+            <groupId>org.github.dbjo</groupId>
+            <artifactId>dbjo-rdb</artifactId>
+            <version>${project.parent.version}</version>
+        </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
