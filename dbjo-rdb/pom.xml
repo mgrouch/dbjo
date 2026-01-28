@@ -101,12 +101,6 @@
             <version>${project.parent.version}</version>
         </dependency>
 
-        <dependency>
-            <groupId>com.sun.rowset</groupId>
-            <artifactId>rowset</artifactId>
-            <version>1.0.1</version>
-        </dependency>
-
     </dependencies>
 
     <build>
