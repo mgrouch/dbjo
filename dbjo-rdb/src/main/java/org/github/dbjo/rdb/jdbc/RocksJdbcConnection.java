@@ -1,17 +1,39 @@
 package org.github.dbjo.rdb.jdbc;
 
-import org.github.dbjo.rdb.jdbc.catalog.RocksJdbcCatalog;
-import org.github.dbjo.rdb.jdbc.catalog.RocksJdbcSql;
-import org.github.dbjo.rdb.jdbc.catalog.RocksJdbcStatement;
-import org.github.dbjo.rdb.jdbc.catalog.RocksJdbcTable;
-import org.github.dbjo.rdb.jdbc.catalog.RocksJdbcWhere;
+import org.github.dbjo.criteria.Condition;
+import org.github.dbjo.criteria.Conditions;
+import org.github.dbjo.criteria.Query;
+import org.github.dbjo.meta.entity.EntityMeta;
+import org.github.dbjo.rdb.DaoRegistry;
+import org.github.dbjo.rdb.IndexedRocksDao;
+import org.github.dbjo.rdb.RocksSessions;
+import org.github.dbjo.rdb.criteria.CriteriaSupport;
+import org.github.dbjo.rdb.jdbc.catalog.*;
 import org.rocksdb.*;
 
+import java.io.Serializable;
+import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.lang.reflect.RecordComponent;
 import java.sql.*;
 import java.util.*;
 import java.util.concurrent.Executor;
 
+/**
+ * Read-only RocksDB JDBC Connection.
+ *
+ * Supports:
+ *  - SHOW TABLES / LIST TABLES (driver-specific)
+ *  - SELECT <projection> FROM <table> [WHERE ...] [LIMIT n]
+ *  - SELECT COUNT(*) FROM <table> [WHERE ...]
+ *
+ * Fast path (index-aware):
+ *  - If catalog implements RocksJdbcCriteriaCatalog and this connection has sessions+registry,
+ *    we compile WHERE into dbjo criteria and call generated IndexedRocksDao.select(criteriaQuery).
+ *
+ * Fallback:
+ *  - Primary CF iterator scan + decode + (optional) CriteriaSupport.test(...)
+ */
 public final class RocksJdbcConnection implements Connection {
     private final String url;
     private final String dbPath;
@@ -24,13 +46,31 @@ public final class RocksJdbcConnection implements Connection {
     private final Map<String, ColumnFamilyHandle> cfByName;
 
     private final RocksJdbcCatalog catalog;
+
+    // Optional: enables index-aware DAO fast-path
+    private final RocksSessions sessions;   // nullable
+    private final DaoRegistry registry;     // nullable
+    private final Map<RocksJdbcTable, Object> daoCache = new HashMap<>();
+
+    // getters cache per table (column order getters)
     private final Map<RocksJdbcTable, MethodGetterCache> getterCache = new HashMap<>();
 
     private volatile boolean closed = false;
 
     private final DatabaseMetaData metaDataProxy;
 
-    static RocksJdbcConnection open(String url, String dbPath, RocksJdbcCatalog catalog) throws SQLException {
+    public static RocksJdbcConnection open(String url, String dbPath, RocksJdbcCatalog catalog) throws SQLException {
+        return open(url, dbPath, catalog, null, null);
+    }
+
+    /** Open connection with optional dbjo sessions+registry, enabling index-aware DAO fast-path for WHERE. */
+    public static RocksJdbcConnection open(
+            String url,
+            String dbPath,
+            RocksJdbcCatalog catalog,
+            RocksSessions sessions,
+            DaoRegistry registry
+    ) throws SQLException {
         Objects.requireNonNull(url, "url");
         Objects.requireNonNull(dbPath, "dbPath");
         Objects.requireNonNull(catalog, "catalog");
@@ -52,13 +92,15 @@ public final class RocksJdbcConnection implements Connection {
         if (cfs.isEmpty()) {
             desc.add(new ColumnFamilyDescriptor(RocksDB.DEFAULT_COLUMN_FAMILY, cfo));
         } else {
-            for (byte[] name : cfs) desc.add(new ColumnFamilyDescriptor(name, cfo));
+            for (byte[] name : cfs) {
+                desc.add(new ColumnFamilyDescriptor(name, cfo));
+            }
         }
 
         List<ColumnFamilyHandle> handles = new ArrayList<>(desc.size());
         try {
             RocksDB db = RocksDB.openReadOnly(dbo, dbPath, desc, handles);
-            return new RocksJdbcConnection(url, dbPath, db, dbo, cfo, handles, catalog);
+            return new RocksJdbcConnection(url, dbPath, db, dbo, cfo, handles, catalog, sessions, registry);
         } catch (RocksDBException e) {
             for (ColumnFamilyHandle h : handles) {
                 try { if (h != null) h.close(); } catch (Throwable ignored) {}
@@ -76,7 +118,9 @@ public final class RocksJdbcConnection implements Connection {
             DBOptions dbOptions,
             ColumnFamilyOptions cfOptions,
             List<ColumnFamilyHandle> handles,
-            RocksJdbcCatalog catalog
+            RocksJdbcCatalog catalog,
+            RocksSessions sessions,
+            DaoRegistry registry
     ) {
         this.url = url;
         this.dbPath = dbPath;
@@ -85,6 +129,8 @@ public final class RocksJdbcConnection implements Connection {
         this.cfOptions = cfOptions;
         this.handles = handles;
         this.catalog = catalog;
+        this.sessions = sessions;
+        this.registry = registry;
 
         this.cfByName = buildCfMap(handles);
 
@@ -106,161 +152,318 @@ public final class RocksJdbcConnection implements Connection {
         return h;
     }
 
-    public ResultSet runQuery(String sql, int statementMaxRows) throws SQLException {
+    /** Entry point for Statements. */
+    public ResultSet runQuery(String sql, int maxRowsFromStatement) throws SQLException {
         ensureOpen();
 
         RocksJdbcSql.Parsed p = RocksJdbcSql.parse(sql);
-        int effMaxRows = applyLimit(statementMaxRows, p.limit());
+
+        Integer parsedLimit = parsedLimit(p);
+        int effectiveSelectLimit = mergeLimits(parsedLimit, maxRowsFromStatement);
+        String whereSql = parsedWhereSql(p);
 
         return switch (p.kind()) {
-            case LIST_TABLES -> queryTables(effMaxRows);
-            case SELECT -> querySelect(p.tableName(), p.whereSql(), effMaxRows, p.projection());
-            case COUNT -> queryCount(p.tableName(), p.whereSql());
+            case LIST_TABLES -> queryTables(effectiveSelectLimit);
+            case COUNT -> queryCount(p.tableName(), whereSql);
+            case SELECT -> querySelect(
+                    p.tableName(),
+                    parsedProjection(p),     // may be null or empty => "*"
+                    whereSql,                // may be null/blank
+                    effectiveSelectLimit
+            );
         };
     }
 
-    private static int applyLimit(int stmtMaxRows, int sqlLimit) {
-        if (sqlLimit > 0) {
-            if (stmtMaxRows <= 0) return sqlLimit;
-            return Math.min(stmtMaxRows, sqlLimit);
-        }
-        return stmtMaxRows;
+    private static int mergeLimits(Integer parsedLimit, int stmtMaxRows) {
+        int a = (parsedLimit == null) ? Integer.MAX_VALUE : Math.max(0, parsedLimit);
+        int b = (stmtMaxRows <= 0) ? Integer.MAX_VALUE : stmtMaxRows;
+        long m = Math.min((long) a, (long) b);
+        return (m > Integer.MAX_VALUE) ? Integer.MAX_VALUE : (int) m;
     }
 
-    private ResultSet queryTables(int maxRows) throws SQLException {
+    private ResultSet queryTables(int limit) throws SQLException {
         String[] cols = { "table_name", "cf_name", "column_count" };
         int[] types = { Types.VARCHAR, Types.VARCHAR, Types.INTEGER };
 
         List<Object[]> rows = new ArrayList<>();
-        int n = 0;
+        int emitted = 0;
         for (RocksJdbcTable t : catalog.tables()) {
-            rows.add(new Object[]{ t.tableName(), t.cfName(), t.columnNames().length });
-            n++;
-            if (maxRows > 0 && n >= maxRows) break;
+            if (limit == 0) break;
+            rows.add(new Object[]{ t.tableName(), t.cfName(), t.columns().length });
+            emitted++;
+            if (emitted >= limit) break;
         }
         return RocksJdbcResultSets.of(cols, types, rows);
     }
 
     private ResultSet queryCount(String tableName, String whereSql) throws SQLException {
         RocksJdbcTable t = catalog.requireTable(tableName);
-        ColumnFamilyHandle cf = cfHandle(t.cfName());
 
-        String[] allColNames = t.columnNames();
-        RocksJdbcWhere.Predicate pred = RocksJdbcWhere.compile(whereSql, allColNames);
-
-        MethodGetterCache getters = getterCache.computeIfAbsent(t, MethodGetterCache::new);
-
-        long count = 0;
-        RocksIterator it = null;
-        try {
-            it = db.newIterator(cf);
-            it.seekToFirst();
-            while (it.isValid()) {
-                Object rowObj = t.decoder().decode(it.value());
-                if (pred.test(idx -> getters.get(rowObj, idx))) count++;
-                it.next();
+        long count;
+        if (whereSql != null && !whereSql.isBlank()) {
+            count = countWithFilter(t, whereSql);
+        } else {
+            ColumnFamilyHandle cf = cfHandle(t.cfName());
+            long c = 0;
+            try (RocksIterator it = db.newIterator(cf)) {
+                it.seekToFirst();
+                while (it.isValid()) {
+                    c++;
+                    it.next();
+                }
             }
-        } finally {
-            if (it != null) it.close();
+            count = c;
         }
 
         String[] cols = { "count" };
         int[] types = { Types.BIGINT };
-        return RocksJdbcResultSets.of(cols, types, java.util.Collections.singletonList(new Object[]{ count }));
+        return RocksJdbcResultSets.of(cols, types, Collections.singletonList(new Object[]{ count }));
     }
 
-    private ResultSet querySelect(String tableName, String whereSql, int maxRows, RocksJdbcSql.SelectedCol[] projection) throws SQLException {
-        RocksJdbcTable t = catalog.requireTable(tableName);
+    private long countWithFilter(RocksJdbcTable t, String whereSql) throws SQLException {
+        // 1) DAO fast path (index-aware), if available
+        CriteriaPlan<?> plan = buildCriteriaPlanIfPossible(t, whereSql, Integer.MAX_VALUE);
+        if (plan != null && plan.dao != null) {
+            @SuppressWarnings("unchecked")
+            List<Object> rows = (List<Object>) plan.dao.select((Query<?>) plan.criteriaQuery);
+            return rows.size();
+        }
+
+        // 2) fallback scan+decode+CriteriaSupport.test
+        if (plan == null) {
+            plan = buildCriteriaPlanFallback(t, whereSql, Integer.MAX_VALUE);
+        }
+        if (plan == null) throw new SQLException("Failed to compile WHERE for COUNT(*)");
+
         ColumnFamilyHandle cf = cfHandle(t.cfName());
+        long count = 0;
 
-        String[] allColNames = t.columnNames();
-        int[] allColTypes = t.columnSqlTypes();
-
-        // WHERE predicate always uses full-table column indexes
-        RocksJdbcWhere.Predicate pred = RocksJdbcWhere.compile(whereSql, allColNames);
-
-        MethodGetterCache getters = getterCache.computeIfAbsent(t, MethodGetterCache::new);
-
-        // Resolve projection to selected column indexes (or all)
-        final int[] selIdx;
-        final String[] outNames;
-        final int[] outTypes;
-
-        if (projection == null) {
-            selIdx = null; // means "all"
-            outNames = allColNames;
-            outTypes = allColTypes;
-        } else {
-            selIdx = new int[projection.length];
-            outNames = new String[projection.length];
-            outTypes = new int[projection.length];
-
-            for (int i = 0; i < projection.length; i++) {
-                String source = projection[i].sourceName();
-                int idx = resolveColumnIndex(allColNames, source);
-                selIdx[i] = idx;
-
-                outNames[i] = projection[i].label() != null && !projection[i].label().isBlank()
-                        ? projection[i].label()
-                        : allColNames[idx];
-
-                outTypes[i] = allColTypes[idx];
+        try (RocksIterator it = db.newIterator(cf)) {
+            it.seekToFirst();
+            while (it.isValid()) {
+                Object bean = t.decoder().decode(it.value());
+                if (CriteriaSupport.test(plan.criteriaQuery, (Serializable) bean)) {
+                    count++;
+                }
+                it.next();
             }
+        }
+        return count;
+    }
+
+    private ResultSet querySelect(
+            String tableName,
+            List<String> projection,
+            String whereSql,
+            int limit
+    ) throws SQLException {
+        RocksJdbcTable t = catalog.requireTable(tableName);
+
+        Projection proj = resolveProjection(t, projection);
+
+        // LIMIT 0 => empty immediately (and avoid Query.limit(0) which is illegal in your criteria Query builder)
+        if (limit == 0) {
+            return RocksJdbcResultSets.of(proj.outNames, proj.outTypes, List.of());
+        }
+
+        CriteriaPlan<?> plan = null;
+        if (whereSql != null && !whereSql.isBlank()) {
+            plan = buildCriteriaPlanIfPossible(t, whereSql, limit);
+            if (plan == null) plan = buildCriteriaPlanFallback(t, whereSql, limit);
+            if (plan == null) throw new SQLException("Failed to compile WHERE clause");
         }
 
         List<Object[]> rows = new ArrayList<>();
+
+        if (plan != null && plan.dao != null) {
+            emitFromDao(t, proj, plan, rows, limit);
+        } else {
+            emitFromPrimaryScan(t, proj, plan, rows, limit);
+        }
+
+        return RocksJdbcResultSets.of(proj.outNames, proj.outTypes, rows);
+    }
+
+    private void emitFromDao(RocksJdbcTable t, Projection proj, CriteriaPlan<?> plan, List<Object[]> out, int limit) throws SQLException {
+        @SuppressWarnings("unchecked")
+        List<Object> beans = (List<Object>) ((IndexedRocksDao<?, ?>) plan.dao).select((Query<?>) plan.criteriaQuery);
+
+        MethodGetterCache getters = getterCache.computeIfAbsent(t, MethodGetterCache::new);
+
+        int emitted = 0;
+        for (Object bean : beans) {
+            Object[] full = new Object[t.getterNames().length];
+            getters.fill(bean, full);
+
+            out.add(projectRow(full, proj));
+            emitted++;
+            if (emitted >= limit) break;
+        }
+    }
+
+    private void emitFromPrimaryScan(RocksJdbcTable t, Projection proj, CriteriaPlan<?> plan, List<Object[]> out, int limit) throws SQLException {
+        ColumnFamilyHandle cf = cfHandle(t.cfName());
+        MethodGetterCache getters = getterCache.computeIfAbsent(t, MethodGetterCache::new);
+
         int emitted = 0;
 
-        RocksIterator it = null;
-        try {
-            it = db.newIterator(cf);
+        try (RocksIterator it = db.newIterator(cf)) {
             it.seekToFirst();
-
             while (it.isValid()) {
-                Object rowObj = t.decoder().decode(it.value());
+                Object bean = t.decoder().decode(it.value());
 
-                if (pred.test(idx -> getters.get(rowObj, idx))) {
-                    Object[] out;
-                    if (selIdx == null) {
-                        out = new Object[allColNames.length];
-                        getters.fill(rowObj, out);
-                    } else {
-                        out = new Object[selIdx.length];
-                        for (int k = 0; k < selIdx.length; k++) {
-                            out[k] = getters.get(rowObj, selIdx[k]);
-                        }
-                    }
-                    rows.add(out);
+                if (plan == null || CriteriaSupport.test(plan.criteriaQuery, (Serializable) bean)) {
+                    Object[] full = new Object[t.getterNames().length];
+                    getters.fill(bean, full);
 
+                    out.add(projectRow(full, proj));
                     emitted++;
-                    if (maxRows > 0 && emitted >= maxRows) break;
+                    if (emitted >= limit) break;
                 }
-
                 it.next();
             }
-        } finally {
-            if (it != null) it.close();
         }
-
-        return RocksJdbcResultSets.of(outNames, outTypes, rows);
     }
 
-    private static int resolveColumnIndex(String[] allColNames, String col) throws SQLException {
-        if (col == null) throw new SQLException("Bad projection column: null");
-        String want = col.trim();
-        if (want.isEmpty()) throw new SQLException("Bad projection column: empty");
+    private static Object[] projectRow(Object[] fullRowInTableOrder, Projection proj) {
+        if (proj.identity) return fullRowInTableOrder;
 
-        for (int i = 0; i < allColNames.length; i++) {
-            if (allColNames[i] != null && allColNames[i].equalsIgnoreCase(want)) return i;
+        Object[] out = new Object[proj.indices.length];
+        for (int i = 0; i < proj.indices.length; i++) {
+            out[i] = fullRowInTableOrder[proj.indices[i]];
         }
-        throw new SQLException("Unknown column in projection: " + col);
+        return out;
     }
 
-    private void ensureOpen() throws SQLException {
-        if (closed) throw new SQLException("Connection is closed");
+    private Projection resolveProjection(RocksJdbcTable t, List<String> projection) throws SQLException {
+        RocksJdbcColumn[] cols = t.columns();
+
+        // If null/empty => "*"
+        if (projection == null || projection.isEmpty()) {
+            String[] outNames = new String[cols.length];
+            int[] outTypes = new int[cols.length];
+            for (int i = 0; i < cols.length; i++) {
+                outNames[i] = colName(cols[i]);
+                outTypes[i] = colType(cols[i]);
+            }
+            return new Projection(true, range0(cols.length), outNames, outTypes);
+        }
+
+        // Build lookup: lower-name -> index in table columns
+        Map<String, Integer> byLower = new HashMap<>();
+        for (int i = 0; i < cols.length; i++) {
+            byLower.put(colName(cols[i]).toLowerCase(Locale.ROOT), i);
+        }
+
+        int[] idx = new int[projection.size()];
+        String[] outNames = new String[projection.size()];
+        int[] outTypes = new int[projection.size()];
+
+        for (int i = 0; i < projection.size(); i++) {
+            String raw = projection.get(i);
+            if (raw == null || raw.isBlank()) throw new SQLException("Empty projection column");
+            String key = stripQuotes(raw).toLowerCase(Locale.ROOT);
+
+            Integer ci = byLower.get(key);
+            if (ci == null) {
+                throw new SQLException("Unknown column in projection: " + raw + " (table=" + t.tableName() + ")");
+            }
+            idx[i] = ci;
+            outNames[i] = colName(cols[ci]);
+            outTypes[i] = colType(cols[ci]);
+        }
+
+        boolean identity = idx.length == cols.length;
+        if (identity) {
+            for (int i = 0; i < idx.length; i++) {
+                if (idx[i] != i) { identity = false; break; }
+            }
+        }
+
+        return new Projection(identity, idx, outNames, outTypes);
+    }
+
+    private static String stripQuotes(String s) {
+        String t = s.trim();
+        if (t.length() >= 2) {
+            if ((t.startsWith("\"") && t.endsWith("\"")) || (t.startsWith("`") && t.endsWith("`"))) {
+                return t.substring(1, t.length() - 1);
+            }
+        }
+        return t;
+    }
+
+    private static int[] range0(int n) {
+        int[] r = new int[n];
+        for (int i = 0; i < n; i++) r[i] = i;
+        return r;
+    }
+
+    // --- WHERE -> Criteria compilation + optional DAO instantiation ---
+
+    private CriteriaPlan<?> buildCriteriaPlanIfPossible(RocksJdbcTable t, String whereSql, int limit) throws SQLException {
+        if (!(catalog instanceof RocksJdbcCriteriaCatalog cc)) return null;
+        RocksJdbcCriteriaBinding<?> b = cc.bindingFor(t.tableName());
+        if (b == null) return null;
+
+        @SuppressWarnings("unchecked")
+        CriteriaPlan<?> plan = compileWhereUsingTerms((RocksJdbcCriteriaBinding<? extends Serializable>) b, whereSql, limit);
+        if (plan == null) return null;
+
+        // Instantiate generated DAO if possible (index-aware)
+        if (sessions != null && registry != null && b.daoClass() != null) {
+            Object dao = daoCache.computeIfAbsent(t, __ -> {
+                try {
+                    return b.daoClass().getConstructor(RocksSessions.class, DaoRegistry.class)
+                            .newInstance(sessions, registry);
+                } catch (Throwable ex) {
+                    return null;
+                }
+            });
+            plan.dao = (dao instanceof IndexedRocksDao<?, ?>) ? (IndexedRocksDao<?, ?>) dao : null;
+        }
+
+        return plan;
+    }
+
+    private CriteriaPlan<?> buildCriteriaPlanFallback(RocksJdbcTable t, String whereSql, int limit) throws SQLException {
+        if (catalog instanceof RocksJdbcCriteriaCatalog cc) {
+            RocksJdbcCriteriaBinding<?> b = cc.bindingFor(t.tableName());
+            if (b != null) {
+                @SuppressWarnings("unchecked")
+                CriteriaPlan<?> plan = compileWhereUsingTerms((RocksJdbcCriteriaBinding<? extends Serializable>) b, whereSql, limit);
+                if (plan != null) return plan;
+            }
+        }
+        throw new SQLException("WHERE is not supported without generated criteria bindings for table: " + t.tableName());
+    }
+
+    private static <B extends Serializable> CriteriaPlan<B> compileWhereUsingTerms(
+            RocksJdbcCriteriaBinding<B> binding,
+            String whereSql,
+            int limit
+    ) throws SQLException {
+        EntityMeta<B> meta = binding.meta();
+        if (meta == null) return null;
+
+        Condition<B> cond = RocksJdbcCriteriaCompiler.compile(whereSql, binding.termsByColumnLower());
+        if (cond == null) cond = Conditions.trueCondition();
+
+        Query.Builder<B> qb = Query.from(meta).where(cond);
+        if (limit > 0 && limit < Integer.MAX_VALUE) {
+            qb.limit(limit);
+        }
+        return new CriteriaPlan<>(qb.build());
+    }
+
+    private static final class CriteriaPlan<B extends Serializable> {
+        final Query<B> criteriaQuery;
+        IndexedRocksDao<?, ?> dao; // optional
+        CriteriaPlan(Query<B> q) { this.criteriaQuery = q; }
     }
 
     // --- DatabaseMetaData proxy handler ---
+
     private Object handleMetaCall(String name, Object[] args) throws SQLException {
         return switch (name) {
             case "getURL" -> url;
@@ -313,18 +516,19 @@ public final class RocksJdbcConnection implements Connection {
 
     private ResultSet metaGetColumns(Object[] args) throws SQLException {
         String tablePattern = (args != null && args.length >= 3) ? (String) args[2] : null;
+        String colPattern   = (args != null && args.length >= 4) ? (String) args[3] : null;
 
         String[] cols = {
                 "TABLE_CAT", "TABLE_SCHEM", "TABLE_NAME",
                 "COLUMN_NAME", "DATA_TYPE", "TYPE_NAME",
                 "COLUMN_SIZE", "DECIMAL_DIGITS", "NULLABLE",
-                "ORDINAL_POSITION"
+                "ORDINAL_POSITION", "IS_AUTOINCREMENT"
         };
         int[] types = {
                 Types.VARCHAR, Types.VARCHAR, Types.VARCHAR,
                 Types.VARCHAR, Types.INTEGER, Types.VARCHAR,
                 Types.INTEGER, Types.INTEGER, Types.INTEGER,
-                Types.INTEGER
+                Types.INTEGER, Types.VARCHAR
         };
 
         List<Object[]> rows = new ArrayList<>();
@@ -332,27 +536,38 @@ public final class RocksJdbcConnection implements Connection {
         for (RocksJdbcTable t : catalog.tables()) {
             if (tablePattern != null && !tablePattern.isBlank()) {
                 boolean match = t.tableName().equalsIgnoreCase(tablePattern);
-                List<String> aliases = t.names();
-                if (!match && aliases != null) {
-                    match = aliases.stream().anyMatch(n -> n != null && n.equalsIgnoreCase(tablePattern));
+                if (!match) {
+                    // names() in your codebase is a List<String>
+                    match = t.names().stream().anyMatch(n -> n.equalsIgnoreCase(tablePattern));
                 }
                 if (!match) continue;
             }
 
-            String[] cn = t.columnNames();
-            int[] ct = t.columnSqlTypes();
+            for (RocksJdbcColumn c : t.columns()) {
+                String cn = colName(c);
+                if (colPattern != null && !colPattern.isBlank()) {
+                    if (!cn.equalsIgnoreCase(colPattern)) continue;
+                }
 
-            for (int i = 0; i < cn.length; i++) {
                 rows.add(new Object[]{
                         null, null, t.tableName(),
-                        cn[i], ct[i], null,
-                        null, null, ResultSetMetaData.columnNullable,
-                        i + 1
+                        cn,
+                        colType(c),
+                        colTypeName(c),
+                        colSize(c),
+                        colScale(c),
+                        colNullable(c),
+                        colOrdinal(c),
+                        colAutoInc(c)
                 });
             }
         }
 
         return RocksJdbcResultSets.of(cols, types, rows);
+    }
+
+    private void ensureOpen() throws SQLException {
+        if (closed) throw new SQLException("Connection is closed");
     }
 
     private static Map<String, ColumnFamilyHandle> buildCfMap(List<ColumnFamilyHandle> handles) {
@@ -492,20 +707,124 @@ public final class RocksJdbcConnection implements Connection {
             }
         }
 
-        Object get(Object rowObj, int colIndex) throws SQLException {
-            try {
-                return methods[colIndex].invoke(rowObj);
-            } catch (Throwable e) {
-                throw new SQLException("Failed to read getter at index " + colIndex, e);
-            }
-        }
-
         void fill(Object rowObj, Object[] out) throws SQLException {
             try {
-                for (int i = 0; i < methods.length; i++) out[i] = methods[i].invoke(rowObj);
+                for (int i = 0; i < methods.length; i++) {
+                    out[i] = methods[i].invoke(rowObj);
+                }
             } catch (Throwable e) {
                 throw new SQLException("Failed to read row getters", e);
             }
         }
+    }
+
+    private record Projection(boolean identity, int[] indices, String[] outNames, int[] outTypes) {}
+
+    // ---------------------------------------------------------------------
+    // Parsed / Column reflection (stabilizes against record component renames)
+    // ---------------------------------------------------------------------
+
+    private static String parsedWhereSql(RocksJdbcSql.Parsed p) {
+        // your Parsed likely has whereSql()/whereClause()/where()
+        return asString(readAny(p, "whereSql", "whereClause", "where", "predicate", "wherePart"));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<String> parsedProjection(RocksJdbcSql.Parsed p) {
+        Object v = readAny(p, "projection", "columns", "selectColumns");
+        if (v == null) return null;
+        if (v instanceof List<?> l) return (List<String>) l;
+        return null;
+    }
+
+    private static Integer parsedLimit(RocksJdbcSql.Parsed p) {
+        Object v = readAny(p, "limit", "limitRows", "rowLimit");
+        if (v instanceof Integer i) return i;
+        if (v instanceof Number n) return n.intValue();
+        return null;
+    }
+
+    private static String colName(RocksJdbcColumn c) {
+        return or(asString(readAny(c, "columnName", "name", "colName", "column")), "");
+    }
+
+    private static int colType(RocksJdbcColumn c) {
+        Integer v = asInt(readAny(c, "dataType", "sqlType", "jdbcType", "type"));
+        return (v == null) ? Types.VARCHAR : v;
+    }
+
+    private static String colTypeName(RocksJdbcColumn c) {
+        return asString(readAny(c, "typeName", "sqlTypeName", "jdbcTypeName"));
+    }
+
+    private static int colSize(RocksJdbcColumn c) {
+        Integer v = asInt(readAny(c, "columnSize", "size", "precision"));
+        return (v == null) ? 0 : v;
+    }
+
+    private static int colScale(RocksJdbcColumn c) {
+        Integer v = asInt(readAny(c, "decimalDigits", "scale"));
+        return (v == null) ? 0 : v;
+    }
+
+    private static int colNullable(RocksJdbcColumn c) {
+        Integer v = asInt(readAny(c, "nullable", "nullability"));
+        return (v == null) ? ResultSetMetaData.columnNullableUnknown : v;
+    }
+
+    private static int colOrdinal(RocksJdbcColumn c) {
+        Integer v = asInt(readAny(c, "ordinalPosition", "ordinal", "position"));
+        return (v == null) ? 0 : v;
+    }
+
+    private static String colAutoInc(RocksJdbcColumn c) {
+        String v = asString(readAny(c, "isAutoincrement", "autoIncrement", "isAutoIncrement"));
+        return (v == null) ? "" : v;
+    }
+
+    private static Object readAny(Object obj, String... names) {
+        if (obj == null || names == null) return null;
+
+        Class<?> cls = obj.getClass();
+
+        // 1) exact public no-arg methods by name
+        for (String n : names) {
+            try {
+                Method m = cls.getMethod(n);
+                return m.invoke(obj);
+            } catch (Throwable ignored) {}
+        }
+
+        // 2) record component accessors (case-insensitive)
+        try {
+            if (cls.isRecord()) {
+                RecordComponent[] rcs = cls.getRecordComponents();
+                for (String n : names) {
+                    for (RecordComponent rc : rcs) {
+                        if (rc.getName().equalsIgnoreCase(n)) {
+                            Method acc = rc.getAccessor();
+                            return acc.invoke(obj);
+                        }
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+
+        return null;
+    }
+
+    private static String asString(Object o) {
+        return (o == null) ? null : String.valueOf(o);
+    }
+
+    private static Integer asInt(Object o) {
+        if (o == null) return null;
+        if (o instanceof Integer i) return i;
+        if (o instanceof Number n) return n.intValue();
+        return null;
+    }
+
+    private static String or(String s, String dflt) {
+        return (s == null) ? dflt : s;
     }
 }
