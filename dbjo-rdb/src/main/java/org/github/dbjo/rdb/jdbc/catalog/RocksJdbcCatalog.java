@@ -158,8 +158,7 @@ public interface RocksJdbcCatalog {
                 args[i] = coerceForParam(ptypes[i], v);
             }
 
-            @SuppressWarnings("unchecked")
-            Constructor<T> ctor = (Constructor<T>) rc.getDeclaredConstructor(ptypes);
+            Constructor<T> ctor = rc.getDeclaredConstructor(ptypes);
             ctor.setAccessible(true);
             return ctor.newInstance(args);
         } catch (SQLException e) {
