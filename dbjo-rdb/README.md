@@ -129,6 +129,72 @@ RocksDB uses native resources heavily. DBJO code in this module generally assume
 * try-with-resources wherever possible
 * avoid holding iterators open across long application-level operations
 
+## IntelliJ / DataGrip usage (read-only)
 
+This project includes a tiny read-only JDBC driver that lets IntelliJ/DataGrip browse RocksDB “tables”
+(backed by column families) and run simple queries like:
 
+- `select * from tables`
+- `select * from <table_name>`
+- `select count(*) from <table_name>`
+
+### 1) Build the driver and the generated catalog
+
+From repo root:
+
+```bash
+mvn -pl dbjo-rdb,dbjo-sim-model -am clean package
+````
+
+You should get:
+
+* `dbjo-rdb/target/dbjo-rdb-*.jar` (driver/runtime)
+* `dbjo-sim-model/target/dbjo-sim-model-*.jar` (contains `GeneratedRocksJdbcCatalog`)
+
+### 2) Register the driver in IntelliJ
+
+1. Open **View → Tool Windows → Database**
+
+2. Click **+ → Data Source → Driver** (or “Add Driver…”)
+
+3. Add these JARs to the driver classpath (**Driver files / Libraries**):
+
+    * `dbjo-rdb-*.jar`
+    * `dbjo-sim-model-*.jar`
+    * `rocksdbjni` (if not already on the classpath)
+    * protobuf runtime + your proto-mapper module (if separate)
+
+4. Set **Driver class** to:
+
+```text
+org.github.dbjo.rdb.jdbc.RocksJdbcDriver
+```
+
+### 3) Create a RocksDB data source
+
+Create a new **Data Source** using the driver above and set the JDBC URL.
+
+Example URL format:
+
+```text
+jdbc:rocksdb:/absolute/path/to/rocksdb
+```
+
+If your driver supports passing the generated catalog as a parameter, use:
+
+```text
+jdbc:rocksdb:/absolute/path/to/rocksdb?catalog=org.github.dbjo.generated.model.rdb.jdbc.GeneratedRocksJdbcCatalog
+```
+
+Then click **Test Connection**.
+
+### 4) Querying
+
+Open a query console for the data source and run:
+
+```sql
+select * from tables;
+select * from client;
+select count(*) from client;
+```
 
