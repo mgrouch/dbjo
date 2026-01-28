@@ -158,7 +158,7 @@ public abstract class AbstractRocksJdbcCatalog implements RocksJdbcCatalog {
                 (Condition) RocksJdbcWhereCompiler.compile(whereSql, (Map) casted);
     }
 
-    @SuppressWarnings({"rawtypes", "unchecked"})
+    @SuppressWarnings({"rawtypes"})
     private Map<?, ?> termsByColumnLowerUnchecked(String table) throws SQLException {
         return (Map) termsByColumnLower(table);
     }
@@ -196,7 +196,7 @@ public abstract class AbstractRocksJdbcCatalog implements RocksJdbcCatalog {
         if (e instanceof RocksJdbcWhere.IsNull p) {
             Object v = getCol(row, p.col());
             boolean isNull = (v == null);
-            return p.not() ? !isNull : isNull;
+            return p.not() != isNull;
         }
         if (e instanceof RocksJdbcWhere.Between p) {
             Object v = getCol(row, p.col());
