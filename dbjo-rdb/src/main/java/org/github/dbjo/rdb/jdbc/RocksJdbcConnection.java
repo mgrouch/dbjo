@@ -79,7 +79,7 @@ public final class RocksJdbcConnection implements Connection {
         return RocksJdbcExecutor.execute(this, sql, maxRows);
     }
 
-    // ---------------- Connection ----------------
+    // Connection
 
     @Override
     public Statement createStatement() throws SQLException {

@@ -49,7 +49,7 @@ public final class RocksJdbcPlanner {
             if (k > bestEqPrefix) { bestEqPrefix = k; best = idx; }
         }
 
-        if (best != null && bestEqPrefix > 0) {
+        if (best != null) {
             List<String> idxCols = best.columns();
             List<Serializable> prefix = new ArrayList<>();
             for (int i = 0; i < bestEqPrefix; i++) prefix.add(eq.get(normCol(idxCols.get(i))));

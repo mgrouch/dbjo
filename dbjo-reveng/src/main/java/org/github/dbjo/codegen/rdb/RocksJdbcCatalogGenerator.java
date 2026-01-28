@@ -291,7 +291,7 @@ public final class RocksJdbcCatalogGenerator {
         return idxCols.equals(pkColsUpper);
     }
 
-    // --- reflection helpers to tolerate different Col models ---
+    // reflection helpers to tolerate different Col models
 
     private static int intVal(Object target, int def, String... methodNames) {
         Object v = invoke0(target, methodNames);

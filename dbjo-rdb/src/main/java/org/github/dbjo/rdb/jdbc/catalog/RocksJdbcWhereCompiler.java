@@ -53,7 +53,7 @@ public final class RocksJdbcWhereCompiler {
         return c == null ? Conditions.trueCondition() : c;
     }
 
-    // ---------------- tokenizer ----------------
+    // tokenizer
 
     private enum TokKind { IDENT, STRING, NUMBER, OP, LP, RP, COMMA, EOF, KW }
 
@@ -178,7 +178,7 @@ public final class RocksJdbcWhereCompiler {
         return t;
     }
 
-    // ---------------- parser ----------------
+    // parser
 
     private static final class Parser<B extends Serializable> {
         private final List<Tok> t;

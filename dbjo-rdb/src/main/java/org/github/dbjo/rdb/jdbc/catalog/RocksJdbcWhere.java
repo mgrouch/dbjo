@@ -11,7 +11,7 @@ import java.util.*;
 public final class RocksJdbcWhere {
     private RocksJdbcWhere() {}
 
-    // -------- AST --------
+    // AST
 
     public interface Expr {}
 
@@ -37,7 +37,7 @@ public final class RocksJdbcWhere {
         return e;
     }
 
-    // ---------------- tokenizer ----------------
+    // tokenizer
 
     private enum TokKind { IDENT, STRING, NUMBER, OP, LP, RP, COMMA, EOF, KW }
     private record Tok(TokKind k, String s) {}
@@ -142,7 +142,7 @@ public final class RocksJdbcWhere {
         return t;
     }
 
-    // ---------------- parser ----------------
+    // parser
 
     private static final class Parser {
         private final List<Tok> t;
