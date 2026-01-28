@@ -4,27 +4,6 @@ import java.sql.SQLException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/**
- * Small SQL parser for the read-only Rocks JDBC driver.
- *
- * Supported:
- *  - select * from tables [limit N | fetch first N rows only]
- *  - select * from <table> [where <expr>] [limit N | fetch first N rows only]
- *  - select top N * from <table> [where <expr>] [limit M]   (effective limit = min(top, limit) if both)
- *  - select count(*) from <table> [where <expr>]
- *  - select count(1) from <table> [where <expr>]
- *
- * Notes:
- *  - Trailing semicolons are allowed.
- *  - Identifiers may be qualified and/or quoted:
- *      client
- *      schema.client
- *      "Client"
- *      "schema"."Client"
- *      [Client]
- *      `Client`
- *  - Returned tableName is the LAST segment only (schema.table -> table).
- */
 public final class RocksJdbcSql {
     private RocksJdbcSql() {}
 
@@ -33,15 +12,13 @@ public final class RocksJdbcSql {
     /** limit==0 means "no SQL limit" */
     public record Parsed(Kind kind, String tableName, String whereSql, int limit) {}
 
-    // segment = "x" | `x` | [x] | bareword; allow qualified seg(.seg)*
     private static final String SEG =
-            "(\"[^\"]+\"|`[^`]+`|\\[[^\\]]+\\]|[A-Za-z_][A-Za-z0-9_]*)";
+            "(\"[^\"]+\"|`[^`]+`|\\[[^]]+]|[A-Za-z_]\\w*)";
     private static final String QUAL_IDENT =
             "(" + SEG + "(\\." + SEG + ")*)";
 
-    // allow quoted "tables" too so tooling can query it
     private static final String TABLES_IDENT =
-            "(tables|\"tables\"|`tables`|\\[tables\\])";
+            "(tables|\"tables\"|`tables`|\\[tables])";
 
     private static final Pattern P_LIST_TABLES =
             Pattern.compile("^\\s*select\\s+\\*\\s+from\\s+" + TABLES_IDENT + "\\s*(?<tail>.*)$",
@@ -52,7 +29,7 @@ public final class RocksJdbcSql {
                     Pattern.CASE_INSENSITIVE);
 
     private static final Pattern P_COUNT =
-            Pattern.compile("^\\s*select\\s+count\\s*\\(\\s*(?<arg>\\*|1)\\s*\\)\\s+from\\s+(?<table>" + QUAL_IDENT + ")\\s*(?<tail>.*)$",
+            Pattern.compile("^\\s*select\\s+count\\s*\\(\\s*(?<arg>[*1])\\s*\\)\\s+from\\s+(?<table>" + QUAL_IDENT + ")\\s*(?<tail>.*)$",
                     Pattern.CASE_INSENSITIVE);
 
     private static final Pattern P_SELECT_ALL =
@@ -89,20 +66,19 @@ public final class RocksJdbcSql {
             Matcher m = P_LIST_TABLES.matcher(s);
             if (m.matches()) {
                 TailParts tp = splitWhereAndTail(m.group("tail"));
-                // we don't support WHERE for pseudo-table
                 if (tp.whereSql != null) throw new SQLException("WHERE not supported for pseudo-table TABLES");
                 int lim = parseLimitFromTail(tp.tailSql);
                 return new Parsed(Kind.LIST_TABLES, null, null, lim);
             }
         }
 
-        // SELECT COUNT(*) / COUNT(1) FROM table ...
+        // SELECT COUNT(*) FROM table ...
         {
             Matcher m = P_COUNT.matcher(s);
             if (m.matches()) {
                 String table = normalizeTableRef(m.group("table"));
                 TailParts tp = splitWhereAndTail(m.group("tail"));
-                int lim = parseLimitFromTail(tp.tailSql); // accepted (ignored by execution)
+                int lim = parseLimitFromTail(tp.tailSql);
                 return new Parsed(Kind.COUNT, table, tp.whereSql, lim);
             }
         }
@@ -121,15 +97,16 @@ public final class RocksJdbcSql {
         throw new SQLException("Unsupported SQL: " + sql);
     }
 
-    // -------- tail parsing: [WHERE ...] [LIMIT/FETCH ...]
-    private static final class TailParts {
-        final String whereSql; // may be null
-        final String tailSql;  // may be ""
-        TailParts(String whereSql, String tailSql) {
-            this.whereSql = (whereSql == null || whereSql.isBlank()) ? null : whereSql.trim();
-            this.tailSql = (tailSql == null) ? "" : tailSql.trim();
+    /**
+     * @param whereSql may be null
+     * @param tailSql  may be ""
+     */ // -------- tail parsing: [WHERE ...] [LIMIT/FETCH ...]
+        private record TailParts(String whereSql, String tailSql) {
+            private TailParts(String whereSql, String tailSql) {
+                this.whereSql = (whereSql == null || whereSql.isBlank()) ? null : whereSql.trim();
+                this.tailSql = (tailSql == null) ? "" : tailSql.trim();
+            }
         }
-    }
 
     private static TailParts splitWhereAndTail(String tail) throws SQLException {
         if (tail == null) return new TailParts(null, "");
@@ -214,7 +191,7 @@ public final class RocksJdbcSql {
         }
     }
 
-    // -------- identifiers (normalize + keep last segment only)
+    // -------- identifiers
     private static String normalizeTableRef(String ident) throws SQLException {
         String q = normalizeQualifiedIdent(ident);
         int dot = q.lastIndexOf('.');

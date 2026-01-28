@@ -63,7 +63,6 @@ public final class RocksJdbcConnection implements Connection {
             RocksDB db = RocksDB.openReadOnly(dbo, dbPath, desc, handles);
             return new RocksJdbcConnection(url, dbPath, db, dbo, cfo, handles, catalog);
         } catch (RocksDBException e) {
-            // close native resources we allocated
             for (ColumnFamilyHandle h : handles) {
                 try { if (h != null) h.close(); } catch (Throwable ignored) {}
             }
@@ -110,16 +109,16 @@ public final class RocksJdbcConnection implements Connection {
         return h;
     }
 
-    public ResultSet runQuery(String sql, int maxRows) throws SQLException {
+    public ResultSet runQuery(String sql, int statementMaxRows) throws SQLException {
         ensureOpen();
 
         RocksJdbcSql.Parsed p = RocksJdbcSql.parse(sql);
-        int effMax = applyLimit(maxRows, p.limit());
+        int effMaxRows = applyLimit(statementMaxRows, p.limit());
 
         return switch (p.kind()) {
-            case LIST_TABLES -> queryTables(effMax);
-            case SELECT_ALL -> querySelectAll(p.tableName(), p.whereSql(), effMax);
-            case COUNT -> queryCount(p.tableName(), p.whereSql()); // limit accepted but ignored
+            case LIST_TABLES -> queryTables(effMaxRows);
+            case SELECT_ALL -> querySelectAll(p.tableName(), p.whereSql(), effMaxRows);
+            case COUNT -> queryCount(p.tableName(), p.whereSql());
         };
     }
 
@@ -155,19 +154,13 @@ public final class RocksJdbcConnection implements Connection {
         MethodGetterCache getters = getterCache.computeIfAbsent(t, MethodGetterCache::new);
 
         long count = 0;
-        RocksIterator it = null;
-        try {
-            it = db.newIterator(cf);
+        try (RocksIterator it = db.newIterator(cf)) {
             it.seekToFirst();
             while (it.isValid()) {
                 Object rowObj = t.decoder().decode(it.value());
-                if (pred.test(idx -> getters.get(rowObj, idx))) {
-                    count++;
-                }
+                if (pred.test(idx -> getters.get(rowObj, idx))) count++;
                 it.next();
             }
-        } finally {
-            if (it != null) it.close();
         }
 
         String[] cols = { "count" };
@@ -189,14 +182,11 @@ public final class RocksJdbcConnection implements Connection {
         List<Object[]> rows = new ArrayList<>();
         int emitted = 0;
 
-        RocksIterator it = null;
-        try {
-            it = db.newIterator(cf);
+        try (RocksIterator it = db.newIterator(cf)) {
             it.seekToFirst();
 
             while (it.isValid()) {
-                byte[] value = it.value();
-                Object rowObj = t.decoder().decode(value);
+                Object rowObj = t.decoder().decode(it.value());
 
                 if (pred.test(idx -> getters.get(rowObj, idx))) {
                     Object[] out = new Object[colNames.length];
@@ -209,8 +199,6 @@ public final class RocksJdbcConnection implements Connection {
 
                 it.next();
             }
-        } finally {
-            if (it != null) it.close();
         }
 
         return RocksJdbcResultSets.of(colNames, colTypes, rows);
@@ -232,8 +220,7 @@ public final class RocksJdbcConnection implements Connection {
             case "getDriverMajorVersion" -> 0;
             case "getDriverMinorVersion" -> 1;
             case "isReadOnly" -> true;
-            case "supportsTransactions" -> false;
-            case "supportsBatchUpdates" -> false;
+            case "supportsTransactions", "supportsBatchUpdates" -> false;
 
             case "getTables" -> metaGetTables();
             case "getColumns" -> metaGetColumns(args);
@@ -242,7 +229,6 @@ public final class RocksJdbcConnection implements Connection {
             case "allTablesAreSelectable" -> true;
 
             default -> {
-                // Return "safe" defaults for many capability probes
                 Class<?> rt = findReturnType(DatabaseMetaData.class, name, args);
                 if (rt == boolean.class) yield false;
                 if (rt == int.class) yield 0;
@@ -293,10 +279,13 @@ public final class RocksJdbcConnection implements Connection {
 
         for (RocksJdbcTable t : catalog.tables()) {
             if (tablePattern != null && !tablePattern.isBlank()) {
-                if (!t.tableName().equalsIgnoreCase(tablePattern)
-                        && t.names().stream().noneMatch(n -> n.equalsIgnoreCase(tablePattern))) {
-                    continue;
+                boolean match = t.tableName().equalsIgnoreCase(tablePattern);
+
+                List<String> aliases = t.names();
+                if (!match && aliases != null) {
+                    match = aliases.stream().anyMatch(n -> n != null && n.equalsIgnoreCase(tablePattern));
                 }
+                if (!match) continue;
             }
 
             String[] cn = t.columnNames();
@@ -323,11 +312,8 @@ public final class RocksJdbcConnection implements Connection {
                 String name = new String(h.getName(), java.nio.charset.StandardCharsets.UTF_8);
                 String k = name.trim().toLowerCase(Locale.ROOT);
                 if (!k.isEmpty()) m.putIfAbsent(k, h);
-            } catch (Throwable ignored) {
-                // ignore
-            }
+            } catch (Throwable ignored) {}
         }
-        // common alias
         if (!handles.isEmpty() && handles.get(0) != null) {
             m.putIfAbsent("default", handles.get(0));
         }
@@ -378,14 +364,10 @@ public final class RocksJdbcConnection implements Connection {
     }
 
     @Override
-    public void commit() throws SQLException {
-        throw new SQLFeatureNotSupportedException("Transactions not supported");
-    }
+    public void commit() throws SQLException { throw new SQLFeatureNotSupportedException("Transactions not supported"); }
 
     @Override
-    public void rollback() throws SQLException {
-        throw new SQLFeatureNotSupportedException("Transactions not supported");
-    }
+    public void rollback() throws SQLException { throw new SQLFeatureNotSupportedException("Transactions not supported"); }
 
     @Override
     public boolean getAutoCommit() { return true; }

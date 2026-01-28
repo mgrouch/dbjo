@@ -4,25 +4,6 @@ import java.sql.SQLException;
 import java.util.*;
 import java.util.regex.Pattern;
 
-/**
- * Tiny WHERE expression compiler + evaluator used by the Rocks JDBC driver.
- *
- * Supported:
- *   - AND / OR / NOT
- *   - parentheses
- *   - comparisons: =, !=, <>, <, <=, >, >=
- *   - IS NULL / IS NOT NULL
- *   - IN (literal, literal, ...)
- *   - LIKE (supports % and _)
- *
- * Literals:
- *   - 'string' with '' escape
- *   - numbers: 1, 1.2, 1e3
- *   - TRUE/FALSE
- *   - NULL
- *
- * No parameters (?).
- */
 public final class RocksJdbcWhere {
     private RocksJdbcWhere() {}
 
@@ -43,8 +24,6 @@ public final class RocksJdbcWhere {
         tz.expect(TokenKind.EOF);
         return pred;
     }
-
-    // -------- tokenizer --------
 
     enum TokenKind { IDENT, STRING, NUMBER, BOOL, NULL, OP, AND, OR, NOT, IS, LIKE, IN, LPAREN, RPAREN, COMMA, EOF }
 
@@ -88,12 +67,12 @@ public final class RocksJdbcWhere {
             if (c == ')') { i++; return new Token(TokenKind.RPAREN, ")"); }
             if (c == ',') { i++; return new Token(TokenKind.COMMA, ","); }
 
-            // operators
             if ("=<>!".indexOf(c) >= 0) {
                 int j = i + 1;
                 if (j < s.length()) {
                     char d = s.charAt(j);
-                    if ((c == '<' && d == '=') || (c == '>' && d == '=') || (c == '!' && d == '=') || (c == '<' && d == '>')) {
+                    if ((c == '<' && d == '=') || (c == '>' && d == '=') || (c == '!' && d == '=')
+                            || (c == '<' && d == '>')) {
                         String op = s.substring(i, j + 1);
                         i = j + 1;
                         return new Token(TokenKind.OP, op);
@@ -103,18 +82,13 @@ public final class RocksJdbcWhere {
                 return new Token(TokenKind.OP, String.valueOf(c));
             }
 
-            // string literal
             if (c == '\'') {
                 StringBuilder sb = new StringBuilder();
-                i++; // skip '
+                i++;
                 while (i < s.length()) {
                     char x = s.charAt(i++);
                     if (x == '\'') {
-                        if (i < s.length() && s.charAt(i) == '\'') { // escaped ''
-                            i++;
-                            sb.append('\'');
-                            continue;
-                        }
+                        if (i < s.length() && s.charAt(i) == '\'') { i++; sb.append('\''); continue; }
                         return new Token(TokenKind.STRING, sb.toString());
                     }
                     sb.append(x);
@@ -122,7 +96,6 @@ public final class RocksJdbcWhere {
                 throw new SQLException("Unterminated string literal");
             }
 
-            // number
             if (Character.isDigit(c) || (c == '.' && i + 1 < s.length() && Character.isDigit(s.charAt(i + 1)))) {
                 int j = i;
                 while (j < s.length()) {
@@ -135,11 +108,9 @@ public final class RocksJdbcWhere {
                 return new Token(TokenKind.NUMBER, num);
             }
 
-            // identifier / keyword / quoted ident
             if (c == '"' || c == '`' || c == '[' || Character.isLetter(c) || c == '_' ) {
                 String ident = readQualifiedIdent();
                 String u = ident.toUpperCase(Locale.ROOT);
-
                 return switch (u) {
                     case "AND" -> new Token(TokenKind.AND, ident);
                     case "OR" -> new Token(TokenKind.OR, ident);
@@ -157,7 +128,6 @@ public final class RocksJdbcWhere {
         }
 
         private String readQualifiedIdent() throws SQLException {
-            // segment(.segment)*
             StringBuilder out = new StringBuilder();
             out.append(readSegment());
             while (true) {
@@ -215,8 +185,6 @@ public final class RocksJdbcWhere {
         }
     }
 
-    // -------- parser --------
-
     static final class Parser {
         private final Tokenizer tz;
         private final Map<String, Integer> colIndex;
@@ -226,9 +194,7 @@ public final class RocksJdbcWhere {
             this.colIndex = buildColIndex(colNames);
         }
 
-        Predicate parseExpr() throws SQLException {
-            return parseOr();
-        }
+        Predicate parseExpr() throws SQLException { return parseOr(); }
 
         private Predicate parseOr() throws SQLException {
             Predicate left = parseAnd();
@@ -266,17 +232,15 @@ public final class RocksJdbcWhere {
         private Predicate parsePredicate() throws SQLException {
             Operand lhs = parseOperand();
 
-            // IS [NOT] NULL
             if (tz.accept(TokenKind.IS)) {
                 boolean not = tz.accept(TokenKind.NOT);
                 tz.expect(TokenKind.NULL);
                 return row -> {
                     Object v = lhs.get(row);
-                    return not ? (v != null) : (v == null);
+                    return not == (v != null);
                 };
             }
 
-            // LIKE
             if (tz.accept(TokenKind.LIKE)) {
                 Operand rhs = parseOperand();
                 return row -> {
@@ -287,7 +251,6 @@ public final class RocksJdbcWhere {
                 };
             }
 
-            // IN (...)
             if (tz.accept(TokenKind.IN)) {
                 tz.expect(TokenKind.LPAREN);
                 List<Operand> elems = new ArrayList<>();
@@ -305,7 +268,6 @@ public final class RocksJdbcWhere {
                 };
             }
 
-            // comparison operator
             Token op = tz.next();
             if (op.kind != TokenKind.OP) throw new SQLException("Expected comparison operator, got " + op.kind);
 
@@ -325,14 +287,13 @@ public final class RocksJdbcWhere {
                 }
                 case STRING -> new LiteralOperand(tz.next().text);
                 case NUMBER -> new LiteralOperand(parseNumber(tz.next().text));
-                case BOOL -> new LiteralOperand(Boolean.valueOf(tz.next().text.equalsIgnoreCase("TRUE")));
+                case BOOL -> new LiteralOperand(tz.next().text.equalsIgnoreCase("TRUE"));
                 case NULL -> { tz.next(); yield new LiteralOperand(null); }
                 default -> throw new SQLException("Expected operand, got " + t.kind + " (" + t.text + ")");
             };
         }
 
         private int resolveColumnIndex(String ident) throws SQLException {
-            // for qualified names, take last segment
             String base = ident;
             int dot = base.lastIndexOf('.');
             if (dot >= 0) base = base.substring(dot + 1);
@@ -360,11 +321,7 @@ public final class RocksJdbcWhere {
         }
     }
 
-    // -------- operands --------
-
-    interface Operand {
-        Object get(RowAccessor row) throws SQLException;
-    }
+    interface Operand { Object get(RowAccessor row) throws SQLException; }
 
     record ColumnOperand(int index) implements Operand {
         @Override public Object get(RowAccessor row) throws SQLException { return row.get(index); }
@@ -373,8 +330,6 @@ public final class RocksJdbcWhere {
     record LiteralOperand(Object value) implements Operand {
         @Override public Object get(RowAccessor row) { return value; }
     }
-
-    // -------- eval helpers --------
 
     private static boolean compare(Object l, Object r, String op) {
         if ("=".equals(op)) return Objects.equals(l, r);
