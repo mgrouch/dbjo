@@ -1,57 +1,83 @@
 package org.github.dbjo.rdb.jdbc;
 
 import org.github.dbjo.rdb.jdbc.catalog.RocksJdbcCatalog;
-import org.rocksdb.RocksDB;
 
 import java.sql.*;
+import java.util.Objects;
 import java.util.Properties;
-import java.util.logging.Logger;
 
+/**
+ * URL forms:
+ *   jdbc:dbjo-rocks:/absolute/or/relative/path
+ *   jdbc:rocksdb:/absolute/or/relative/path
+ *
+ * Properties:
+ *   rebuildIndexes = true|false   (default true)
+ *   catalogClass   = fqcn of generated catalog (optional if driver registered programmatically)
+ */
 public final class RocksJdbcDriver implements Driver {
+    public static final String URL1 = "jdbc:dbjo-rocks:";
+    public static final String URL2 = "jdbc:rocksdb:";
+
+    private final RocksJdbcCatalog fixedCatalogOrNull;
+
     static {
         try {
-            RocksDB.loadLibrary();
-        } catch (Throwable ignored) {}
+            DriverManager.registerDriver(new RocksJdbcDriver(null));
+        } catch (SQLException ignore) {}
+    }
 
-        try {
-            DriverManager.registerDriver(new RocksJdbcDriver());
-        } catch (Throwable ignored) {}
+    public RocksJdbcDriver() { this(null); }
+
+    public RocksJdbcDriver(RocksJdbcCatalog catalog) {
+        this.fixedCatalogOrNull = catalog;
+    }
+
+    public static void register(RocksJdbcCatalog catalog) throws SQLException {
+        DriverManager.registerDriver(new RocksJdbcDriver(Objects.requireNonNull(catalog)));
     }
 
     @Override
     public Connection connect(String url, Properties info) throws SQLException {
         if (!acceptsURL(url)) return null;
 
-        RocksJdbcUtil.ParsedUrl p = RocksJdbcUtil.parseUrl(url, info);
-        RocksJdbcCatalog catalog = RocksJdbcUtil.loadCatalog(p.catalogClassName());
+        Properties props = (info == null) ? new Properties() : info;
 
-        return RocksJdbcConnection.open(url, p.dbPath(), catalog);
+        RocksJdbcCatalog catalog = this.fixedCatalogOrNull;
+        if (catalog == null) {
+            String cls = props.getProperty("catalogClass", System.getProperty("dbjo.jdbc.catalog"));
+            if (cls == null || cls.isBlank()) {
+                throw new SQLException("Missing catalog: set Properties catalogClass=... or call RocksJdbcDriver.register(new GeneratedRocksJdbcCatalog())");
+            }
+            try {
+                Class<?> c = Class.forName(cls);
+                Object o = c.getDeclaredConstructor().newInstance();
+                catalog = (RocksJdbcCatalog) o;
+            } catch (Exception e) {
+                throw new SQLException("Failed to create catalogClass: " + cls, e);
+            }
+        }
+
+        String path = url.substring(url.startsWith(URL1) ? URL1.length() : URL2.length());
+        if (path.isBlank()) throw new SQLException("Missing RocksDB path in URL");
+
+        boolean rebuild = Boolean.parseBoolean(props.getProperty("rebuildIndexes", "true"));
+
+        RocksJdbcEngine engine = new RocksJdbcEngine(catalog, path, rebuild);
+        return new RocksJdbcConnection(url, props, engine);
     }
 
     @Override
     public boolean acceptsURL(String url) {
-        return url != null && url.startsWith(RocksJdbcUtil.URL_PREFIX);
+        return url != null && (url.startsWith(URL1) || url.startsWith(URL2));
     }
 
-    @Override
-    public DriverPropertyInfo[] getPropertyInfo(String url, Properties info) {
-        DriverPropertyInfo cat = new DriverPropertyInfo("catalog", (info == null) ? null : info.getProperty("catalog"));
-        cat.required = true;
-        cat.description = "FQN of generated RocksJdbcCatalog class (e.g. ...GeneratedRocksJdbcCatalog).";
-        return new DriverPropertyInfo[]{ cat };
+    @Override public DriverPropertyInfo[] getPropertyInfo(String url, Properties info) {
+        return new DriverPropertyInfo[0];
     }
 
-    @Override
-    public int getMajorVersion() { return 0; }
-
-    @Override
-    public int getMinorVersion() { return 1; }
-
-    @Override
-    public boolean jdbcCompliant() { return false; }
-
-    @Override
-    public Logger getParentLogger() throws SQLFeatureNotSupportedException {
-        throw new SQLFeatureNotSupportedException();
-    }
+    @Override public int getMajorVersion() { return 1; }
+    @Override public int getMinorVersion() { return 0; }
+    @Override public boolean jdbcCompliant() { return false; }
+    @Override public java.util.logging.Logger getParentLogger() { return java.util.logging.Logger.getGlobal(); }
 }
