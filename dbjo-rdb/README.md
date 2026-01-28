@@ -1,5 +1,3 @@
-
-
 # dbjo-rdb
 
 RocksDB-backed storage layer for DBJO.
