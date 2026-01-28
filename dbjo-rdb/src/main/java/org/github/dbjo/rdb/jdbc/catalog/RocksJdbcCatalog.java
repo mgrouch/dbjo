@@ -1,12 +1,8 @@
 package org.github.dbjo.rdb.jdbc.catalog;
 
-import java.lang.reflect.Constructor;
-import java.lang.reflect.RecordComponent;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Compatibility-first catalog API.
