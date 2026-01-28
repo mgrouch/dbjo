@@ -1,4 +1,4 @@
-package org.github.dbjo.rdb.jdbc.catalog;
+package org.github.dbjo.rdb.jdbc;
 
 import org.github.dbjo.rdb.jdbc.catalog.RocksJdbcCatalog;
 
@@ -10,14 +10,14 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
 
-public final class RocksJdbcUtil {
+final class RocksJdbcUtil {
     private RocksJdbcUtil() {}
 
-    public static final String URL_PREFIX = "jdbc:rocksdb:";
+    static final String URL_PREFIX = "jdbc:rocksdb:";
 
-    public record ParsedUrl(String dbPath, String catalogClassName) {}
+    record ParsedUrl(String dbPath, String catalogClassName) {}
 
-    public static ParsedUrl parseUrl(String url, Properties info) throws SQLException {
+    static ParsedUrl parseUrl(String url, Properties info) throws SQLException {
         if (url == null || !url.startsWith(URL_PREFIX)) {
             throw new SQLException("Bad URL (expected prefix " + URL_PREFIX + "): " + url);
         }
@@ -40,10 +40,6 @@ public final class RocksJdbcUtil {
 
         Map<String, String> qp = parseQuery(queryPart);
 
-        // catalog can be in:
-        //  - Properties "catalog"
-        //  - URL ?catalog=...
-        //  - System property dbjo.rocksJdbcCatalog
         String catalog = null;
         if (info != null) catalog = trimToNull(info.getProperty("catalog"));
         if (catalog == null) catalog = trimToNull(qp.get("catalog"));
@@ -52,12 +48,13 @@ public final class RocksJdbcUtil {
         return new ParsedUrl(dbPath, catalog);
     }
 
-    public static RocksJdbcCatalog loadCatalog(String catalogClassName) throws SQLException {
+    static RocksJdbcCatalog loadCatalog(String catalogClassName) throws SQLException {
         if (catalogClassName == null || catalogClassName.isBlank()) {
             throw new SQLException(
-                    "Rocks JDBC requires a catalog class.\n" +
-                            "Provide it as connection property 'catalog' or URL ?catalog=... or system property dbjo.rocksJdbcCatalog.\n" +
-                            "Example: jdbc:rocksdb:/path/to/db?catalog=org.github.dbjo.generated.rdb.jdbc.GeneratedRocksJdbcCatalog"
+                    """
+                            Rocks JDBC requires a catalog class.
+                            Provide it as connection property 'catalog' or URL ?catalog=... or system property dbjo.rocksJdbcCatalog.
+                            Example: jdbc:rocksdb:/path/to/db?catalog=org.github.dbjo.generated.rdb.jdbc.GeneratedRocksJdbcCatalog"""
             );
         }
 
@@ -76,7 +73,6 @@ public final class RocksJdbcUtil {
                 // fall through
             }
 
-            // Try no-arg constructor
             return (RocksJdbcCatalog) c.getDeclaredConstructor().newInstance();
 
         } catch (SQLException e) {
@@ -91,7 +87,6 @@ public final class RocksJdbcUtil {
         String p = s.trim();
         if (p.isEmpty()) return p;
 
-        // Support file:/... URIs
         if (p.startsWith("file:")) {
             try {
                 return java.nio.file.Paths.get(URI.create(p)).toString();
@@ -100,7 +95,6 @@ public final class RocksJdbcUtil {
             }
         }
 
-        // Allow percent-encoding
         return URLDecoder.decode(p, StandardCharsets.UTF_8);
     }
 
@@ -112,11 +106,8 @@ public final class RocksJdbcUtil {
         for (String part : parts) {
             if (part.isBlank()) continue;
             int i = part.indexOf('=');
-            if (i < 0) {
-                m.put(urlDecode(part), "");
-            } else {
-                m.put(urlDecode(part.substring(0, i)), urlDecode(part.substring(i + 1)));
-            }
+            if (i < 0) m.put(urlDecode(part), "");
+            else m.put(urlDecode(part.substring(0, i)), urlDecode(part.substring(i + 1)));
         }
         return m;
     }

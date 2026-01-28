@@ -5,14 +5,10 @@ import java.lang.reflect.Proxy;
 import java.sql.*;
 import java.util.*;
 
-/**
- * Tiny in-memory ResultSet + ResultSetMetaData without com.sun.rowset.
- * Implemented via dynamic proxy: supports only the small subset we need.
- */
-public final class RocksJdbcResultSets {
+final class RocksJdbcResultSets {
     private RocksJdbcResultSets() {}
 
-    public static ResultSet of(String[] colNames, int[] colTypes, List<Object[]> rows) throws SQLException {
+    static ResultSet of(String[] colNames, int[] colTypes, List<Object[]> rows) throws SQLException {
         Objects.requireNonNull(colNames, "colNames");
         Objects.requireNonNull(colTypes, "colTypes");
         Objects.requireNonNull(rows, "rows");
@@ -80,6 +76,12 @@ public final class RocksJdbcResultSets {
             return true;
         }
 
+        void beforeFirst() throws SQLException {
+            ensureOpen();
+            cursor = -1;
+            lastWasNull = false;
+        }
+
         Object get(int col) throws SQLException {
             ensureOpen();
             if (cursor < 0 || cursor >= rows.size()) throw new SQLException("Cursor not on a row");
@@ -99,150 +101,173 @@ public final class RocksJdbcResultSets {
         }
     }
 
-    private static final class RsHandler implements InvocationHandler {
-        private final State st;
-
-        RsHandler(State st) { this.st = st; }
+    private record RsHandler(State st) implements InvocationHandler {
 
         @Override
-        public Object invoke(Object proxy, java.lang.reflect.Method method, Object[] args) throws Throwable {
-            String name = method.getName();
+            public Object invoke(Object proxy, java.lang.reflect.Method method, Object[] args) throws Throwable {
+                String name = method.getName();
 
-            switch (name) {
-                case "next" -> { return st.next(); }
-                case "close" -> { st.closed = true; return null; }
-                case "isClosed" -> { return st.closed; }
-                case "wasNull" -> { return st.lastWasNull; }
+                switch (name) {
+                    case "next" -> {
+                        return st.next();
+                    }
+                    case "beforeFirst" -> {
+                        st.beforeFirst();
+                        return null;
+                    }
+                    case "close" -> {
+                        st.closed = true;
+                        return null;
+                    }
+                    case "isClosed" -> {
+                        return st.closed;
+                    }
+                    case "wasNull" -> {
+                        return st.lastWasNull;
+                    }
 
-                case "getMetaData" -> { return st.meta; }
-                case "findColumn" -> { return st.findColumn((String) args[0]); }
+                    case "getMetaData" -> {
+                        return st.meta;
+                    }
+                    case "findColumn" -> {
+                        return st.findColumn((String) args[0]);
+                    }
 
-                case "getRow" -> { return (st.cursor < 0 ? 0 : Math.min(st.cursor + 1, st.rows.size())); }
+                    case "isBeforeFirst" -> {
+                        return st.cursor < 0;
+                    }
+                    case "isAfterLast" -> {
+                        return st.cursor >= st.rows.size();
+                    }
+                    case "getRow" -> {
+                        return (st.cursor < 0 ? 0 : Math.min(st.cursor + 1, st.rows.size()));
+                    }
 
-                case "getType" -> { return ResultSet.TYPE_FORWARD_ONLY; }
-                case "getConcurrency" -> { return ResultSet.CONCUR_READ_ONLY; }
-                case "getHoldability" -> { return ResultSet.HOLD_CURSORS_OVER_COMMIT; }
+                    case "getType" -> {
+                        return ResultSet.TYPE_FORWARD_ONLY;
+                    }
+                    case "getConcurrency" -> {
+                        return ResultSet.CONCUR_READ_ONLY;
+                    }
+                    case "getHoldability" -> {
+                        return ResultSet.HOLD_CURSORS_OVER_COMMIT;
+                    }
 
-                case "getStatement" -> { return null; }
-                case "getWarnings" -> { return null; }
-                case "clearWarnings" -> { return null; }
+                    case "getStatement", "clearWarnings", "getWarnings" -> {
+                        return null;
+                    }
 
-                case "getObject" -> {
-                    if (args == null || args.length == 0) throw unsup(name);
-                    if (args[0] instanceof Integer i) return st.get(i);
-                    if (args[0] instanceof String s) return st.get(st.findColumn(s));
-                    throw unsup(name);
-                }
+                    case "getObject" -> {
+                        if (args == null || args.length == 0) throw unsup(name);
+                        if (args[0] instanceof Integer i) return st.get(i);
+                        if (args[0] instanceof String s) return st.get(st.findColumn(s));
+                        throw unsup(name);
+                    }
 
-                case "getString" -> {
-                    Object v = getByArg(args);
-                    return (v == null) ? null : String.valueOf(v);
-                }
+                    case "getString" -> {
+                        Object v = getByArg(args);
+                        return (v == null) ? null : String.valueOf(v);
+                    }
 
-                case "getInt" -> { return coerceInt(getByArg(args), st); }
-                case "getLong" -> { return coerceLong(getByArg(args), st); }
-                case "getBoolean" -> { return coerceBoolean(getByArg(args), st); }
-                case "getDouble" -> { return coerceDouble(getByArg(args), st); }
+                    case "getInt" -> {
+                        return coerceInt(getByArg(args));
+                    }
+                    case "getLong" -> {
+                        return coerceLong(getByArg(args));
+                    }
+                    case "getBoolean" -> {
+                        return coerceBoolean(getByArg(args));
+                    }
+                    case "getDouble" -> {
+                        return coerceDouble(getByArg(args));
+                    }
 
-                case "unwrap" -> {
-                    Class<?> iface = (Class<?>) args[0];
-                    if (iface.isInstance(proxy)) return proxy;
-                    throw new SQLException("Not a wrapper for " + iface.getName());
-                }
-                case "isWrapperFor" -> {
-                    Class<?> iface = (Class<?>) args[0];
-                    return iface.isInstance(proxy);
-                }
-            }
-
-            // Safe defaults for some harmless methods clients probe
-            Class<?> rt = method.getReturnType();
-            if (rt == boolean.class) return false;
-            if (rt == int.class) return 0;
-            if (rt == long.class) return 0L;
-            if (rt == void.class) return null;
-
-            throw unsup("ResultSet." + name);
-        }
-
-        private Object getByArg(Object[] args) throws SQLException {
-            if (args == null || args.length == 0) throw new SQLException("Missing argument");
-            if (args[0] instanceof Integer i) return st.get(i);
-            if (args[0] instanceof String s) return st.get(st.findColumn(s));
-            throw new SQLException("Bad column selector: " + args[0]);
-        }
-
-        private static SQLFeatureNotSupportedException unsup(String what) {
-            return new SQLFeatureNotSupportedException(what + " not supported in rudimentary Rocks JDBC");
-        }
-    }
-
-    private static final class MdHandler implements InvocationHandler {
-        private final State st;
-
-        MdHandler(State st) { this.st = st; }
-
-        @Override
-        public Object invoke(Object proxy, java.lang.reflect.Method method, Object[] args) throws Throwable {
-            String name = method.getName();
-
-            return switch (name) {
-                case "getColumnCount" -> st.colNames.length;
-
-                case "getColumnName", "getColumnLabel" -> st.colNames[idx(args) - 1];
-
-                case "getColumnType" -> st.colTypes[idx(args) - 1];
-
-                case "getColumnTypeName" -> {
-                    int t = st.colTypes[idx(args) - 1];
-                    try {
-                        yield JDBCType.valueOf(t).getName();
-                    } catch (Throwable ignore) {
-                        yield "UNKNOWN";
+                    case "unwrap" -> {
+                        Class<?> iface = (Class<?>) args[0];
+                        if (iface.isInstance(proxy)) return proxy;
+                        throw new SQLException("Not a wrapper for " + iface.getName());
+                    }
+                    case "isWrapperFor" -> {
+                        Class<?> iface = (Class<?>) args[0];
+                        return iface.isInstance(proxy);
                     }
                 }
 
-                case "isNullable" -> ResultSetMetaData.columnNullable;
+                // Safe defaults for probes
+                Class<?> rt = method.getReturnType();
+                if (rt == boolean.class) return false;
+                if (rt == int.class) return 0;
+                if (rt == long.class) return 0L;
+                if (rt == void.class) return null;
 
-                case "isAutoIncrement" -> false;
-                case "isCaseSensitive" -> true;
-                case "isSearchable" -> true;
-                case "isCurrency" -> false;
-                case "isSigned" -> true;
-                case "getSchemaName" -> "";
-                case "getTableName" -> "";
-                case "getCatalogName" -> "";
-                case "getPrecision" -> 0;
-                case "getScale" -> 0;
-                case "getColumnDisplaySize" -> 0;
-                case "isReadOnly" -> true;
-                case "isWritable" -> false;
-                case "isDefinitelyWritable" -> false;
-                case "getColumnClassName" -> "java.lang.Object";
-
-                case "unwrap" -> {
-                    Class<?> iface = (Class<?>) args[0];
-                    if (iface.isInstance(proxy)) yield proxy;
-                    throw new SQLException("Not a wrapper for " + iface.getName());
-                }
-                case "isWrapperFor" -> {
-                    Class<?> iface = (Class<?>) args[0];
-                    yield iface.isInstance(proxy);
-                }
-
-                default -> throw new SQLFeatureNotSupportedException("ResultSetMetaData." + name + " not supported");
-            };
-        }
-
-        private static int idx(Object[] args) throws SQLException {
-            if (args == null || args.length == 0 || !(args[0] instanceof Integer i)) {
-                throw new SQLException("Missing column index");
+                throw unsup("ResultSet." + name);
             }
-            return i;
-        }
-    }
 
-    private static int coerceInt(Object v, State st) throws SQLException {
+            private Object getByArg(Object[] args) throws SQLException {
+                if (args == null || args.length == 0) throw new SQLException("Missing argument");
+                if (args[0] instanceof Integer i) return st.get(i);
+                if (args[0] instanceof String s) return st.get(st.findColumn(s));
+                throw new SQLException("Bad column selector: " + args[0]);
+            }
+
+            private static SQLFeatureNotSupportedException unsup(String what) {
+                return new SQLFeatureNotSupportedException(what + " not supported");
+            }
+        }
+
+    private record MdHandler(State st) implements InvocationHandler {
+
+        @Override
+            public Object invoke(Object proxy, java.lang.reflect.Method method, Object[] args) throws Throwable {
+                String name = method.getName();
+
+                return switch (name) {
+                    case "getColumnCount" -> st.colNames.length;
+
+                    case "getColumnName", "getColumnLabel" -> st.colNames[idx(args) - 1];
+
+                    case "getColumnType" -> st.colTypes[idx(args) - 1];
+
+                    case "getColumnTypeName" -> {
+                        int t = st.colTypes[idx(args) - 1];
+                        try {
+                            yield JDBCType.valueOf(t).getName();
+                        } catch (Throwable ignore) {
+                            yield "UNKNOWN";
+                        }
+                    }
+
+                    case "isNullable" -> ResultSetMetaData.columnNullable;
+
+                    case "isAutoIncrement", "isCurrency", "isWritable", "isDefinitelyWritable" -> false;
+                    case "isCaseSensitive", "isSearchable", "isSigned", "isReadOnly" -> true;
+                    case "getSchemaName", "getTableName", "getCatalogName" -> "";
+                    case "getPrecision", "getScale", "getColumnDisplaySize" -> 0;
+                    case "getColumnClassName" -> "java.lang.Object";
+
+                    case "unwrap" -> {
+                        Class<?> iface = (Class<?>) args[0];
+                        if (iface.isInstance(proxy)) yield proxy;
+                        throw new SQLException("Not a wrapper for " + iface.getName());
+                    }
+                    case "isWrapperFor" -> {
+                        Class<?> iface = (Class<?>) args[0];
+                        yield iface.isInstance(proxy);
+                    }
+
+                    default -> throw new SQLFeatureNotSupportedException("ResultSetMetaData." + name + " not supported");
+                };
+            }
+
+            private static int idx(Object[] args) throws SQLException {
+                if (args == null || args.length == 0 || !(args[0] instanceof Integer i)) {
+                    throw new SQLException("Missing column index");
+                }
+                return i;
+            }
+        }
+
+    private static int coerceInt(Object v) throws SQLException {
         if (v == null) return 0;
         if (v instanceof Number n) return n.intValue();
         if (v instanceof Boolean b) return b ? 1 : 0;
@@ -250,7 +275,7 @@ public final class RocksJdbcResultSets {
         catch (Exception e) { throw new SQLException("Cannot coerce to int: " + v, e); }
     }
 
-    private static long coerceLong(Object v, State st) throws SQLException {
+    private static long coerceLong(Object v) throws SQLException {
         if (v == null) return 0L;
         if (v instanceof Number n) return n.longValue();
         if (v instanceof Boolean b) return b ? 1L : 0L;
@@ -258,7 +283,7 @@ public final class RocksJdbcResultSets {
         catch (Exception e) { throw new SQLException("Cannot coerce to long: " + v, e); }
     }
 
-    private static double coerceDouble(Object v, State st) throws SQLException {
+    private static double coerceDouble(Object v) throws SQLException {
         if (v == null) return 0.0;
         if (v instanceof Number n) return n.doubleValue();
         if (v instanceof Boolean b) return b ? 1.0 : 0.0;
@@ -266,7 +291,7 @@ public final class RocksJdbcResultSets {
         catch (Exception e) { throw new SQLException("Cannot coerce to double: " + v, e); }
     }
 
-    private static boolean coerceBoolean(Object v, State st) throws SQLException {
+    private static boolean coerceBoolean(Object v) {
         if (v == null) return false;
         if (v instanceof Boolean b) return b;
         if (v instanceof Number n) return n.longValue() != 0L;
