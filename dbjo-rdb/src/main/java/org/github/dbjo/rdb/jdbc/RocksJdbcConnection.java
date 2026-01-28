@@ -1,11 +1,9 @@
 package org.github.dbjo.rdb.jdbc;
 
 import org.github.dbjo.rdb.jdbc.catalog.RocksJdbcCatalog;
+import org.github.dbjo.rdb.jdbc.catalog.RocksJdbcExecutor;
 import org.github.dbjo.rdb.jdbc.catalog.RocksJdbcStatement;
 
-import javax.sql.rowset.CachedRowSet;
-import javax.sql.rowset.RowSetProvider;
-import java.lang.reflect.Method;
 import java.sql.Array;
 import java.sql.Blob;
 import java.sql.CallableStatement;
@@ -46,9 +44,7 @@ public final class RocksJdbcConnection implements Connection {
     private int transactionIsolation = Connection.TRANSACTION_READ_COMMITTED;
     private int networkTimeoutMs = 0;
 
-    /**
-     * Factory expected by RocksJdbcDriver.
-     */
+    /** Factory expected by RocksJdbcDriver. */
     public static RocksJdbcConnection open(String url, String user, RocksJdbcCatalog catalog) throws SQLException {
         return new RocksJdbcConnection(url, user, new Properties(), catalog);
     }
@@ -75,49 +71,12 @@ public final class RocksJdbcConnection implements Connection {
 
     /**
      * Method expected by RocksJdbcStatement.
-     * Delegates to RocksJdbcCatalog if it has a compatible method, otherwise returns an empty ResultSet.
+     * This is now the single runtime entry point that wires:
+     * SQL parse -> WHERE parse/compile -> plan -> execute (index/full scan) -> projection/limit.
      */
     public ResultSet runQuery(String sql, int maxRows) throws SQLException {
         checkOpen();
-        Objects.requireNonNull(sql, "sql");
-
-        Object out = invokeCatalogQuery(sql, maxRows);
-        if (out instanceof ResultSet rs) return rs;
-
-        // Fallback: empty result set (keeps runtime stable even if catalog isn't wired yet)
-        CachedRowSet crs = RowSetProvider.newFactory().createCachedRowSet();
-        crs.beforeFirst();
-        return crs;
-    }
-
-    private Object invokeCatalogQuery(String sql, int maxRows) throws SQLException {
-        try {
-            // Prefer: runQuery(String,int)
-            Method m = findMethod(rocksCatalog.getClass(), "runQuery", String.class, int.class);
-            if (m != null) return m.invoke(rocksCatalog, sql, maxRows);
-
-            // Alternative: query(String,int)
-            m = findMethod(rocksCatalog.getClass(), "query", String.class, int.class);
-            if (m != null) return m.invoke(rocksCatalog, sql, maxRows);
-
-            // Alternative: query(String)
-            m = findMethod(rocksCatalog.getClass(), "query", String.class);
-            if (m != null) return m.invoke(rocksCatalog, sql);
-
-            return null;
-        } catch (ReflectiveOperationException e) {
-            throw new SQLException("Catalog query invocation failed", e);
-        }
-    }
-
-    private static Method findMethod(Class<?> c, String name, Class<?>... params) {
-        try {
-            Method m = c.getMethod(name, params);
-            m.setAccessible(true);
-            return m;
-        } catch (NoSuchMethodException ignored) {
-            return null;
-        }
+        return RocksJdbcExecutor.execute(this, sql, maxRows);
     }
 
     // ---------------- Connection ----------------
@@ -128,25 +87,11 @@ public final class RocksJdbcConnection implements Connection {
         return new RocksJdbcStatement(this);
     }
 
-    @Override
-    public Statement createStatement(int resultSetType, int resultSetConcurrency) throws SQLException {
-        return createStatement();
-    }
+    @Override public Statement createStatement(int resultSetType, int resultSetConcurrency) throws SQLException { return createStatement(); }
+    @Override public Statement createStatement(int resultSetType, int resultSetConcurrency, int resultSetHoldability) throws SQLException { return createStatement(); }
 
-    @Override
-    public Statement createStatement(int resultSetType, int resultSetConcurrency, int resultSetHoldability) throws SQLException {
-        return createStatement();
-    }
-
-    @Override
-    public PreparedStatement prepareStatement(String sql) throws SQLException {
-        throw notSupported();
-    }
-
-    @Override
-    public CallableStatement prepareCall(String sql) throws SQLException {
-        throw notSupported();
-    }
+    @Override public PreparedStatement prepareStatement(String sql) throws SQLException { throw notSupported(); }
+    @Override public CallableStatement prepareCall(String sql) throws SQLException { throw notSupported(); }
 
     @Override
     public String nativeSQL(String sql) throws SQLException {
@@ -170,30 +115,20 @@ public final class RocksJdbcConnection implements Connection {
     public void commit() throws SQLException {
         checkOpen();
         if (autoCommit) throw new SQLException("commit() not allowed when autoCommit=true");
-        // no-op (implement transactional semantics later)
+        // no-op for now
     }
 
     @Override
     public void rollback() throws SQLException {
         checkOpen();
         if (autoCommit) throw new SQLException("rollback() not allowed when autoCommit=true");
-        // no-op
+        // no-op for now
     }
 
-    @Override
-    public void close() throws SQLException {
-        closed = true;
-    }
+    @Override public void close() throws SQLException { closed = true; }
+    @Override public boolean isClosed() throws SQLException { return closed; }
 
-    @Override
-    public boolean isClosed() throws SQLException {
-        return closed;
-    }
-
-    @Override
-    public DatabaseMetaData getMetaData() throws SQLException {
-        throw notSupported();
-    }
+    @Override public DatabaseMetaData getMetaData() throws SQLException { throw notSupported(); }
 
     @Override
     public void setReadOnly(boolean readOnly) throws SQLException {
@@ -231,148 +166,43 @@ public final class RocksJdbcConnection implements Connection {
         return transactionIsolation;
     }
 
-    @Override
-    public SQLWarning getWarnings() throws SQLException {
-        checkOpen();
-        return null;
-    }
+    @Override public SQLWarning getWarnings() throws SQLException { checkOpen(); return null; }
+    @Override public void clearWarnings() throws SQLException { checkOpen(); }
 
-    @Override
-    public void clearWarnings() throws SQLException {
-        checkOpen();
-    }
+    @Override public Map<String, Class<?>> getTypeMap() throws SQLException { throw notSupported(); }
+    @Override public void setTypeMap(Map<String, Class<?>> map) throws SQLException { throw notSupported(); }
 
-    @Override
-    public Map<String, Class<?>> getTypeMap() throws SQLException {
-        throw notSupported();
-    }
+    @Override public void setHoldability(int holdability) throws SQLException { throw notSupported(); }
+    @Override public int getHoldability() throws SQLException { throw notSupported(); }
 
-    @Override
-    public void setTypeMap(Map<String, Class<?>> map) throws SQLException {
-        throw notSupported();
-    }
+    @Override public Savepoint setSavepoint() throws SQLException { throw notSupported(); }
+    @Override public Savepoint setSavepoint(String name) throws SQLException { throw notSupported(); }
+    @Override public void rollback(Savepoint savepoint) throws SQLException { throw notSupported(); }
+    @Override public void releaseSavepoint(Savepoint savepoint) throws SQLException { throw notSupported(); }
 
-    @Override
-    public void setHoldability(int holdability) throws SQLException {
-        throw notSupported();
-    }
+    @Override public PreparedStatement prepareStatement(String sql, int autoGeneratedKeys) throws SQLException { throw notSupported(); }
+    @Override public PreparedStatement prepareStatement(String sql, int[] columnIndexes) throws SQLException { throw notSupported(); }
+    @Override public PreparedStatement prepareStatement(String sql, String[] columnNames) throws SQLException { throw notSupported(); }
+    @Override public PreparedStatement prepareStatement(String sql, int resultSetType, int resultSetConcurrency) throws SQLException { throw notSupported(); }
+    @Override public PreparedStatement prepareStatement(String sql, int resultSetType, int resultSetConcurrency, int resultSetHoldability) throws SQLException { throw notSupported(); }
 
-    @Override
-    public int getHoldability() throws SQLException {
-        throw notSupported();
-    }
+    @Override public CallableStatement prepareCall(String sql, int resultSetType, int resultSetConcurrency) throws SQLException { throw notSupported(); }
+    @Override public CallableStatement prepareCall(String sql, int resultSetType, int resultSetConcurrency, int resultSetHoldability) throws SQLException { throw notSupported(); }
 
-    @Override
-    public Savepoint setSavepoint() throws SQLException {
-        throw notSupported();
-    }
+    @Override public Clob createClob() throws SQLException { throw notSupported(); }
+    @Override public Blob createBlob() throws SQLException { throw notSupported(); }
+    @Override public NClob createNClob() throws SQLException { throw notSupported(); }
+    @Override public SQLXML createSQLXML() throws SQLException { throw notSupported(); }
 
-    @Override
-    public Savepoint setSavepoint(String name) throws SQLException {
-        throw notSupported();
-    }
+    @Override public boolean isValid(int timeout) throws SQLException { return !closed; }
 
-    @Override
-    public void rollback(Savepoint savepoint) throws SQLException {
-        throw notSupported();
-    }
+    @Override public void setClientInfo(String name, String value) throws SQLClientInfoException { }
+    @Override public void setClientInfo(Properties properties) throws SQLClientInfoException { }
+    @Override public String getClientInfo(String name) throws SQLException { return null; }
+    @Override public Properties getClientInfo() throws SQLException { return new Properties(); }
 
-    @Override
-    public void releaseSavepoint(Savepoint savepoint) throws SQLException {
-        throw notSupported();
-    }
-
-    @Override
-    public PreparedStatement prepareStatement(String sql, int autoGeneratedKeys) throws SQLException {
-        throw notSupported();
-    }
-
-    @Override
-    public PreparedStatement prepareStatement(String sql, int[] columnIndexes) throws SQLException {
-        throw notSupported();
-    }
-
-    @Override
-    public PreparedStatement prepareStatement(String sql, String[] columnNames) throws SQLException {
-        throw notSupported();
-    }
-
-    @Override
-    public PreparedStatement prepareStatement(String sql, int resultSetType, int resultSetConcurrency) throws SQLException {
-        throw notSupported();
-    }
-
-    @Override
-    public PreparedStatement prepareStatement(String sql, int resultSetType, int resultSetConcurrency, int resultSetHoldability)
-            throws SQLException {
-        throw notSupported();
-    }
-
-    @Override
-    public CallableStatement prepareCall(String sql, int resultSetType, int resultSetConcurrency) throws SQLException {
-        throw notSupported();
-    }
-
-    @Override
-    public CallableStatement prepareCall(String sql, int resultSetType, int resultSetConcurrency, int resultSetHoldability)
-            throws SQLException {
-        throw notSupported();
-    }
-
-    @Override
-    public Clob createClob() throws SQLException {
-        throw notSupported();
-    }
-
-    @Override
-    public Blob createBlob() throws SQLException {
-        throw notSupported();
-    }
-
-    @Override
-    public NClob createNClob() throws SQLException {
-        throw notSupported();
-    }
-
-    @Override
-    public SQLXML createSQLXML() throws SQLException {
-        throw notSupported();
-    }
-
-    @Override
-    public boolean isValid(int timeout) throws SQLException {
-        return !closed;
-    }
-
-    @Override
-    public void setClientInfo(String name, String value) throws SQLClientInfoException {
-        // ignore
-    }
-
-    @Override
-    public void setClientInfo(Properties properties) throws SQLClientInfoException {
-        // ignore
-    }
-
-    @Override
-    public String getClientInfo(String name) throws SQLException {
-        return null;
-    }
-
-    @Override
-    public Properties getClientInfo() throws SQLException {
-        return new Properties();
-    }
-
-    @Override
-    public Array createArrayOf(String typeName, Object[] elements) throws SQLException {
-        throw notSupported();
-    }
-
-    @Override
-    public Struct createStruct(String typeName, Object[] attributes) throws SQLException {
-        throw notSupported();
-    }
+    @Override public Array createArrayOf(String typeName, Object[] elements) throws SQLException { throw notSupported(); }
+    @Override public Struct createStruct(String typeName, Object[] attributes) throws SQLException { throw notSupported(); }
 
     @Override
     public void setSchema(String schema) throws SQLException {
@@ -386,10 +216,7 @@ public final class RocksJdbcConnection implements Connection {
         return schema;
     }
 
-    @Override
-    public void abort(Executor executor) throws SQLException {
-        close();
-    }
+    @Override public void abort(Executor executor) throws SQLException { close(); }
 
     @Override
     public void setNetworkTimeout(Executor executor, int milliseconds) throws SQLException {
@@ -403,38 +230,15 @@ public final class RocksJdbcConnection implements Connection {
         return networkTimeoutMs;
     }
 
-    // Java 9+ request boundaries (safe no-ops)
-    @Override
-    public void beginRequest() throws SQLException {
-        checkOpen();
-    }
-
-    @Override
-    public void endRequest() throws SQLException {
-        checkOpen();
-    }
+    // Java 9+ request boundaries
+    @Override public void beginRequest() throws SQLException { checkOpen(); }
+    @Override public void endRequest() throws SQLException { checkOpen(); }
 
     // Java 9+ sharding (unsupported)
-    @Override
-    public boolean setShardingKeyIfValid(ShardingKey shardingKey, ShardingKey superShardingKey, int timeout)
-            throws SQLException {
-        throw notSupported();
-    }
-
-    @Override
-    public boolean setShardingKeyIfValid(ShardingKey shardingKey, int timeout) throws SQLException {
-        throw notSupported();
-    }
-
-    @Override
-    public void setShardingKey(ShardingKey shardingKey, ShardingKey superShardingKey) throws SQLException {
-        throw notSupported();
-    }
-
-    @Override
-    public void setShardingKey(ShardingKey shardingKey) throws SQLException {
-        throw notSupported();
-    }
+    @Override public boolean setShardingKeyIfValid(ShardingKey shardingKey, ShardingKey superShardingKey, int timeout) throws SQLException { throw notSupported(); }
+    @Override public boolean setShardingKeyIfValid(ShardingKey shardingKey, int timeout) throws SQLException { throw notSupported(); }
+    @Override public void setShardingKey(ShardingKey shardingKey, ShardingKey superShardingKey) throws SQLException { throw notSupported(); }
+    @Override public void setShardingKey(ShardingKey shardingKey) throws SQLException { throw notSupported(); }
 
     @Override
     public <T> T unwrap(Class<T> iface) throws SQLException {

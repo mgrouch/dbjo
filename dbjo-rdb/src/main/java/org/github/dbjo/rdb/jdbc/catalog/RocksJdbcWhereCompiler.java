@@ -12,6 +12,22 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 
+/**
+ * Compiles a SQL-ish WHERE clause string into dbjo Criteria {@link Condition}.
+ *
+ * Supported:
+ *  - AND / OR / NOT with parentheses
+ *  - IS NULL / IS NOT NULL
+ *  - =, !=, <>, <, <=, >, >=
+ *  - BETWEEN a AND b
+ *  - IN (a, b, c)
+ *  - literals: NULL, TRUE/FALSE, numbers, 'strings' ('' escape)
+ *  - identifiers can be qualified (t.col) and quoted with "..." or `...`
+ *
+ * Notes:
+ *  - This compiler produces a Criteria Condition mainly for validation/continuity.
+ *  - Execution/filtering can be done via RocksJdbcWhere AST evaluator.
+ */
 public final class RocksJdbcWhereCompiler {
     private RocksJdbcWhereCompiler() {}
 
@@ -24,16 +40,11 @@ public final class RocksJdbcWhereCompiler {
 
         List<Tok> toks = tokenize(whereSql);
         Parser<B> p = new Parser<>(toks, termsByColumnLower);
+
         Condition<B> c = p.parseExpr();
         p.expect(TokKind.EOF);
-        return c == null ? Conditions.trueCondition() : c;
-    }
 
-    // Cast away wildcard capture for JDBC-compiled WHERE values.
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    private static <B extends Serializable> PropertyTerm<B, Serializable>
-    asAny(PropertyTerm<B, ? extends Serializable> t) {
-        return (PropertyTerm) t;
+        return c == null ? Conditions.trueCondition() : c;
     }
 
     // ---------------- tokenizer ----------------
@@ -84,7 +95,8 @@ public final class RocksJdbcWhereCompiler {
                 if (i + 1 < s.length()) {
                     String two = s.substring(i, i + 2);
                     if (two.equals("<=") || two.equals(">=") || two.equals("<>") || two.equals("!=")) {
-                        op = two; i += 2;
+                        op = two;
+                        i += 2;
                         out.add(new Tok(TokKind.OP, op));
                         continue;
                     }
@@ -95,7 +107,7 @@ public final class RocksJdbcWhereCompiler {
                 continue;
             }
 
-            // number
+            // number (simple; accepts exponent)
             if (Character.isDigit(c) || (c == '-' && i + 1 < s.length() && Character.isDigit(s.charAt(i + 1)))) {
                 int j = i + 1;
                 while (j < s.length()) {
@@ -145,7 +157,7 @@ public final class RocksJdbcWhereCompiler {
         }
         while (j < s.length()) {
             char c = s.charAt(j);
-            if (Character.isLetterOrDigit(c) || c == '_' || c == '.' ) j++;
+            if (Character.isLetterOrDigit(c) || c == '_' || c == '.') j++;
             else break;
         }
         return s.substring(i, j);
@@ -154,8 +166,8 @@ public final class RocksJdbcWhereCompiler {
     private static String stripQuotes(String s) {
         String t = s.trim();
         if (t.length() >= 2) {
-            char a = t.charAt(0), b = t.charAt(t.length()-1);
-            if ((a == '"' && b == '"') || (a == '`' && b == '`')) return t.substring(1, t.length()-1);
+            char a = t.charAt(0), b = t.charAt(t.length() - 1);
+            if ((a == '"' && b == '"') || (a == '`' && b == '`')) return t.substring(1, t.length() - 1);
         }
         return t;
     }
@@ -208,12 +220,8 @@ public final class RocksJdbcWhereCompiler {
 
         private Condition<B> parsePred() throws SQLException {
             String col = expectIdent();
-
-            PropertyTerm<B, ? extends Serializable> t0 = resolveTerm(col);
-            if (t0 == null) throw new SQLException("Unknown column in WHERE: " + col);
-
-            // critical: erase wildcard capture once
-            PropertyTerm<B, Serializable> term = asAny(t0);
+            PropertyTerm<B, ? extends Serializable> term = resolveTerm(col);
+            if (term == null) throw new SQLException("Unknown column in WHERE: " + col);
 
             // IS [NOT] NULL
             if (peekKw("is")) {
@@ -227,10 +235,12 @@ public final class RocksJdbcWhereCompiler {
             // BETWEEN a AND b
             if (peekKw("between")) {
                 next();
-                Serializable a = (Serializable) readValue();
+                Object a = readValue();
                 expectKw("and");
-                Serializable b = (Serializable) readValue();
-                return term.between(a, b);
+                Object b = readValue();
+                Serializable sa = coerceToTermType(term, a);
+                Serializable sb = coerceToTermType(term, b);
+                return term.between(sa, sb);
             }
 
             // IN (a,b,c)
@@ -240,18 +250,22 @@ public final class RocksJdbcWhereCompiler {
                 ArrayList<Serializable> vs = new ArrayList<>();
                 if (!peek(TokKind.RP)) {
                     while (true) {
-                        vs.add((Serializable) readValue());
+                        Object v = readValue();
+                        vs.add(coerceToTermType(term, v));
                         if (peek(TokKind.COMMA)) { next(); continue; }
                         break;
                     }
                 }
                 expect(TokKind.RP);
-                return term.in(vs);
+                // Avoid wildcard-capture pain: use varargs with Serializable[]
+                Serializable[] arr = vs.toArray(new Serializable[0]);
+                return term.in(arr);
             }
 
             // Comparison: = != <> < <= > >=
             String op = expectOp();
-            Serializable sv = (Serializable) readValue();
+            Object v = readValue();
+            Serializable sv = coerceToTermType(term, v);
 
             return switch (op) {
                 case "="  -> term.eq(sv);
@@ -284,7 +298,18 @@ public final class RocksJdbcWhereCompiler {
             throw new SQLException("Expected literal value, got: " + x.k + " '" + x.s + "'");
         }
 
+        /**
+         * Coerce literal into something safe to pass to PropertyTerm<? extends Serializable> without capture issues.
+         * We can't know V at runtime. We just ensure the returned object is Serializable (or null).
+         */
+        private static Serializable coerceToTermType(PropertyTerm<?, ? extends Serializable> term, Object v) throws SQLException {
+            if (v == null) return null;
+            if (v instanceof Serializable s) return s;
+            throw new SQLException("Literal is not Serializable: " + v);
+        }
+
         private static Serializable coerceString(String s) {
+            // Try timestamp-ish first (safe fallbacks)
             try { return Timestamp.valueOf(s); } catch (Throwable ignored) {}
             try { return LocalDateTime.parse(s); } catch (Throwable ignored) {}
             try { return LocalDate.parse(s); } catch (Throwable ignored) {}
