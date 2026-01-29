@@ -10,49 +10,50 @@ import org.github.dbjo.generated.model.entity.Client;
 import org.github.dbjo.generated.model.entity.Product;
 import org.github.dbjo.generated.model.entity.Purchase;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.sql.SQLException;
+import java.util.function.BiConsumer;
+import java.util.function.Function;
 
 @Service
 public record HsqlToRocksLoader(ClientJdbcDao clientJdbcDao, ProductJdbcDao productJdbcDao,
                                 PurchaseJdbcDao purchaseJdbcDao, ClientDao clientDao, ProductDao productDao,
-                                PurchaseDao purchaseDao) {
+                                PurchaseDao purchaseDao, TransactionTemplate rocksTransactionTemplate) {
 
-    @Transactional(transactionManager = "rocksTransactionManager")
     public void load() {
-        loadClients();
-        loadProducts();
-        loadPurchases();
+        rocksTransactionTemplate.executeWithoutResult(status -> {
+            loadClients();
+            loadProducts();
+            loadPurchases();
+        });
     }
 
     private void loadClients() {
-        try {
-            for (Client client : clientJdbcDao.selectAll()) {
-                clientDao.upsert(client.getId(), client);
-            }
-        } catch (SQLException ex) {
-            throw new IllegalStateException("Failed to load clients from HSQL", ex);
-        }
+        loadEntities("clients", clientJdbcDao::selectAll, clientDao::upsert, Client::getId);
     }
 
     private void loadProducts() {
-        try {
-            for (Product product : productJdbcDao.selectAll()) {
-                productDao.upsert(product.getId(), product);
-            }
-        } catch (SQLException ex) {
-            throw new IllegalStateException("Failed to load products from HSQL", ex);
-        }
+        loadEntities("products", productJdbcDao::selectAll, productDao::upsert, Product::getId);
     }
 
     private void loadPurchases() {
+        loadEntities("purchases", purchaseJdbcDao::selectAll, purchaseDao::upsert, Purchase::getId);
+    }
+
+    private <T> void loadEntities(String label, SqlSupplier<? extends Iterable<T>> loader,
+                                  BiConsumer<Long, T> upsert, Function<T, Long> idProvider) {
         try {
-            for (Purchase purchase : purchaseJdbcDao.selectAll()) {
-                purchaseDao.upsert(purchase.getId(), purchase);
+            for (T entity : loader.get()) {
+                upsert.accept(idProvider.apply(entity), entity);
             }
         } catch (SQLException ex) {
-            throw new IllegalStateException("Failed to load purchases from HSQL", ex);
+            throw new IllegalStateException("Failed to load " + label + " from HSQL", ex);
         }
+    }
+
+    @FunctionalInterface
+    private interface SqlSupplier<T> {
+        T get() throws SQLException;
     }
 }
