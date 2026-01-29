@@ -169,13 +169,14 @@ public final class RocksJdbcCatalogGenerator {
             int ordinal = c.pos();
             String colName = c.colName();
             int dataType = c.sqlType();
-            String typeName = (c.typeName() == null || c.typeName().isBlank()) ? \"\" + dataType : c.typeName();
+            String typeName = (c.typeName() == null || c.typeName().isBlank()) ? "\"" + dataType + "\"": c.typeName();
             int colSize = c.size();
             int decDigits = c.scale();
-            int nullable = c.nullable();
-            String isAutoInc = (c.isAutoIncrement() ? "YES" : "NO");
+            boolean nullable = c.nullable();
+            String isAutoInc = (c.autoIncrement() ? "YES" : "NO");
             String columnDef = c.defaultValue();
             String getter = toGetterName(colName);
+
 
             sb.append("                new RocksJdbcColumn(")
                     .append(ordinal).append(", ")
