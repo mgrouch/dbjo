@@ -17,6 +17,8 @@ public record RocksJdbcReporter(RocksProps rocksProps) {
         String url = "jdbc:rocksdb:" + rocksProps.path();
         Properties props = new Properties();
         props.setProperty("catalogClass", GeneratedRocksJdbcCatalog.class.getName());
+        props.setProperty("readOnly", "true");
+        props.setProperty("rebuildIndexes", "false");
 
         try (Connection connection = DriverManager.getConnection(url, props);
              Statement statement = connection.createStatement();

@@ -25,6 +25,11 @@ public final class RocksJdbcEngine implements AutoCloseable {
     private final Map<String, ColumnFamilyHandle> cfsByName;
 
     public RocksJdbcEngine(RocksJdbcCatalog catalog, String dbPath, boolean rebuildIndexes) throws SQLException {
+        this(catalog, dbPath, rebuildIndexes, false);
+    }
+
+    public RocksJdbcEngine(RocksJdbcCatalog catalog, String dbPath, boolean rebuildIndexes, boolean readOnly)
+            throws SQLException {
         this.catalog = Objects.requireNonNull(catalog, "catalog");
 
         try {
@@ -34,9 +39,13 @@ public final class RocksJdbcEngine implements AutoCloseable {
         }
 
         try {
+            if (readOnly && rebuildIndexes) {
+                throw new SQLException("Cannot rebuild indexes while opening RocksDB in read-only mode");
+            }
+
             this.dbOptions = new DBOptions()
-                    .setCreateIfMissing(true)
-                    .setCreateMissingColumnFamilies(true);
+                    .setCreateIfMissing(!readOnly)
+                    .setCreateMissingColumnFamilies(!readOnly);
 
             List<ColumnFamilyDescriptor> desc = new ArrayList<>();
             // Default CF must always exist
@@ -55,7 +64,11 @@ public final class RocksJdbcEngine implements AutoCloseable {
             }
 
             this.handles = new ArrayList<>();
-            this.db = RocksDB.open(dbOptions, dbPath, desc, handles);
+            if (readOnly) {
+                this.db = RocksDB.openReadOnly(dbOptions, dbPath, desc, handles);
+            } else {
+                this.db = RocksDB.open(dbOptions, dbPath, desc, handles);
+            }
 
             HashMap<String, ColumnFamilyHandle> map = new HashMap<>();
             // default handle is handles[0] but we don't address by name
