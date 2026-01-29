@@ -52,6 +52,21 @@ final class RocksJdbcDriverTest {
     }
 
     @Test
+    void groupByHavingCountStarWorks() throws Exception {
+        try (RocksJdbcEngine engine = new RocksJdbcEngine(new TestCatalog(), dir.toString(), false)) {
+            insertRows(engine);
+
+            String sql = "select category, count(*) from items group by category having count(*) > 1 order by category";
+            CachedRowSet rs = engine.query(sql, 0);
+
+            assertTrue(rs.next());
+            assertEquals("B", rs.getString(1));
+            assertEquals(2L, rs.getLong(2));
+            assertFalse(rs.next());
+        }
+    }
+
+    @Test
     void orderByAndLimitApply() throws Exception {
         try (RocksJdbcEngine engine = new RocksJdbcEngine(new TestCatalog(), dir.toString(), false)) {
             insertRows(engine);
