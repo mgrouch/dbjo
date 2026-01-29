@@ -1,5 +1,7 @@
 package org.github.dbjo.rdb.jdbc;
 
+import org.github.dbjo.rdb.jdbc.catalog.RocksJdbcExecutor;
+
 import java.sql.*;
 import java.util.Map;
 import java.util.Objects;
@@ -20,6 +22,16 @@ public final class RocksJdbcConnection implements Connection {
     }
 
     public RocksJdbcEngine engine() { return engine; }
+
+    /**
+     * Method expected by RocksJdbcStatement.
+     * This is now the single runtime entry point that wires:
+     * SQL parse -> WHERE parse/compile -> plan -> execute (index/full scan) -> projection/limit.
+     */
+    public ResultSet runQuery(String sql, int maxRows) throws SQLException {
+        checkOpen();
+        return engine.query(sql, maxRows);
+    }
 
     private void checkOpen() throws SQLException {
         if (closed) throw new SQLException("Connection is closed");
