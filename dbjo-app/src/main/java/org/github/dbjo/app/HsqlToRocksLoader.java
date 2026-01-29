@@ -15,29 +15,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.sql.SQLException;
 
 @Service
-public class HsqlToRocksLoader {
-    private final ClientJdbcDao clientJdbcDao;
-    private final ProductJdbcDao productJdbcDao;
-    private final PurchaseJdbcDao purchaseJdbcDao;
-    private final ClientDao clientDao;
-    private final ProductDao productDao;
-    private final PurchaseDao purchaseDao;
-
-    public HsqlToRocksLoader(
-            ClientJdbcDao clientJdbcDao,
-            ProductJdbcDao productJdbcDao,
-            PurchaseJdbcDao purchaseJdbcDao,
-            ClientDao clientDao,
-            ProductDao productDao,
-            PurchaseDao purchaseDao
-    ) {
-        this.clientJdbcDao = clientJdbcDao;
-        this.productJdbcDao = productJdbcDao;
-        this.purchaseJdbcDao = purchaseJdbcDao;
-        this.clientDao = clientDao;
-        this.productDao = productDao;
-        this.purchaseDao = purchaseDao;
-    }
+public record HsqlToRocksLoader(ClientJdbcDao clientJdbcDao, ProductJdbcDao productJdbcDao,
+                                PurchaseJdbcDao purchaseJdbcDao, ClientDao clientDao, ProductDao productDao,
+                                PurchaseDao purchaseDao) {
 
     @Transactional(transactionManager = "rocksTransactionManager")
     public void load() {
