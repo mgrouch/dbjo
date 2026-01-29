@@ -14,6 +14,7 @@ import java.util.Properties;
  * Properties:
  *   rebuildIndexes = true|false   (default true)
  *   catalogClass   = fqcn of generated catalog (optional if driver registered programmatically)
+ *   readOnly       = true|false   (default false)
  */
 public final class RocksJdbcDriver implements Driver {
     public static final String URL1 = "jdbc:dbjo-rocks:";
@@ -62,8 +63,9 @@ public final class RocksJdbcDriver implements Driver {
         if (path.isBlank()) throw new SQLException("Missing RocksDB path in URL");
 
         boolean rebuild = Boolean.parseBoolean(props.getProperty("rebuildIndexes", "true"));
+        boolean readOnly = Boolean.parseBoolean(props.getProperty("readOnly", "false"));
 
-        RocksJdbcEngine engine = new RocksJdbcEngine(catalog, path, rebuild);
+        RocksJdbcEngine engine = new RocksJdbcEngine(catalog, path, rebuild, readOnly);
         return new RocksJdbcConnection(url, props, engine);
     }
 
