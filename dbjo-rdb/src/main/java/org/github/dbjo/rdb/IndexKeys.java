@@ -102,4 +102,14 @@ public final class IndexKeys {
         if (p < 0) return null;
         return Arrays.copyOfRange(idxKey, 0, p);
     }
+
+    /** True if key begins with prefix bytes. */
+    public static boolean startsWith(byte[] key, byte[] prefix) {
+        if (key == null || prefix == null) return false;
+        if (prefix.length > key.length) return false;
+        for (int i = 0; i < prefix.length; i++) {
+            if (key[i] != prefix[i]) return false;
+        }
+        return true;
+    }
 }
