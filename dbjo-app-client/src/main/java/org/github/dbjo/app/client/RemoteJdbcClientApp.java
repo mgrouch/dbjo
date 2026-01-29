@@ -8,6 +8,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.List;
+import java.util.Properties;
 
 public final class RemoteJdbcClientApp {
     private static final String DEFAULT_URL = "jdbc:rocksdb+rest:https://localhost:8433/api/rocks-jdbc";
@@ -29,7 +30,11 @@ public final class RemoteJdbcClientApp {
                 "select product_id, count(*) from purchase group by product_id having count(*) > 0"
         );
 
-        try (Connection connection = DriverManager.getConnection(url);
+        Properties properties = new Properties();
+        if (url.contains("https://")) {
+            properties.setProperty("ssl.trustAll", "true");
+        }
+        try (Connection connection = DriverManager.getConnection(url, properties);
              Statement statement = connection.createStatement()) {
             for (String query : queries) {
                 System.out.println("==> " + query);
