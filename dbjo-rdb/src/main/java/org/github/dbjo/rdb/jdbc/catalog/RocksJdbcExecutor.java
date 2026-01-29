@@ -56,6 +56,7 @@ public final class RocksJdbcExecutor {
         int out = 0;
         for (RowEntry e : scan(db, cfsByName, table, primaryCf, access)) {
             if (out >= limit) break;
+            if (e == null) continue;
 
             Object bean = decode(table, e.valueBytes());
             if (!where.eval(colName -> acc.get(bean, colName))) continue;
@@ -195,6 +196,8 @@ public final class RocksJdbcExecutor {
 
             final byte[] fromPrefix = (r.fromBytesRaw() == null) ? null : IndexKeys.prefix(r.fromBytesRaw());
             final byte[] toPrefix   = (r.toBytesRaw() == null) ? null : IndexKeys.prefix(r.toBytesRaw());
+            final byte[] fromEscaped = (r.fromBytesRaw() == null) ? null : IndexKeys.escapeValue(r.fromBytesRaw());
+            final byte[] toEscaped   = (r.toBytesRaw() == null) ? null : IndexKeys.escapeValue(r.toBytesRaw());
 
             return () -> new Iterator<>() {
                 final RocksIterator it = db.newIterator(idxCf);
@@ -217,16 +220,16 @@ public final class RocksJdbcExecutor {
                         byte[] vprefix = IndexKeys.escapedValuePart(k);
 
                         // lower bound handling: if exclusive and value == from -> skip
-                        if (fromPrefix != null && !r.fromInclusive()) {
-                            if (Arrays.equals(vprefix, fromPrefix)) {
+                        if (fromEscaped != null && !r.fromInclusive()) {
+                            if (Arrays.equals(vprefix, fromEscaped)) {
                                 it.next();
                                 continue;
                             }
                         }
 
                         // upper bound handling
-                        if (toPrefix != null) {
-                            int cmp = lexCompare(vprefix, toPrefix);
+                        if (toEscaped != null) {
+                            int cmp = lexCompare(vprefix, toEscaped);
                             if (cmp > 0) return false;
                             if (cmp == 0 && !r.toInclusive()) {
                                 // value == to and exclusive -> stop entirely
