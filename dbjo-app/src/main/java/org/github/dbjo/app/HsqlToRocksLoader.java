@@ -42,21 +42,36 @@ public class HsqlToRocksLoader {
     private void loadClients() {
         jdbcTemplate.query(
                 "select id, email, name, created_at from client",
-                (rs) -> clientDao.upsert(rs.getLong("id"), toClient(rs))
+                (org.springframework.jdbc.core.ResultSetExtractor<Void>) rs -> {
+                    while (rs.next()) {
+                        clientDao.upsert(rs.getLong("id"), toClient(rs));
+                    }
+                    return null;
+                }
         );
     }
 
     private void loadProducts() {
         jdbcTemplate.query(
                 "select id, sku, title, price_cents from product",
-                (rs) -> productDao.upsert(rs.getLong("id"), toProduct(rs))
+                (org.springframework.jdbc.core.ResultSetExtractor<Void>) rs -> {
+                    while (rs.next()) {
+                        productDao.upsert(rs.getLong("id"), toProduct(rs));
+                    }
+                    return null;
+                }
         );
     }
 
     private void loadPurchases() {
         jdbcTemplate.query(
                 "select id, client_id, product_id, qty, ordered_at from purchase",
-                (rs) -> purchaseDao.upsert(rs.getLong("id"), toPurchase(rs))
+                (org.springframework.jdbc.core.ResultSetExtractor<Void>) rs -> {
+                    while (rs.next()) {
+                        purchaseDao.upsert(rs.getLong("id"), toPurchase(rs));
+                    }
+                    return null;
+                }
         );
     }
 
