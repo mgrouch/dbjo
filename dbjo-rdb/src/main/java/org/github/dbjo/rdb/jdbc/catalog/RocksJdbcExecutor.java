@@ -342,6 +342,19 @@ public final class RocksJdbcExecutor {
     ) throws SQLException {
         List<String> labels = new ArrayList<>();
         for (RocksJdbcColumn c : selected) labels.add(c.name());
+        Set<String> labelLower = new HashSet<>();
+        for (String label : labels) {
+            if (label != null) labelLower.add(label.trim().toLowerCase(Locale.ROOT));
+        }
+        List<String> orderExtras = new ArrayList<>();
+        if (orderBy != null) {
+            for (RocksJdbcSqlParser.OrderItem item : orderBy) {
+                String col = item.column();
+                if (col == null) continue;
+                String key = col.trim().toLowerCase(Locale.ROOT);
+                if (!labelLower.contains(key)) orderExtras.add(col);
+            }
+        }
 
         List<RowResult> rows = new ArrayList<>();
         for (RowEntry e : scan(db, cfsByName, table, primaryCf, access)) {
@@ -355,7 +368,11 @@ public final class RocksJdbcExecutor {
                 RocksJdbcColumn c = selected.get(i);
                 values[i] = acc.getByGetter(bean, c.getterName());
             }
-            rows.add(new RowResult(labels, values));
+            Map<String, Object> extraValues = new HashMap<>();
+            for (String col : orderExtras) {
+                extraValues.put(col.trim().toLowerCase(Locale.ROOT), acc.get(bean, col));
+            }
+            rows.add(new RowResult(labels, values, extraValues));
         }
 
         applyOrderBy(rows, orderBy);
@@ -434,6 +451,10 @@ public final class RocksJdbcExecutor {
         }
 
         List<String> labels = selectLabels(table, items, parsed.selectAll());
+        Set<String> labelLower = new HashSet<>();
+        for (String label : labels) {
+            if (label != null) labelLower.add(label.trim().toLowerCase(Locale.ROOT));
+        }
         List<RowResult> rows = new ArrayList<>();
         int out = 0;
         for (AggState state : groups.values()) {
@@ -441,7 +462,15 @@ public final class RocksJdbcExecutor {
             for (int i = 0; i < items.size(); i++) {
                 values[i] = state.valueFor(items.get(i));
             }
-            RowResult row = new RowResult(labels, values);
+            Map<String, Object> extraValues = new HashMap<>();
+            for (String groupCol : groupByCols) {
+                if (groupCol == null) continue;
+                String key = groupCol.trim().toLowerCase(Locale.ROOT);
+                if (!labelLower.contains(key)) {
+                    extraValues.put(key, state.groupValue(groupCol));
+                }
+            }
+            RowResult row = new RowResult(labels, values, extraValues);
             if (havingExpr != null && !havingExpr.eval(row::valueFor)) continue;
             rows.add(row);
         }
@@ -692,20 +721,29 @@ public final class RocksJdbcExecutor {
 
     private static final class RowResult {
         private final Map<String, Integer> indexByLabelLower = new HashMap<>();
+        private final Map<String, Object> extraByLabelLower = new HashMap<>();
         private final Object[] values;
 
-        RowResult(List<String> labels, Object[] values) {
+        RowResult(List<String> labels, Object[] values, Map<String, Object> extraValues) {
             this.values = values;
             for (int i = 0; i < labels.size(); i++) {
                 String label = labels.get(i);
                 if (label != null) indexByLabelLower.put(label.trim().toLowerCase(Locale.ROOT), i);
+            }
+            if (extraValues != null) {
+                for (Map.Entry<String, Object> entry : extraValues.entrySet()) {
+                    String key = entry.getKey();
+                    if (key == null) continue;
+                    extraByLabelLower.put(key.trim().toLowerCase(Locale.ROOT), entry.getValue());
+                }
             }
         }
 
         Object valueFor(String label) {
             if (label == null) return null;
             Integer idx = indexByLabelLower.get(label.trim().toLowerCase(Locale.ROOT));
-            return idx == null ? null : values[idx];
+            if (idx != null) return values[idx];
+            return extraByLabelLower.get(label.trim().toLowerCase(Locale.ROOT));
         }
 
         Object[] values() {
@@ -772,6 +810,12 @@ public final class RocksJdbcExecutor {
                 return acc == null ? null : acc.value();
             }
             return null;
+        }
+
+        Object groupValue(String col) {
+            if (col == null) return null;
+            Integer idx = groupIndexByColumnLower.get(col.trim().toLowerCase(Locale.ROOT));
+            return (idx == null) ? null : groupValues[idx];
         }
 
         private final Map<String, Integer> groupIndexByColumnLower = new HashMap<>();

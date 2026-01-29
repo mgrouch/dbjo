@@ -93,7 +93,7 @@ public final class RocksJdbcSqlParser {
             if (!groupPart.isBlank()) {
                 for (String g : groupPart.split(",")) {
                     String gg = g.trim();
-                    if (!gg.isEmpty()) groupBy.add(stripIdentifierQuotes(gg));
+                    if (!gg.isEmpty()) groupBy.add(stripSchema(stripIdentifierQuotes(gg)));
                 }
             }
         }
@@ -120,7 +120,7 @@ public final class RocksJdbcSqlParser {
                     String oo = o.trim();
                     if (oo.isEmpty()) continue;
                     String[] parts = oo.split("\\s+");
-                    String col = stripIdentifierQuotes(parts[0]);
+                    String col = stripSchema(stripIdentifierQuotes(parts[0]));
                     boolean desc = false;
                     if (parts.length > 1) {
                         String last = parts[parts.length - 1];
@@ -169,13 +169,13 @@ public final class RocksJdbcSqlParser {
                 default -> null;
             };
             if (agg != null) {
-                String argNorm = stripIdentifierQuotes(arg);
+                String argNorm = stripSchema(stripIdentifierQuotes(arg));
                 boolean countStar = argNorm.equals("*") || argNorm.equals("1");
                 String col = countStar ? null : argNorm;
                 return new SelectAgg(agg, col, countStar);
             }
         }
-        return new SelectColumn(stripIdentifierQuotes(trimmed));
+        return new SelectColumn(stripSchema(stripIdentifierQuotes(trimmed)));
     }
 
     private static Integer parseLimit(String lim) throws SQLException {
