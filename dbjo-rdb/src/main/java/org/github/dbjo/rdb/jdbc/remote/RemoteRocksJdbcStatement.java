@@ -29,8 +29,9 @@ public final class RemoteRocksJdbcStatement implements Statement {
     @Override
     public boolean execute(String sql) throws SQLException {
         checkOpen();
-        ResultSet rs = executeQuery(sql);
-        return rs != null;
+        try (ResultSet rs = executeQuery(sql)) {
+            return rs != null;
+        }
     }
 
     @Override public ResultSet getResultSet() { return last; }
