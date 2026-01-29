@@ -9,7 +9,7 @@ public record RocksJdbcColumn(
         String typeName,
         int size,
         int scale,
-        int nullable,            // DatabaseMetaData.columnNullable / columnNoNulls / columnNullableUnknown
+        boolean nullable,            // DatabaseMetaData.columnNullable / columnNoNulls / columnNullableUnknown
         String isAutoIncrement,  // "YES"/"NO"/""
         String defaultValue,
         String getterName        // Java bean getter on row class
@@ -26,6 +26,6 @@ public record RocksJdbcColumn(
     }
 
     public boolean nullableBool() {
-        return nullable == java.sql.DatabaseMetaData.columnNullable;
+        return nullable;
     }
 }
