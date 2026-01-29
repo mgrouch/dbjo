@@ -18,7 +18,9 @@ import org.rocksdb.RocksDBException;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.List;
 
@@ -43,6 +45,12 @@ public class RocksDbAppConfig {
     @Bean(name = "rocksTransactionManager")
     public PlatformTransactionManager rocksTransactionManager(RocksDbHandle h) {
         return new RocksDbTransactionManager(h.db());
+    }
+
+    @Bean
+    public TransactionTemplate rocksTransactionTemplate(
+            @Qualifier("rocksTransactionManager") PlatformTransactionManager transactionManager) {
+        return new TransactionTemplate(transactionManager);
     }
 
     @Bean
