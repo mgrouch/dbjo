@@ -1,6 +1,7 @@
 package org.github.dbjo.app;
 
 import org.github.dbjo.generated.model.rdb.jdbc.GeneratedRocksJdbcCatalog;
+import org.github.dbjo.meta.jdbc.JdbcUtil;
 import org.github.dbjo.rdb.RocksProps;
 import org.springframework.stereotype.Component;
 
@@ -28,30 +29,7 @@ public class RocksJdbcReporter {
         try (Connection connection = DriverManager.getConnection(url, props);
              Statement statement = connection.createStatement();
              ResultSet resultSet = statement.executeQuery("select * from tables")) {
-            printResultSet(resultSet);
-        }
-    }
-
-    private static void printResultSet(ResultSet resultSet) throws SQLException {
-        ResultSetMetaData meta = resultSet.getMetaData();
-        int columns = meta.getColumnCount();
-        StringBuilder header = new StringBuilder();
-        for (int i = 1; i <= columns; i++) {
-            if (i > 1) {
-                header.append(" | ");
-            }
-            header.append(meta.getColumnLabel(i));
-        }
-        System.out.println(header);
-        while (resultSet.next()) {
-            StringBuilder row = new StringBuilder();
-            for (int i = 1; i <= columns; i++) {
-                if (i > 1) {
-                    row.append(" | ");
-                }
-                row.append(resultSet.getString(i));
-            }
-            System.out.println(row);
+            JdbcUtil.printResultSet(System.out, resultSet);
         }
     }
 }
