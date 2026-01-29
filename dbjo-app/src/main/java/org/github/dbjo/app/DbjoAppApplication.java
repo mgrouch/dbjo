@@ -3,7 +3,8 @@ package org.github.dbjo.app;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
-import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.boot.CommandLineRunner;
+import org.springframework.context.annotation.Bean;
 import org.github.dbjo.generated.model.dao.jdbc.ClientJdbcDao;
 import org.github.dbjo.generated.model.dao.jdbc.ProductJdbcDao;
 import org.github.dbjo.generated.model.dao.jdbc.PurchaseJdbcDao;
@@ -35,9 +36,12 @@ import java.util.List;
 public class DbjoAppApplication {
 
     public static void main(String[] args) {
-        try (ConfigurableApplicationContext app = SpringApplication.run(DbjoAppApplication.class, args)) {
-            DataSource dataSource = app.getBean(DataSource.class);
-            RocksProps rocksProps = app.getBean(RocksProps.class);
+        SpringApplication.run(DbjoAppApplication.class, args);
+    }
+
+    @Bean
+    CommandLineRunner loadRocksDb(DataSource dataSource, RocksProps rocksProps) {
+        return args -> {
             List<RocksSchema<?>> schemas = List.of(
                     ClientSchema.INSTANCE,
                     ProductSchema.INSTANCE,
@@ -72,6 +76,6 @@ public class DbjoAppApplication {
             } catch (RocksDBException | SQLException e) {
                 throw new IllegalStateException("Failed to initialize RocksDB wiring", e);
             }
-        }
+        };
     }
 }
