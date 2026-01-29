@@ -183,7 +183,7 @@ public final class RocksJdbcExecutor {
         boolean aggregateQuery = hasAggregates || hasGroupBy;
         RocksJdbcWhereParser.Expr havingExpr = (parsed.havingSql() == null)
                 ? null
-                : RocksJdbcWhereParser.parse(parsed.havingSql());
+                : RocksJdbcWhereParser.parse(normalizeHavingSql(parsed.havingSql()));
 
         int limit = limit(parsed.limit(), statementMaxRows);
         int offset = offset(parsed.offset());
@@ -891,6 +891,61 @@ public final class RocksJdbcExecutor {
     private static void applyOrderBy(List<RowResult> rows, List<RocksJdbcSqlParser.OrderItem> orderBy) {
         if (orderBy == null || orderBy.isEmpty() || rows.isEmpty()) return;
         rows.sort((a, b) -> compareRow(a, b, orderBy));
+    }
+
+    private static String normalizeHavingSql(String havingSql) {
+        if (havingSql == null || havingSql.isBlank()) return havingSql;
+        String normalized = replaceAggReferences(havingSql, "COUNT", true);
+        normalized = replaceAggReferences(normalized, "SUM", false);
+        normalized = replaceAggReferences(normalized, "MIN", false);
+        normalized = replaceAggReferences(normalized, "MAX", false);
+        return normalized;
+    }
+
+    private static String replaceAggReferences(String sql, String fn, boolean allowStar) {
+        String normalized = sql;
+        if (allowStar) {
+            java.util.regex.Pattern starPattern = java.util.regex.Pattern.compile(
+                    "(?i)" + fn + "\\s*\\(\\s*(\\*|1)\\s*\\)"
+            );
+            java.util.regex.Matcher starMatcher = starPattern.matcher(normalized);
+            StringBuffer sbStar = new StringBuffer();
+            while (starMatcher.find()) {
+                starMatcher.appendReplacement(sbStar, fn);
+            }
+            starMatcher.appendTail(sbStar);
+            normalized = sbStar.toString();
+        }
+        java.util.regex.Pattern colPattern = java.util.regex.Pattern.compile(
+                "(?i)" + fn + "\\s*\\(\\s*([^\\)]+)\\s*\\)"
+        );
+        java.util.regex.Matcher colMatcher = colPattern.matcher(normalized);
+        StringBuffer sbCol = new StringBuffer();
+        while (colMatcher.find()) {
+            String raw = colMatcher.group(1);
+            String col = normalizeIdentifier(raw);
+            String label = fn + "_" + col;
+            colMatcher.appendReplacement(sbCol, java.util.regex.Matcher.quoteReplacement(label));
+        }
+        colMatcher.appendTail(sbCol);
+        return sbCol.toString();
+    }
+
+    private static String normalizeIdentifier(String raw) {
+        if (raw == null) return "";
+        String s = raw.trim();
+        if (s.length() >= 2) {
+            char first = s.charAt(0);
+            char last = s.charAt(s.length() - 1);
+            if ((first == '"' && last == '"') || (first == '`' && last == '`') || (first == '[' && last == ']')) {
+                s = s.substring(1, s.length() - 1);
+            }
+        }
+        int dot = s.lastIndexOf('.');
+        if (dot >= 0 && dot + 1 < s.length()) {
+            s = s.substring(dot + 1);
+        }
+        return s.trim();
     }
 
     private static int compareRow(RowResult a, RowResult b, List<RocksJdbcSqlParser.OrderItem> orderBy) {
