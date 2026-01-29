@@ -30,7 +30,8 @@ public final class RocksJdbcSqlParser {
             String havingSql,            // null => none
             List<String> groupByColumns,
             List<OrderItem> orderBy,
-            Integer limit                // null => none
+            Integer limit,               // null => none
+            Integer offset               // null => none
     ) {}
 
     public static Parsed parse(String sql) throws SQLException {
@@ -57,6 +58,7 @@ public final class RocksJdbcSqlParser {
         String table;
         String where = null;
         Integer limit = null;
+        Integer offset = null;
 
         int whereIdx = indexOfKeyword(tailU, " WHERE ");
         int groupIdx = indexOfKeyword(tailU, " GROUP BY ");
@@ -93,7 +95,7 @@ public final class RocksJdbcSqlParser {
             if (!groupPart.isBlank()) {
                 for (String g : groupPart.split(",")) {
                     String gg = g.trim();
-                    if (!gg.isEmpty()) groupBy.add(stripIdentifierQuotes(gg));
+                    if (!gg.isEmpty()) groupBy.add(stripSchema(stripIdentifierQuotes(gg)));
                 }
             }
         }
@@ -120,7 +122,7 @@ public final class RocksJdbcSqlParser {
                     String oo = o.trim();
                     if (oo.isEmpty()) continue;
                     String[] parts = oo.split("\\s+");
-                    String col = stripIdentifierQuotes(parts[0]);
+                    String col = stripSchema(stripIdentifierQuotes(parts[0]));
                     boolean desc = false;
                     if (parts.length > 1) {
                         String last = parts[parts.length - 1];
@@ -134,7 +136,9 @@ public final class RocksJdbcSqlParser {
         if (limitIdx >= 0) {
             int limitStart = limitIdx + " LIMIT ".length();
             String lim = tail.substring(limitStart).trim();
-            limit = parseLimit(lim);
+            LimitOffset lo = parseLimit(lim);
+            limit = lo.limit();
+            offset = lo.offset();
         }
 
         table = stripSchema(table);
@@ -151,7 +155,7 @@ public final class RocksJdbcSqlParser {
             }
         }
 
-        return new Parsed(stripIdentifierQuotes(table), items, selectAll, where, having, groupBy, orderBy, limit);
+        return new Parsed(stripIdentifierQuotes(table), items, selectAll, where, having, groupBy, orderBy, limit, offset);
     }
 
     private static SelectItem parseSelectItem(String token) {
@@ -169,24 +173,53 @@ public final class RocksJdbcSqlParser {
                 default -> null;
             };
             if (agg != null) {
-                String argNorm = stripIdentifierQuotes(arg);
+                String argNorm = stripSchema(stripIdentifierQuotes(arg));
                 boolean countStar = argNorm.equals("*") || argNorm.equals("1");
                 String col = countStar ? null : argNorm;
                 return new SelectAgg(agg, col, countStar);
             }
         }
-        return new SelectColumn(stripIdentifierQuotes(trimmed));
+        return new SelectColumn(stripSchema(stripIdentifierQuotes(trimmed)));
     }
 
-    private static Integer parseLimit(String lim) throws SQLException {
-        if (lim == null || lim.isBlank()) return null;
-        // allow trailing tokens
-        String[] parts = lim.trim().split("\\s+");
+    private record LimitOffset(Integer limit, Integer offset) {}
+
+    private static LimitOffset parseLimit(String lim) throws SQLException {
+        if (lim == null || lim.isBlank()) return new LimitOffset(null, null);
+        String trimmed = lim.trim();
+
+        int comma = trimmed.indexOf(',');
+        if (comma >= 0) {
+            String left = trimmed.substring(0, comma).trim();
+            String right = trimmed.substring(comma + 1).trim();
+            if (left.isEmpty() || right.isEmpty()) throw new SQLException("Bad LIMIT: " + lim);
+            int offset = parseLimitValue(left, lim);
+            int limit = parseLimitValue(right.split("\\s+")[0], lim);
+            return new LimitOffset(limit, offset);
+        }
+
+        String upper = trimmed.toUpperCase(Locale.ROOT);
+        int offsetIdx = upper.indexOf(" OFFSET ");
+        if (offsetIdx >= 0) {
+            String limitPart = trimmed.substring(0, offsetIdx).trim();
+            String offsetPart = trimmed.substring(offsetIdx + " OFFSET ".length()).trim();
+            if (limitPart.isEmpty() || offsetPart.isEmpty()) throw new SQLException("Bad LIMIT: " + lim);
+            int limit = parseLimitValue(limitPart.split("\\s+")[0], lim);
+            int offset = parseLimitValue(offsetPart.split("\\s+")[0], lim);
+            return new LimitOffset(limit, offset);
+        }
+
+        String[] parts = trimmed.split("\\s+");
+        int limit = parseLimitValue(parts[0], lim);
+        return new LimitOffset(limit, 0);
+    }
+
+    private static int parseLimitValue(String token, String original) throws SQLException {
         try {
-            int v = Integer.parseInt(parts[0]);
+            int v = Integer.parseInt(token);
             return Math.max(0, v);
         } catch (Exception e) {
-            throw new SQLException("Bad LIMIT: " + lim);
+            throw new SQLException("Bad LIMIT: " + original);
         }
     }
 
