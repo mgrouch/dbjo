@@ -365,20 +365,38 @@ public final class RocksJdbcWhereParser {
                 return new IsNull(col, neg);
             }
 
-            // BETWEEN / NOT BETWEEN
-            boolean negBetween = false;
-            if (look.t == TokenType.NOT) { negBetween = true; consume(); }
+            // BETWEEN / NOT BETWEEN / IN / NOT IN
+            if (look.t == TokenType.NOT) {
+                consume();
+                if (look.t == TokenType.BETWEEN) {
+                    consume();
+                    Lit lo = parseLit();
+                    expectIdentKeyword("AND");
+                    Lit hi = parseLit();
+                    return new Between(col, lo, hi, true);
+                }
+                if (look.t == TokenType.IN) {
+                    consume();
+                    expect(TokenType.LP);
+                    ArrayList<Lit> vs = new ArrayList<>();
+                    if (look.t != TokenType.RP) {
+                        vs.add(parseLit());
+                        while (look.t == TokenType.COMMA) { consume(); vs.add(parseLit()); }
+                    }
+                    expect(TokenType.RP);
+                    return new In(col, vs, true);
+                }
+                throw new SQLException("Expected BETWEEN or IN after NOT");
+            }
+
             if (look.t == TokenType.BETWEEN) {
                 consume();
                 Lit lo = parseLit();
                 expectIdentKeyword("AND");
                 Lit hi = parseLit();
-                return new Between(col, lo, hi, negBetween);
+                return new Between(col, lo, hi, false);
             }
 
-            // IN / NOT IN
-            boolean negIn = false;
-            if (look.t == TokenType.NOT) { negIn = true; consume(); }
             if (look.t == TokenType.IN) {
                 consume();
                 expect(TokenType.LP);
@@ -388,7 +406,7 @@ public final class RocksJdbcWhereParser {
                     while (look.t == TokenType.COMMA) { consume(); vs.add(parseLit()); }
                 }
                 expect(TokenType.RP);
-                return new In(col, vs, negIn);
+                return new In(col, vs, false);
             }
 
             // comparison

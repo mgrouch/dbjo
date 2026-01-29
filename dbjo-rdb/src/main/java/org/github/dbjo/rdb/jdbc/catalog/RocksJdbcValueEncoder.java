@@ -23,19 +23,19 @@ public final class RocksJdbcValueEncoder {
     }
 
     public static int coerceInt(Object value) throws SQLException {
-        if (value instanceof Number n) {
-            long l = n.longValue();
-            if (l < Integer.MIN_VALUE || l > Integer.MAX_VALUE) {
-                throw new SQLException("Numeric literal out of int range: " + value);
-            }
-            return (int) l;
-        }
         if (value instanceof BigDecimal bd) {
             try {
                 return bd.intValueExact();
             } catch (ArithmeticException ex) {
                 throw new SQLException("Numeric literal out of int range: " + value, ex);
             }
+        }
+        if (value instanceof Number n) {
+            long l = n.longValue();
+            if (l < Integer.MIN_VALUE || l > Integer.MAX_VALUE) {
+                throw new SQLException("Numeric literal out of int range: " + value);
+            }
+            return (int) l;
         }
         try {
             return Integer.parseInt(String.valueOf(value).trim());
@@ -45,7 +45,6 @@ public final class RocksJdbcValueEncoder {
     }
 
     public static long coerceLong(Object value) throws SQLException {
-        if (value instanceof Number n) return n.longValue();
         if (value instanceof BigDecimal bd) {
             try {
                 return bd.longValueExact();
@@ -53,6 +52,7 @@ public final class RocksJdbcValueEncoder {
                 throw new SQLException("Numeric literal out of long range: " + value, ex);
             }
         }
+        if (value instanceof Number n) return n.longValue();
         try {
             return Long.parseLong(String.valueOf(value).trim());
         } catch (NumberFormatException ex) {
