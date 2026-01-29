@@ -5,12 +5,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Pattern;
 
-public final class ArgMap {
-    private final Map<String, String> map;
-
-    private ArgMap(Map<String, String> map) {
-        this.map = map;
-    }
+public record ArgMap(Map<String, String> map) {
 
     public static ArgMap parse(String[] args) {
         Map<String, String> m = new LinkedHashMap<>();

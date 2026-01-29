@@ -30,7 +30,7 @@ final class SqlCriteriaCompilerTest {
 
     @SuppressWarnings({"rawtypes", "unchecked"})
     private static final EntityMeta<Foo> META = new EntityMeta(
-            (java.util.List) java.util.List.of(ID, CREATED_AT),
+            java.util.List.of(ID, CREATED_AT),
             java.util.List.of("id", "createdAt"),
             java.util.List.of(Integer.class, String.class)
     );
@@ -70,7 +70,7 @@ final class SqlCriteriaCompilerTest {
     @Test
     void falseWhere_becomesWhere1eq0() {
         org.github.dbjo.criteria.Query<Foo> q = org.github.dbjo.criteria.Query.from(META)
-                .where(Conditions.<Foo>falseCondition())
+                .where(Conditions.falseCondition())
                 .build();
 
         SqlCriteriaCompiler.Compiled out = SqlCriteriaCompiler.compileSelectAll(DB_META, q);

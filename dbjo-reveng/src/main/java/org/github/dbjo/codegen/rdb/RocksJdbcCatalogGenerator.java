@@ -10,7 +10,6 @@ import org.github.dbjo.meta.db.TableModel;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.sql.Types;
 import java.util.*;
 
 /**

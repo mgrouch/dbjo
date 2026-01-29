@@ -20,7 +20,7 @@ import java.util.regex.Pattern;
  */
 public final class IdentifierQuoter {
 
-    private static final Pattern SIMPLE_IDENT = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
+    private static final Pattern SIMPLE_IDENT = Pattern.compile("[A-Za-z_]\\w*");
 
     private static final Set<String> EXTRA_KEYWORDS = Set.of(
             "USER", "ORDER", "GROUP", "SELECT", "FROM", "WHERE",

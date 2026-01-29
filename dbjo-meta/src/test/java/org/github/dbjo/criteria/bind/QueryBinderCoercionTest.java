@@ -93,7 +93,7 @@ final class QueryBinderCoercionTest {
 
     @SuppressWarnings({"rawtypes", "unchecked"})
     private static final EntityMeta<Foo> META = new EntityMeta(
-            (List) List.of(ID, LONG_ID, SMALL, ACTIVE, STATUS, PLAIN),
+            List.of(ID, LONG_ID, SMALL, ACTIVE, STATUS, PLAIN),
             List.of("id", "longId", "small", "active", "status", "plain"),
             List.of(Integer.class, Long.class, Short.class, Boolean.class, Status.class, Plain.class)
     );
