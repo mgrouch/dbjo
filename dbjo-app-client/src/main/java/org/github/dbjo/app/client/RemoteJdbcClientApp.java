@@ -20,9 +20,13 @@ public final class RemoteJdbcClientApp {
                 "select * from tables",
                 "select * from client",
                 "select count(*) from client",
+                "select id, name, email from client where id >= 1 order by id limit 5",
+                "select id from client where id in (1, 2, 3)",
+                "select * from client where email is not null",
                 "select id, email from client order by id",
+                "select min(qty), max(qty), sum(qty) from purchase",
                 "select product_id, sum(qty) from purchase group by product_id order by product_id",
-                "select c.name, count(*) from purchase p join client c on p.client_id = c.id group by c.name"
+                "select product_id, count(*) from purchase group by product_id having count(*) > 0"
         );
 
         try (Connection connection = DriverManager.getConnection(url);
