@@ -9,6 +9,7 @@ import javax.sql.rowset.RowSetProvider;
 import java.lang.reflect.Method;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.sql.DatabaseMetaData;
 import java.sql.SQLException;
 import java.util.*;
 import java.util.Base64;
@@ -336,7 +337,7 @@ public final class RocksJdbcExecutor {
             md.setColumnTypeName(col, c.typeName());
             md.setColumnDisplaySize(col, c.size());
             md.setScale(col, c.scale());
-            md.setNullable(col, c.nullable());
+            md.setNullable(col, c.nullable() ? java.sql.DatabaseMetaData.columnNullable : DatabaseMetaData.columnNoNulls);
         }
         return md;
     }

@@ -331,7 +331,7 @@ public final class RocksJdbcDatabaseMetaData implements DatabaseMetaData {
                 rs.updateString(5, c.typeName());
                 rs.updateInt(6, c.size());
                 rs.updateInt(7, c.scale());
-                rs.updateInt(8, c.nullable());
+                rs.updateInt(8, c.nullable() ? java.sql.DatabaseMetaData.columnNullable : DatabaseMetaData.columnNoNulls);
                 rs.updateInt(9, c.pos());
                 rs.insertRow();
                 rs.moveToCurrentRow();
