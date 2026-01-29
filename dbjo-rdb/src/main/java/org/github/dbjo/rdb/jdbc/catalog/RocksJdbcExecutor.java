@@ -265,7 +265,7 @@ public final class RocksJdbcExecutor {
 
                         // upper bound handling
                         if (toEscaped != null) {
-                            int cmp = lexCompare(vprefix, toEscaped);
+                            int cmp = lexCompare(Objects.requireNonNull(vprefix), toEscaped);
                             if (cmp > 0) return false;
                             if (cmp == 0 && !r.toInclusive()) {
                                 // value == to and exclusive -> stop entirely

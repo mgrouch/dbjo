@@ -89,23 +89,8 @@ public final class RocksJdbcStatement implements Statement {
     @Override public boolean isCloseOnCompletion() { return false; }
 
     @Override
-    public long getLargeUpdateCount() throws SQLException {
-        return Statement.super.getLargeUpdateCount();
-    }
-
-    @Override
     public void setLargeMaxRows(long max) throws SQLException {
         Statement.super.setLargeMaxRows(max);
-    }
-
-    @Override
-    public long getLargeMaxRows() throws SQLException {
-        return Statement.super.getLargeMaxRows();
-    }
-
-    @Override
-    public long[] executeLargeBatch() throws SQLException {
-        return Statement.super.executeLargeBatch();
     }
 
     @Override

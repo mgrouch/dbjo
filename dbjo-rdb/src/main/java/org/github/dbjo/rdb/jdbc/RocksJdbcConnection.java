@@ -1,7 +1,5 @@
 package org.github.dbjo.rdb.jdbc;
 
-import org.github.dbjo.rdb.jdbc.catalog.RocksJdbcExecutor;
-
 import java.sql.*;
 import java.util.Map;
 import java.util.Objects;

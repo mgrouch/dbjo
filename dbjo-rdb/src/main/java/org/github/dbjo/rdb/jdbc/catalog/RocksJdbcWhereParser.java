@@ -53,7 +53,7 @@ public final class RocksJdbcWhereParser {
         @Override public boolean eval(Row row) throws SQLException {
             Object v = row.get(col);
             boolean ok = compare(v, Op.GE, lo.value()) && compare(v, Op.LE, hi.value());
-            return negated ? !ok : ok;
+            return negated != ok;
         }
     }
 
@@ -64,7 +64,7 @@ public final class RocksJdbcWhereParser {
             for (Lit l : values) {
                 if (equalsValue(v, l.value())) { ok = true; break; }
             }
-            return negated ? !ok : ok;
+            return negated != ok;
         }
     }
 
@@ -72,7 +72,7 @@ public final class RocksJdbcWhereParser {
         @Override public boolean eval(Row row) throws SQLException {
             Object v = row.get(col);
             boolean ok = (v == null);
-            return negated ? !ok : ok;
+            return negated != ok;
         }
     }
 
@@ -283,8 +283,7 @@ public final class RocksJdbcWhereParser {
 
             // quoted identifiers: "x"  [x]  `x`
             if (c == '"' || c == '[' || c == '`') {
-                char open = c;
-                char close = (open == '[') ? ']' : open;
+                char close = (c == '[') ? ']' : c;
                 i++;
                 int start = i;
                 while (i < src.length() && src.charAt(i) != close) i++;

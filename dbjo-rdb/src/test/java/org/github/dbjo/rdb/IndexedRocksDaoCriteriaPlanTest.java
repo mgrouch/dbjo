@@ -37,7 +37,7 @@ final class IndexedRocksDaoCriteriaPlanTest {
 
     @SuppressWarnings({"rawtypes", "unchecked"})
     private static final EntityMeta<Foo> META = new EntityMeta(
-            (List) List.of(ID, AGE, NAME),
+            List.of(ID, AGE, NAME),
             List.of("id", "age", "name"),
             List.of(Integer.class, Integer.class, String.class)
     );
@@ -77,7 +77,7 @@ final class IndexedRocksDaoCriteriaPlanTest {
         );
     }
 
-    TestDao dao = newDao();
+    final TestDao dao = newDao();
 
     private static final class TestDao extends IndexedRocksDao<Foo, Integer> {
         final List<Query<Integer>> seen = new ArrayList<>();

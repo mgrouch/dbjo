@@ -387,7 +387,7 @@ public final class RocksJdbcDatabaseMetaData implements DatabaseMetaData {
 
         // Primary as "PRIMARY"
         String[] pk = t.pkColumns();
-        if (pk.length > 0 && (!unique || true)) {
+        if (pk.length > 0) {
             for (int i = 0; i < pk.length; i++) {
                 rs.moveToInsertRow();
                 rs.updateString(1, t.schemaName());

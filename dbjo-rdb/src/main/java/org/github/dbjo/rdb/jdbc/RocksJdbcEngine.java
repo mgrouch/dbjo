@@ -9,7 +9,6 @@ import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import java.util.*;
-import java.util.Base64;
 
 /**
  * Opens RocksDB with the CFs described by the generated RocksJdbcCatalog
@@ -115,10 +114,10 @@ public final class RocksJdbcEngine implements AutoCloseable {
 
         // scan primary, repopulate
         RocksIterator it = db.newIterator(primary);
-        it.seekToFirst();
 
-        try (WriteBatch wb = new WriteBatch();
+        try (it; WriteBatch wb = new WriteBatch();
              WriteOptions wo = new WriteOptions().setDisableWAL(true)) {
+            it.seekToFirst();
 
             int batchOps = 0;
             final byte[] EMPTY = new byte[0];
@@ -177,8 +176,6 @@ public final class RocksJdbcEngine implements AutoCloseable {
         } catch (Exception e) {
             if (e instanceof SQLException se) throw se;
             throw new SQLException("Index rebuild failed for " + t.tableName(), e);
-        } finally {
-            it.close();
         }
     }
 

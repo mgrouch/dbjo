@@ -89,11 +89,6 @@ public final class SimpleRowSetMetaData implements RowSetMetaData {
     @Override public void setCatalogName(int column, String catalogName) {}
     @Override public void setColumnCount(int columnCount) throws SQLException {}
 
-    public void setReadOnly(int column, boolean property) {}
-    public void setWritable(int column, boolean property) {}
-    public void setDefinitelyWritable(int column, boolean property) {}
-    public void setColumnClassName(int column, String className) {}
-
     // wrappers:
     @Override public <T> T unwrap(Class<T> iface) throws SQLException { throw new SQLException("unwrap"); }
     @Override public boolean isWrapperFor(Class<?> iface) { return false; }

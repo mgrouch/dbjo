@@ -18,8 +18,7 @@ import java.sql.Types;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 final class RocksJdbcDriverTest {
 
@@ -48,7 +47,7 @@ final class RocksJdbcDriverTest {
             assertTrue(rs.next());
             assertEquals("B", rs.getString(1));
             assertEquals(2L, rs.getLong(2));
-            assertTrue(!rs.next());
+            assertFalse(rs.next());
         }
     }
 
@@ -67,7 +66,7 @@ final class RocksJdbcDriverTest {
             assertTrue(rs.next());
             assertEquals(2, rs.getInt(1));
             assertEquals(20L, rs.getLong(2));
-            assertTrue(!rs.next());
+            assertFalse(rs.next());
         }
     }
 

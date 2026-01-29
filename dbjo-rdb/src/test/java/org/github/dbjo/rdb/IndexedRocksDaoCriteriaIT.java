@@ -60,7 +60,7 @@ public class IndexedRocksDaoCriteriaIT {
 
     @SuppressWarnings({"rawtypes", "unchecked"})
     private static final EntityMeta<Person> PERSON_META = new EntityMeta(
-            (List) List.of(P_ID, P_REGION, P_AGE),
+            List.of(P_ID, P_REGION, P_AGE),
             List.of("id", "region", "age"),
             List.of(Integer.class, String.class, Integer.class)
     );

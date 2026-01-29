@@ -7,33 +7,29 @@ import java.util.function.Function;
 
 /**
  * Defines a secondary index for a RocksDB-backed entity.
- *
+ * <p>
  * Index keys are stored as:
- *    unique( escaped(valueBytes) + SEP + pkBytes )
- *
+ * unique( escaped(valueBytes) + SEP + pkBytes )
+ * <p>
  * So both "unique" and "multi" indexes can be scanned by value prefix.
- *
+ * <p>
  * For criteria pushdown we also optionally carry:
- *  - propertyName: Java bean property name (matching PropertyMeta#getPropertyName())
- *  - codec: how to encode that property's value into valueBytes (order-preserving for ranges)
+ * - propertyName: Java bean property name (matching PropertyMeta#getPropertyName())
+ * - codec: how to encode that property's value into valueBytes (order-preserving for ranges)
+ *
+ * @param propertyName nullable
+ * @param valueKeys    Produces encoded value-bytes (NOT including pk); maintainIndexes will append pk via IndexKeys.unique(...)
  */
-public final class IndexDef<T, V> {
+public record IndexDef<T, V>(String name, String propertyName, org.github.dbjo.rdb.IndexDef.Kind kind,
+                             IndexKeyCodec<V> codec, Function<T, Iterable<byte[]>> valueKeys) {
 
-    public enum Kind { UNIQUE, MULTI }
+    public enum Kind {UNIQUE, MULTI}
 
-    private final String name;
-    private final String propertyName; // nullable
-    private final Kind kind;
-    private final IndexKeyCodec<V> codec;
-
-    // Produces encoded value-bytes (NOT including pk); maintainIndexes will append pk via IndexKeys.unique(...)
-    private final Function<T, Iterable<byte[]>> valueKeys;
-
-    private IndexDef(String name,
-                     String propertyName,
-                     Kind kind,
-                     IndexKeyCodec<V> codec,
-                     Function<T, Iterable<byte[]>> valueKeys) {
+    public IndexDef(String name,
+                    String propertyName,
+                    Kind kind,
+                    IndexKeyCodec<V> codec,
+                    Function<T, Iterable<byte[]>> valueKeys) {
         this.name = Objects.requireNonNull(name, "name");
         this.propertyName = (propertyName == null || propertyName.isBlank()) ? null : propertyName;
         this.kind = Objects.requireNonNull(kind, "kind");
@@ -41,16 +37,17 @@ public final class IndexDef<T, V> {
         this.valueKeys = Objects.requireNonNull(valueKeys, "valueKeys");
     }
 
-    public String name() { return name; }
+    /**
+     * Nullable; when present enables criteria pushdown by property name.
+     */
+    @Override
+    public String propertyName() {
+        return propertyName;
+    }
 
-    /** Nullable; when present enables criteria pushdown by property name. */
-    public String propertyName() { return propertyName; }
-
-    public Kind kind() { return kind; }
-
-    public IndexKeyCodec<V> codec() { return codec; }
-
-    /** Encodes a typed value to raw value-bytes (may return null if value is null). */
+    /**
+     * Encodes a typed value to raw value-bytes (may return null if value is null).
+     */
     public byte[] encodeValueOrNull(V value) {
         return value == null ? null : codec.encode(value);
     }
