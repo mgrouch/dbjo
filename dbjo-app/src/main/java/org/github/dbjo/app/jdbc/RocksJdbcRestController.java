@@ -14,6 +14,8 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import javax.sql.rowset.CachedRowSet;
+import javax.sql.rowset.RowSetProvider;
+import javax.sql.rowset.WebRowSet;
 import java.io.StringWriter;
 import java.sql.SQLException;
 
@@ -35,8 +37,10 @@ public class RocksJdbcRestController {
     public RemoteRocksJdbcQueryResponse query(@RequestBody RemoteRocksJdbcQueryRequest request) {
         try {
             CachedRowSet rowSet = engine.query(request.sql(), request.maxRows());
+            WebRowSet webRowSet = RowSetProvider.newFactory().createWebRowSet();
+            webRowSet.populate(rowSet);
             StringWriter writer = new StringWriter();
-            rowSet.writeXml(writer);
+            webRowSet.writeXml(writer);
             return new RemoteRocksJdbcQueryResponse(writer.toString());
         } catch (SQLException e) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Query failed", e);

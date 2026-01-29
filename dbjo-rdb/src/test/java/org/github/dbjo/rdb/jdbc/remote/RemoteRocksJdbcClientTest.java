@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import javax.sql.rowset.CachedRowSet;
 import javax.sql.rowset.RowSetMetaDataImpl;
 import javax.sql.rowset.RowSetProvider;
+import javax.sql.rowset.WebRowSet;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.StringWriter;
@@ -77,7 +78,7 @@ class RemoteRocksJdbcClientTest {
     }
 
     private static String buildRowSetXml() throws SQLException {
-        CachedRowSet rowSet = RowSetProvider.newFactory().createCachedRowSet();
+        WebRowSet rowSet = RowSetProvider.newFactory().createWebRowSet();
         RowSetMetaDataImpl meta = new RowSetMetaDataImpl();
         meta.setColumnCount(1);
         meta.setColumnName(1, "id");

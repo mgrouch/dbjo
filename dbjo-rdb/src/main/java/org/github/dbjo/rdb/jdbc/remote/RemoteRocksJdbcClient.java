@@ -7,6 +7,7 @@ import org.github.dbjo.rdb.jdbc.remote.dto.RemoteRocksJdbcQueryResponse;
 
 import javax.sql.rowset.CachedRowSet;
 import javax.sql.rowset.RowSetProvider;
+import javax.sql.rowset.WebRowSet;
 import java.io.IOException;
 import java.io.StringReader;
 import java.net.URI;
@@ -64,7 +65,7 @@ final class RemoteRocksJdbcClient {
             }
             RemoteRocksJdbcQueryResponse queryResponse =
                     mapper.readValue(response.body(), RemoteRocksJdbcQueryResponse.class);
-            CachedRowSet rowSet = RowSetProvider.newFactory().createCachedRowSet();
+            WebRowSet rowSet = RowSetProvider.newFactory().createWebRowSet();
             rowSet.readXml(new StringReader(queryResponse.rowsetXml()));
             return rowSet;
         } catch (InterruptedException e) {

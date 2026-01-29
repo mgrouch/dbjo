@@ -51,6 +51,8 @@ public final class RemoteRocksJdbcStatement implements Statement {
     @Override public void cancel() {}
     @Override public void clearWarnings() {}
     @Override public SQLWarning getWarnings() { return null; }
+    @Override public void setMaxFieldSize(int max) {}
+    @Override public int getMaxFieldSize() { return 0; }
     @Override public void clearBatch() {}
     @Override public void addBatch(String sql) throws SQLException { throw new SQLFeatureNotSupportedException(); }
     @Override public int[] executeBatch() throws SQLException { throw new SQLFeatureNotSupportedException(); }
@@ -64,6 +66,7 @@ public final class RemoteRocksJdbcStatement implements Statement {
     @Override public int getUpdateCount() { return -1; }
     @Override public boolean getMoreResults() { return false; }
     @Override public boolean getMoreResults(int current) { return false; }
+    @Override public ResultSet getGeneratedKeys() throws SQLException { throw new SQLFeatureNotSupportedException(); }
     @Override public void setEscapeProcessing(boolean enable) {}
     @Override public void setQueryTimeout(int seconds) {}
     @Override public int getQueryTimeout() { return 0; }
