@@ -60,6 +60,7 @@ public final class RocksJdbcExecutor {
 
         boolean hasAggregates = p.selectItems().stream().anyMatch(i -> i instanceof RocksJdbcSqlParser.SelectAgg);
         boolean hasGroupBy = !p.groupByColumns().isEmpty();
+        RocksJdbcWhereParser.Expr havingExpr = (p.havingSql() == null) ? null : RocksJdbcWhereParser.parse(p.havingSql());
 
         int limit = limit(p.limit(), statementMaxRows);
 
@@ -69,13 +70,26 @@ public final class RocksJdbcExecutor {
 
         if (hasAggregates || hasGroupBy) {
             rs.setMetaData(buildMetaForSelectItems(table, p.selectItems(), p.selectAll(), p.groupByColumns()));
-            runAggregateQuery(rs, db, cfsByName, table, primaryCf, acc, criteria, legacyWhere, access, p, limit);
+            runAggregateQuery(rs, db, cfsByName, table, primaryCf, acc, criteria, legacyWhere, access, p, havingExpr, limit);
         } else {
             List<RocksJdbcColumn> selected = p.selectAll()
                     ? List.of(table.columns())
                     : selectColumns(table, p.selectItems());
             rs.setMetaData(buildMeta(selected));
-            runRowQuery(rs, db, cfsByName, table, primaryCf, acc, criteria, legacyWhere, access, selected, limit);
+            runRowQuery(
+                    rs,
+                    db,
+                    cfsByName,
+                    table,
+                    primaryCf,
+                    acc,
+                    criteria,
+                    legacyWhere,
+                    access,
+                    selected,
+                    p.orderBy(),
+                    limit
+            );
         }
 
         rs.beforeFirst();
@@ -323,21 +337,35 @@ public final class RocksJdbcExecutor {
             RocksJdbcWhereParser.Expr legacyWhere,
             RocksJdbcPlanner.Access access,
             List<RocksJdbcColumn> selected,
+            List<RocksJdbcSqlParser.OrderItem> orderBy,
             int limit
     ) throws SQLException {
-        int out = 0;
+        List<String> labels = new ArrayList<>();
+        for (RocksJdbcColumn c : selected) labels.add(c.name());
+
+        List<RowResult> rows = new ArrayList<>();
         for (RowEntry e : scan(db, cfsByName, table, primaryCf, access)) {
-            if (out >= limit) break;
             if (e == null) continue;
 
             Object bean = decode(table, e.valueBytes());
             if (!matchesWhere(bean, acc, criteria, legacyWhere)) continue;
 
-            rs.moveToInsertRow();
+            Object[] values = new Object[selected.size()];
             for (int i = 0; i < selected.size(); i++) {
                 RocksJdbcColumn c = selected.get(i);
-                Object v = acc.getByGetter(bean, c.getterName());
-                rs.updateObject(i + 1, v);
+                values[i] = acc.getByGetter(bean, c.getterName());
+            }
+            rows.add(new RowResult(labels, values));
+        }
+
+        applyOrderBy(rows, orderBy);
+
+        int out = 0;
+        for (RowResult row : rows) {
+            if (out >= limit) break;
+            rs.moveToInsertRow();
+            for (int i = 0; i < row.values().length; i++) {
+                rs.updateObject(i + 1, row.values()[i]);
             }
             rs.insertRow();
             rs.moveToCurrentRow();
@@ -356,10 +384,12 @@ public final class RocksJdbcExecutor {
             RocksJdbcWhereParser.Expr legacyWhere,
             RocksJdbcPlanner.Access access,
             RocksJdbcSqlParser.Parsed parsed,
+            RocksJdbcWhereParser.Expr havingExpr,
             int limit
     ) throws SQLException {
         List<String> groupByCols = parsed.groupByColumns();
         List<RocksJdbcSqlParser.SelectItem> items = parsed.selectItems();
+        List<RocksJdbcSqlParser.OrderItem> orderBy = parsed.orderBy();
 
         if (parsed.selectAll()) {
             throw new SQLException("SELECT * is not supported with GROUP BY or aggregate functions.");
@@ -403,13 +433,26 @@ public final class RocksJdbcExecutor {
             groups.put(key, AggState.create(new Object[0], groupByCols, items));
         }
 
+        List<String> labels = selectLabels(table, items, parsed.selectAll());
+        List<RowResult> rows = new ArrayList<>();
         int out = 0;
         for (AggState state : groups.values()) {
+            Object[] values = new Object[items.size()];
+            for (int i = 0; i < items.size(); i++) {
+                values[i] = state.valueFor(items.get(i));
+            }
+            RowResult row = new RowResult(labels, values);
+            if (havingExpr != null && !havingExpr.eval(row::valueFor)) continue;
+            rows.add(row);
+        }
+
+        applyOrderBy(rows, orderBy);
+
+        for (RowResult row : rows) {
             if (out >= limit) break;
             rs.moveToInsertRow();
-            for (int i = 0; i < items.size(); i++) {
-                Object v = state.valueFor(items.get(i));
-                rs.updateObject(i + 1, v);
+            for (int i = 0; i < row.values().length; i++) {
+                rs.updateObject(i + 1, row.values()[i]);
             }
             rs.insertRow();
             rs.moveToCurrentRow();
@@ -494,6 +537,27 @@ public final class RocksJdbcExecutor {
             }
         }
         return md;
+    }
+
+    private static List<String> selectLabels(
+            RocksJdbcTable table,
+            List<RocksJdbcSqlParser.SelectItem> items,
+            boolean selectAll
+    ) throws SQLException {
+        if (selectAll && items.isEmpty()) {
+            List<String> labels = new ArrayList<>();
+            for (RocksJdbcColumn c : table.columns()) labels.add(c.name());
+            return labels;
+        }
+        List<String> labels = new ArrayList<>();
+        for (RocksJdbcSqlParser.SelectItem item : items) {
+            if (item instanceof RocksJdbcSqlParser.SelectColumn sc) {
+                labels.add(sc.name());
+            } else if (item instanceof RocksJdbcSqlParser.SelectAgg agg) {
+                labels.add(aggLabel(agg));
+            }
+        }
+        return labels;
     }
 
     private static int aggSqlType(RocksJdbcTable table, RocksJdbcSqlParser.SelectAgg agg) throws SQLException {
@@ -608,6 +672,42 @@ public final class RocksJdbcExecutor {
         rs.moveToCurrentRow();
         rs.beforeFirst();
         return rs;
+    }
+
+    private static void applyOrderBy(List<RowResult> rows, List<RocksJdbcSqlParser.OrderItem> orderBy) {
+        if (orderBy == null || orderBy.isEmpty() || rows.isEmpty()) return;
+        rows.sort((a, b) -> compareRow(a, b, orderBy));
+    }
+
+    private static int compareRow(RowResult a, RowResult b, List<RocksJdbcSqlParser.OrderItem> orderBy) {
+        for (RocksJdbcSqlParser.OrderItem item : orderBy) {
+            int cmp = compareValues(a.valueFor(item.column()), b.valueFor(item.column()));
+            if (cmp != 0) return item.descending() ? -cmp : cmp;
+        }
+        return 0;
+    }
+
+    private static final class RowResult {
+        private final Map<String, Integer> indexByLabelLower = new HashMap<>();
+        private final Object[] values;
+
+        RowResult(List<String> labels, Object[] values) {
+            this.values = values;
+            for (int i = 0; i < labels.size(); i++) {
+                String label = labels.get(i);
+                if (label != null) indexByLabelLower.put(label.trim().toLowerCase(Locale.ROOT), i);
+            }
+        }
+
+        Object valueFor(String label) {
+            if (label == null) return null;
+            Integer idx = indexByLabelLower.get(label.trim().toLowerCase(Locale.ROOT));
+            return idx == null ? null : values[idx];
+        }
+
+        Object[] values() {
+            return values;
+        }
     }
 
     private static final class GroupKey {

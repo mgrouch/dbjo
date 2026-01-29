@@ -39,7 +39,7 @@ public final class RocksJdbcTable {
             String[] pkColumns,
             RocksJdbcIndex[] indexes,
             RocksJdbcDecoder decoder,
-            Map<String, PropertyTerm<?, ? extends Serializable>> termsByColumnLower,
+            Map<String, ? extends PropertyTerm<?, ? extends Serializable>> termsByColumnLower,
             String[] names
     ) {
         this.schemaName = (schemaName == null || schemaName.isBlank()) ? "PUBLIC" : schemaName;

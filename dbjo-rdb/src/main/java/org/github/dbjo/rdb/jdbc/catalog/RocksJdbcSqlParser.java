@@ -9,9 +9,9 @@ import java.util.Locale;
  * Minimal SQL parser for DataGrip-style queries:
  *
  * Supported:
- *  - SELECT * FROM t [WHERE ...] [LIMIT n]
- *  - SELECT c1,c2 FROM t [WHERE ...] [LIMIT n]
- *  - SELECT COUNT(*) FROM t [WHERE ...]
+ *  - SELECT * FROM t [WHERE ...] [ORDER BY ...] [LIMIT n]
+ *  - SELECT c1,c2 FROM t [WHERE ...] [GROUP BY ...] [HAVING ...] [ORDER BY ...] [LIMIT n]
+ *  - SELECT COUNT(*) FROM t [WHERE ...] [GROUP BY ...] [HAVING ...] [ORDER BY ...] [LIMIT n]
  */
 public final class RocksJdbcSqlParser {
     private RocksJdbcSqlParser() {}
@@ -20,13 +20,16 @@ public final class RocksJdbcSqlParser {
     public record SelectColumn(String name) implements SelectItem {}
     public record SelectAgg(AggFn fn, String column, boolean countStar) implements SelectItem {}
     public enum AggFn { COUNT, MIN, MAX, SUM }
+    public record OrderItem(String column, boolean descending) {}
 
     public record Parsed(
             String tableName,
             List<SelectItem> selectItems,
             boolean selectAll,
             String whereSql,             // null => none
+            String havingSql,            // null => none
             List<String> groupByColumns,
+            List<OrderItem> orderBy,
             Integer limit                // null => none
     ) {}
 
@@ -57,14 +60,22 @@ public final class RocksJdbcSqlParser {
 
         int whereIdx = indexOfKeyword(tailU, " WHERE ");
         int groupIdx = indexOfKeyword(tailU, " GROUP BY ");
+        int havingIdx = indexOfKeyword(tailU, " HAVING ");
+        int orderIdx = indexOfKeyword(tailU, " ORDER BY ");
         int limitIdx = indexOfKeyword(tailU, " LIMIT ");
 
-        int tableEnd = firstPos(tail.length(), whereIdx, groupIdx, limitIdx);
+        int tableEnd = firstPos(tail.length(), whereIdx, groupIdx, havingIdx, orderIdx, limitIdx);
         table = tail.substring(0, tableEnd).trim();
 
         if (whereIdx >= 0) {
             int whereStart = whereIdx + " WHERE ".length();
-            int whereEnd = firstPos(tail.length(), nextPosAfter(whereIdx, groupIdx), nextPosAfter(whereIdx, limitIdx));
+            int whereEnd = firstPos(
+                    tail.length(),
+                    nextPosAfter(whereIdx, groupIdx),
+                    nextPosAfter(whereIdx, havingIdx),
+                    nextPosAfter(whereIdx, orderIdx),
+                    nextPosAfter(whereIdx, limitIdx)
+            );
             where = tail.substring(whereStart, whereEnd).trim();
             if (where.isBlank()) where = null;
         }
@@ -72,12 +83,46 @@ public final class RocksJdbcSqlParser {
         List<String> groupBy = new ArrayList<>();
         if (groupIdx >= 0) {
             int groupStart = groupIdx + " GROUP BY ".length();
-            int groupEnd = firstPos(tail.length(), nextPosAfter(groupIdx, limitIdx));
+            int groupEnd = firstPos(
+                    tail.length(),
+                    nextPosAfter(groupIdx, havingIdx),
+                    nextPosAfter(groupIdx, orderIdx),
+                    nextPosAfter(groupIdx, limitIdx)
+            );
             String groupPart = tail.substring(groupStart, groupEnd).trim();
             if (!groupPart.isBlank()) {
                 for (String g : groupPart.split(",")) {
                     String gg = g.trim();
                     if (!gg.isEmpty()) groupBy.add(stripIdentifierQuotes(gg));
+                }
+            }
+        }
+
+        String having = null;
+        if (havingIdx >= 0) {
+            int havingStart = havingIdx + " HAVING ".length();
+            int havingEnd = firstPos(
+                    tail.length(),
+                    nextPosAfter(havingIdx, orderIdx),
+                    nextPosAfter(havingIdx, limitIdx)
+            );
+            having = tail.substring(havingStart, havingEnd).trim();
+            if (having.isBlank()) having = null;
+        }
+
+        List<OrderItem> orderBy = new ArrayList<>();
+        if (orderIdx >= 0) {
+            int orderStart = orderIdx + " ORDER BY ".length();
+            int orderEnd = firstPos(tail.length(), nextPosAfter(orderIdx, limitIdx));
+            String orderPart = tail.substring(orderStart, orderEnd).trim();
+            if (!orderPart.isBlank()) {
+                for (String o : orderPart.split(",")) {
+                    String oo = o.trim();
+                    if (oo.isEmpty()) continue;
+                    String[] parts = oo.split("\\s+");
+                    String col = stripIdentifierQuotes(parts[0]);
+                    boolean desc = parts.length > 1 && "DESC".equalsIgnoreCase(parts[1]);
+                    orderBy.add(new OrderItem(col, desc));
                 }
             }
         }
@@ -102,7 +147,7 @@ public final class RocksJdbcSqlParser {
             }
         }
 
-        return new Parsed(stripIdentifierQuotes(table), items, selectAll, where, groupBy, limit);
+        return new Parsed(stripIdentifierQuotes(table), items, selectAll, where, having, groupBy, orderBy, limit);
     }
 
     private static SelectItem parseSelectItem(String token) {
