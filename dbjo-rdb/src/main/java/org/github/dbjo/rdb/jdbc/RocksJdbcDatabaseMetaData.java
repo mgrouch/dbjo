@@ -518,10 +518,9 @@ public final class RocksJdbcDatabaseMetaData implements DatabaseMetaData {
     // Misc: more required boolean flags
     // -------------------------------------------------------------------------
 
-    @Override public boolean supportsCatalogsInDataManipulationTransactionsOnly() { return false; } // not used, conservative
-    @Override public boolean supportsDataManipulationTransactionsOnly(boolean dummy) { return false; } // not real; keep out
-
-    @Override public boolean supportsDifferentTableCorrelationNames(boolean dummy) { return false; } // not real; keep out
+    public boolean supportsCatalogsInDataManipulationTransactionsOnly() { return false; } // not used, conservative
+    public boolean supportsDataManipulationTransactionsOnly(boolean dummy) { return false; } // not real; keep out
+    public boolean supportsDifferentTableCorrelationNames(boolean dummy) { return false; } // not real; keep out
 
     // -------------------------------------------------------------------------
     // Connection
@@ -566,12 +565,9 @@ public final class RocksJdbcDatabaseMetaData implements DatabaseMetaData {
     // These are mostly about fine-grained feature support. Implement conservatively.
     // -------------------------------------------------------------------------
 
-    @Override public boolean supportsDataDefinitionAndDataManipulationTransactions() { return false; }
-    @Override public boolean supportsDataManipulationTransactionsOnly() { return false; } // already above but interface requires once
+    public boolean supportsBatchUpdates(boolean dummy) { return false; } // not real; DO NOT add in your code
 
-    @Override public boolean supportsBatchUpdates(boolean dummy) { return false; } // not real; DO NOT add in your code
-
-    @Override public boolean supportsSubqueriesInComparisons(boolean dummy) { return false; } // not real; DO NOT add
+    public boolean supportsSubqueriesInComparisons(boolean dummy) { return false; } // not real; DO NOT add
 
     // -------------------------------------------------------------------------
     // NOTE:
