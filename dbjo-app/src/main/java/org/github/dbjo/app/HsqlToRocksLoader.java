@@ -3,6 +3,9 @@ package org.github.dbjo.app;
 import org.github.dbjo.generated.model.dao.rdb.ClientDao;
 import org.github.dbjo.generated.model.dao.rdb.ProductDao;
 import org.github.dbjo.generated.model.dao.rdb.PurchaseDao;
+import org.github.dbjo.generated.model.dbmeta.ClientDbMeta;
+import org.github.dbjo.generated.model.dbmeta.ProductDbMeta;
+import org.github.dbjo.generated.model.dbmeta.PurchaseDbMeta;
 import org.github.dbjo.generated.model.entity.Client;
 import org.github.dbjo.generated.model.entity.Product;
 import org.github.dbjo.generated.model.entity.Purchase;
@@ -10,8 +13,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.sql.ResultSet;
-import java.sql.SQLException;
 
 @Service
 public class HsqlToRocksLoader {
@@ -41,10 +42,11 @@ public class HsqlToRocksLoader {
 
     private void loadClients() {
         jdbcTemplate.query(
-                "select id, email, name, created_at from client",
+                ClientDbMeta.INSTANCE.selectAllSql(),
                 (org.springframework.jdbc.core.ResultSetExtractor<Void>) rs -> {
                     while (rs.next()) {
-                        clientDao.upsert(rs.getLong("id"), toClient(rs));
+                        Client client = ClientDbMeta.INSTANCE.fromRow(rs);
+                        clientDao.upsert(client.getId(), client);
                     }
                     return null;
                 }
@@ -53,10 +55,11 @@ public class HsqlToRocksLoader {
 
     private void loadProducts() {
         jdbcTemplate.query(
-                "select id, sku, title, price_cents from product",
+                ProductDbMeta.INSTANCE.selectAllSql(),
                 (org.springframework.jdbc.core.ResultSetExtractor<Void>) rs -> {
                     while (rs.next()) {
-                        productDao.upsert(rs.getLong("id"), toProduct(rs));
+                        Product product = ProductDbMeta.INSTANCE.fromRow(rs);
+                        productDao.upsert(product.getId(), product);
                     }
                     return null;
                 }
@@ -65,41 +68,14 @@ public class HsqlToRocksLoader {
 
     private void loadPurchases() {
         jdbcTemplate.query(
-                "select id, client_id, product_id, qty, ordered_at from purchase",
+                PurchaseDbMeta.INSTANCE.selectAllSql(),
                 (org.springframework.jdbc.core.ResultSetExtractor<Void>) rs -> {
                     while (rs.next()) {
-                        purchaseDao.upsert(rs.getLong("id"), toPurchase(rs));
+                        Purchase purchase = PurchaseDbMeta.INSTANCE.fromRow(rs);
+                        purchaseDao.upsert(purchase.getId(), purchase);
                     }
                     return null;
                 }
         );
-    }
-
-    private static Client toClient(ResultSet rs) throws SQLException {
-        Client client = new Client();
-        client.setId(rs.getLong("id"));
-        client.setEmail(rs.getString("email"));
-        client.setName(rs.getString("name"));
-        client.setCreatedAt(rs.getTimestamp("created_at"));
-        return client;
-    }
-
-    private static Product toProduct(ResultSet rs) throws SQLException {
-        Product product = new Product();
-        product.setId(rs.getLong("id"));
-        product.setSku(rs.getString("sku"));
-        product.setTitle(rs.getString("title"));
-        product.setPriceCents(rs.getInt("price_cents"));
-        return product;
-    }
-
-    private static Purchase toPurchase(ResultSet rs) throws SQLException {
-        Purchase purchase = new Purchase();
-        purchase.setId(rs.getLong("id"));
-        purchase.setClientId(rs.getLong("client_id"));
-        purchase.setProductId(rs.getLong("product_id"));
-        purchase.setQty(rs.getInt("qty"));
-        purchase.setOrderedAt(rs.getTimestamp("ordered_at"));
-        return purchase;
     }
 }
