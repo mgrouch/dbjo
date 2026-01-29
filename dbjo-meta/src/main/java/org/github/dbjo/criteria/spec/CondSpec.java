@@ -5,6 +5,5 @@ import java.io.Serializable;
 public sealed interface CondSpec extends Serializable
         permits TrueSpec, FalseSpec,
         EqSpec, NeSpec, InSpec, IsNullSpec, IsNotNullSpec,
-        BetweenSpec, CmpSpec,
+        BetweenSpec, CmpSpec, LikeSpec,
         AndSpec, OrSpec, NotSpec {}
-

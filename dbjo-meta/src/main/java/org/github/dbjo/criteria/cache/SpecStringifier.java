@@ -17,6 +17,7 @@ public final class SpecStringifier {
         if (c instanceof IsNotNullSpec e) return "ISNOTNULL(" + e.property() + ")";
         if (c instanceof BetweenSpec e) return "BETWEEN(" + e.property() + "," + valueKey(e.lo()) + "," + valueKey(e.hi()) + ")";
         if (c instanceof CmpSpec e) return "CMP(" + e.property() + "," + e.op() + "," + valueKey(e.value()) + ")";
+        if (c instanceof LikeSpec e) return "LIKE(" + e.property() + "," + valueKey(e.pattern()) + ")";
         if (c instanceof InSpec e) {
             StringBuilder sb = new StringBuilder("IN(").append(e.property()).append(",[");
             List<Object> vals = (e.values() == null) ? List.of() : e.values();

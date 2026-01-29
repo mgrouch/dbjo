@@ -127,4 +127,16 @@ final class SqlCriteriaCompilerTest {
         assertEquals("SELECT * FROM foo WHERE (id >= ?) AND (created_at = ?)", out.sql());
         assertArrayEquals(new Object[]{10, "x"}, out.params());
     }
+
+    @Test
+    void like_compilesToLikeWithParam() {
+        org.github.dbjo.criteria.Query<Foo> q = org.github.dbjo.criteria.Query.from(META)
+                .where(Conditions.like(CREATED_AT, "%2024%"))
+                .build();
+
+        SqlCriteriaCompiler.Compiled out = SqlCriteriaCompiler.compileSelectAll(DB_META, q);
+
+        assertEquals("SELECT * FROM foo WHERE created_at LIKE ?", out.sql());
+        assertArrayEquals(new Object[]{"%2024%"}, out.params());
+    }
 }
