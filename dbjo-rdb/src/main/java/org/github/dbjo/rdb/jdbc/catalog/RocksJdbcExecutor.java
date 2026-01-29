@@ -63,6 +63,7 @@ public final class RocksJdbcExecutor {
         RocksJdbcWhereParser.Expr havingExpr = (p.havingSql() == null) ? null : RocksJdbcWhereParser.parse(p.havingSql());
 
         int limit = limit(p.limit(), statementMaxRows);
+        int offset = offset(p.offset());
 
         CachedRowSet rs = RowSetProvider.newFactory().createCachedRowSet();
 
@@ -70,7 +71,21 @@ public final class RocksJdbcExecutor {
 
         if (hasAggregates || hasGroupBy) {
             rs.setMetaData(buildMetaForSelectItems(table, p.selectItems(), p.selectAll(), p.groupByColumns()));
-            runAggregateQuery(rs, db, cfsByName, table, primaryCf, acc, criteria, legacyWhere, access, p, havingExpr, limit);
+            runAggregateQuery(
+                    rs,
+                    db,
+                    cfsByName,
+                    table,
+                    primaryCf,
+                    acc,
+                    criteria,
+                    legacyWhere,
+                    access,
+                    p,
+                    havingExpr,
+                    limit,
+                    offset
+            );
         } else {
             List<RocksJdbcColumn> selected = p.selectAll()
                     ? List.of(table.columns())
@@ -88,7 +103,8 @@ public final class RocksJdbcExecutor {
                     access,
                     selected,
                     p.orderBy(),
-                    limit
+                    limit,
+                    offset
             );
         }
 
@@ -338,7 +354,8 @@ public final class RocksJdbcExecutor {
             RocksJdbcPlanner.Access access,
             List<RocksJdbcColumn> selected,
             List<RocksJdbcSqlParser.OrderItem> orderBy,
-            int limit
+            int limit,
+            int offset
     ) throws SQLException {
         List<String> labels = new ArrayList<>();
         for (RocksJdbcColumn c : selected) labels.add(c.name());
@@ -378,7 +395,12 @@ public final class RocksJdbcExecutor {
         applyOrderBy(rows, orderBy);
 
         int out = 0;
+        int skipped = 0;
         for (RowResult row : rows) {
+            if (skipped < offset) {
+                skipped++;
+                continue;
+            }
             if (out >= limit) break;
             rs.moveToInsertRow();
             for (int i = 0; i < row.values().length; i++) {
@@ -402,7 +424,8 @@ public final class RocksJdbcExecutor {
             RocksJdbcPlanner.Access access,
             RocksJdbcSqlParser.Parsed parsed,
             RocksJdbcWhereParser.Expr havingExpr,
-            int limit
+            int limit,
+            int offset
     ) throws SQLException {
         List<String> groupByCols = parsed.groupByColumns();
         List<RocksJdbcSqlParser.SelectItem> items = parsed.selectItems();
@@ -457,6 +480,7 @@ public final class RocksJdbcExecutor {
         }
         List<RowResult> rows = new ArrayList<>();
         int out = 0;
+        int skipped = 0;
         for (AggState state : groups.values()) {
             Object[] values = new Object[items.size()];
             for (int i = 0; i < items.size(); i++) {
@@ -478,6 +502,10 @@ public final class RocksJdbcExecutor {
         applyOrderBy(rows, orderBy);
 
         for (RowResult row : rows) {
+            if (skipped < offset) {
+                skipped++;
+                continue;
+            }
             if (out >= limit) break;
             rs.moveToInsertRow();
             for (int i = 0; i < row.values().length; i++) {
@@ -511,6 +539,11 @@ public final class RocksJdbcExecutor {
         int lim = (sqlLimit == null) ? Integer.MAX_VALUE : Math.max(0, sqlLimit);
         if (stmtMaxRows > 0) lim = Math.min(lim, stmtMaxRows);
         return lim;
+    }
+
+    private static int offset(Integer sqlOffset) {
+        if (sqlOffset == null) return 0;
+        return Math.max(0, sqlOffset);
     }
 
     private static RowSetMetaDataImpl buildMeta(List<RocksJdbcColumn> cols) throws SQLException {
