@@ -5,11 +5,11 @@ import org.github.dbjo.criteria.eval.ConditionEvaluator;
 import org.github.dbjo.rdb.IndexKeys;
 import org.github.dbjo.rdb.IndexPredicate;
 import org.github.dbjo.rdb.criteria.CriteriaIndexPlanner;
-import org.github.dbjo.rdb.jdbc.rowset.SimpleRowSetMetaData;
 import org.rocksdb.*;
 
 import javax.sql.rowset.CachedRowSet;
 import javax.sql.rowset.RowSetProvider;
+import javax.sql.rowset.RowSetMetaDataImpl;
 import java.lang.reflect.Method;
 import java.math.BigDecimal;
 import java.sql.DatabaseMetaData;
@@ -484,8 +484,9 @@ public final class RocksJdbcExecutor {
         return lim;
     }
 
-    private static SimpleRowSetMetaData buildMeta(List<RocksJdbcColumn> cols) throws SQLException {
-        SimpleRowSetMetaData md = new SimpleRowSetMetaData(cols.size());
+    private static RowSetMetaDataImpl buildMeta(List<RocksJdbcColumn> cols) throws SQLException {
+        RowSetMetaDataImpl md = new RowSetMetaDataImpl();
+        md.setColumnCount(cols.size());
         for (int i = 0; i < cols.size(); i++) {
             RocksJdbcColumn c = cols.get(i);
             int col = i + 1;
@@ -500,7 +501,7 @@ public final class RocksJdbcExecutor {
         return md;
     }
 
-    private static SimpleRowSetMetaData buildMetaForSelectItems(
+    private static RowSetMetaDataImpl buildMetaForSelectItems(
             RocksJdbcTable table,
             List<RocksJdbcSqlParser.SelectItem> items,
             boolean selectAll,
@@ -509,7 +510,8 @@ public final class RocksJdbcExecutor {
         if (selectAll && items.isEmpty()) {
             return buildMeta(List.of(table.columns()));
         }
-        SimpleRowSetMetaData md = new SimpleRowSetMetaData(items.size());
+        RowSetMetaDataImpl md = new RowSetMetaDataImpl();
+        md.setColumnCount(items.size());
         for (int i = 0; i < items.size(); i++) {
             RocksJdbcSqlParser.SelectItem item = items.get(i);
             int col = i + 1;
@@ -659,7 +661,8 @@ public final class RocksJdbcExecutor {
 
     private static CachedRowSet singleLong(String name, long v) throws SQLException {
         CachedRowSet rs = RowSetProvider.newFactory().createCachedRowSet();
-        SimpleRowSetMetaData md = new SimpleRowSetMetaData(1);
+        RowSetMetaDataImpl md = new RowSetMetaDataImpl();
+        md.setColumnCount(1);
         md.setColumnName(1, name);
         md.setColumnLabel(1, name);
         md.setColumnType(1, java.sql.Types.BIGINT);
