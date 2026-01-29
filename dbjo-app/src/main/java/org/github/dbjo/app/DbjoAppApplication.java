@@ -3,6 +3,7 @@ package org.github.dbjo.app;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.github.dbjo.rdb.RocksDbHandle;
 
@@ -10,7 +11,7 @@ import org.github.dbjo.rdb.RocksDbHandle;
 public class DbjoAppApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(DbjoAppApplication.class, args);
+        try(ConfigurableApplicationContext app = SpringApplication.run(DbjoAppApplication.class, args)) {}
     }
 
     @Bean
