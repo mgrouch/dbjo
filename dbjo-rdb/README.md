@@ -210,3 +210,33 @@ Notes:
 
 * `SELECT *` is not supported with `GROUP BY` or aggregate functions.
 * Mixing aggregates and non-aggregates without `GROUP BY` is not supported.
+
+## Remote JDBC over REST (read-only)
+
+If RocksDB is only available inside your Spring app process, you can expose a lightweight REST
+service and use the remote JDBC driver to query over the network. The driver minimizes calls by
+fetching catalog metadata once and then issuing a single POST per SQL query.
+
+### Server: expose the REST endpoints
+
+Add the REST controller from `dbjo-app` (or mirror it in your own Spring app). It exposes:
+
+* `GET /api/rocks-jdbc/catalog` — returns catalog metadata
+* `POST /api/rocks-jdbc/query` — executes SQL and returns a serialized rowset
+
+### Client: register the remote driver
+
+Driver class:
+
+```text
+org.github.dbjo.rdb.jdbc.remote.RemoteRocksJdbcDriver
+```
+
+Example JDBC URL:
+
+```text
+jdbc:rocksdb+rest:http://localhost:8080/api/rocks-jdbc
+```
+
+From IntelliJ/DataGrip you can register the same JARs as the local driver, but point the URL at
+the server endpoint.

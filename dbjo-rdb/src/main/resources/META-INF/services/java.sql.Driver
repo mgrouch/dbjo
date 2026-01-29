@@ -1,1 +1,2 @@
 org.github.dbjo.rdb.jdbc.RocksJdbcDriver
+org.github.dbjo.rdb.jdbc.remote.RemoteRocksJdbcDriver

@@ -27,13 +27,15 @@ import java.util.Objects;
  * Everything else is conservative defaults or unsupported.
  */
 public final class RocksJdbcDatabaseMetaData implements DatabaseMetaData {
-    private final RocksJdbcConnection conn;
+    private final Connection conn;
+    private final RocksJdbcCatalog catalog;
 
-    public RocksJdbcDatabaseMetaData(RocksJdbcConnection conn) {
+    public RocksJdbcDatabaseMetaData(Connection conn, RocksJdbcCatalog catalog) {
         this.conn = Objects.requireNonNull(conn, "conn");
+        this.catalog = Objects.requireNonNull(catalog, "catalog");
     }
 
-    private RocksJdbcCatalog catalog() { return conn.engine().catalog(); }
+    private RocksJdbcCatalog catalog() { return catalog; }
 
     private static SQLFeatureNotSupportedException unsup() {
         return new SQLFeatureNotSupportedException("Not supported");
