@@ -121,7 +121,11 @@ public final class RocksJdbcSqlParser {
                     if (oo.isEmpty()) continue;
                     String[] parts = oo.split("\\s+");
                     String col = stripIdentifierQuotes(parts[0]);
-                    boolean desc = parts.length > 1 && "DESC".equalsIgnoreCase(parts[1]);
+                    boolean desc = false;
+                    if (parts.length > 1) {
+                        String last = parts[parts.length - 1];
+                        desc = "DESC".equalsIgnoreCase(last);
+                    }
                     orderBy.add(new OrderItem(col, desc));
                 }
             }
