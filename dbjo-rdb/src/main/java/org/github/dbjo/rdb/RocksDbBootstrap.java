@@ -2,7 +2,9 @@ package org.github.dbjo.rdb;
 
 import org.rocksdb.*;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 
@@ -12,9 +14,11 @@ public final class RocksDbBootstrap {
     public static RocksDbHandle open(RocksProps props, List<RocksSchema> schemas) throws RocksDBException {
         RocksDB.loadLibrary();
 
+        Path dbPath = Path.of(props.path());
         if (props.wipeOnStart()) {
-            destroyIfExists(Path.of(props.path()));
+            destroyIfExists(dbPath);
         }
+        ensureDirectory(dbPath);
 
         // collect CF names (dedupe + stable order)
         LinkedHashSet<String> names = new LinkedHashSet<>();
@@ -41,7 +45,7 @@ public final class RocksDbBootstrap {
         }
 
         List<ColumnFamilyHandle> handles = new ArrayList<>(desc.size());
-        TransactionDB db = TransactionDB.open(dbOpts, txOpts, props.path(), desc, handles);
+        TransactionDB db = TransactionDB.open(dbOpts, txOpts, dbPath.toString(), desc, handles);
 
         Map<String, ColumnFamilyHandle> cfByName = new HashMap<>();
         for (int i = 0; i < desc.size(); i++) {
@@ -59,6 +63,14 @@ public final class RocksDbBootstrap {
         try (Options opt = new Options()) {
             RocksDB.destroyDB(dir.toString(), opt);
         } catch (RocksDBException ignore) {
+        }
+    }
+
+    private static void ensureDirectory(Path dir) {
+        try {
+            Files.createDirectories(dir);
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to create RocksDB directory: " + dir, e);
         }
     }
 }
