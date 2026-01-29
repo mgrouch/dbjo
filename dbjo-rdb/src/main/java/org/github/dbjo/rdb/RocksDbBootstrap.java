@@ -14,7 +14,7 @@ public final class RocksDbBootstrap {
     public static RocksDbHandle open(RocksProps props, List<RocksSchema> schemas) throws RocksDBException {
         RocksDB.loadLibrary();
 
-        Path dbPath = Path.of(props.path());
+        Path dbPath = Path.of(props.path()).toAbsolutePath().normalize();
         if (props.wipeOnStart()) {
             destroyIfExists(dbPath);
         }
