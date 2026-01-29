@@ -10,7 +10,7 @@ import java.sql.Statement;
 import java.util.List;
 
 public final class RemoteJdbcClientApp {
-    private static final String DEFAULT_URL = "jdbc:rocksdb+rest:http://localhost:8080/api/rocks-jdbc";
+    private static final String DEFAULT_URL = "jdbc:rocksdb+rest:https://localhost:8433/api/rocks-jdbc";
 
     private RemoteJdbcClientApp() {}
 
