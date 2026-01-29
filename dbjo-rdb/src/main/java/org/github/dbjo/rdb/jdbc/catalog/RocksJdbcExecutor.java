@@ -102,7 +102,7 @@ public final class RocksJdbcExecutor {
 
         if (access instanceof RocksJdbcPlanner.IndexEq eq) {
             ColumnFamilyHandle idxCf = requireCf(cfsByName, eq.indexName());
-            byte[] prefix = IndexKeys.prefixEq(eq.valueBytesRaw());
+            byte[] prefix = IndexKeys.prefix(eq.valueBytesRaw());
 
             return () -> new Iterator<>() {
                 final RocksIterator it = db.newIterator(idxCf);
@@ -123,7 +123,7 @@ public final class RocksJdbcExecutor {
                 @Override public RowEntry next() {
                     if (!hasNext()) throw new NoSuchElementException();
                     byte[] idxKey = it.key();
-                    byte[] pk = IndexKeys.extractPk(idxKey);
+                    byte[] pk = IndexKeys.pkFromIndexKey(idxKey);
                     it.next();
                     try {
                         byte[] v = db.get(primaryCf, pk);
@@ -152,13 +152,13 @@ public final class RocksJdbcExecutor {
                     while (true) {
                         if (it == null) {
                             if (vi >= values.size()) return false;
-                            prefix = IndexKeys.prefixEq(values.get(vi++));
+                            prefix = IndexKeys.prefix(values.get(vi++));
                             it = db.newIterator(idxCf);
                             it.seek(prefix);
                         }
 
                         while (it.isValid() && IndexKeys.startsWith(it.key(), prefix)) {
-                            byte[] pk = IndexKeys.extractPk(it.key());
+                            byte[] pk = IndexKeys.pkFromIndexKey(it.key());
                             it.next();
 
                             BytesKey bk = new BytesKey(pk);
@@ -192,8 +192,8 @@ public final class RocksJdbcExecutor {
         if (access instanceof RocksJdbcPlanner.IndexRange r) {
             ColumnFamilyHandle idxCf = requireCf(cfsByName, r.indexName());
 
-            final byte[] fromPrefix = (r.fromBytesRaw() == null) ? null : IndexKeys.prefixEq(r.fromBytesRaw());
-            final byte[] toPrefix   = (r.toBytesRaw() == null) ? null : IndexKeys.prefixEq(r.toBytesRaw());
+            final byte[] fromPrefix = (r.fromBytesRaw() == null) ? null : IndexKeys.prefix(r.fromBytesRaw());
+            final byte[] toPrefix   = (r.toBytesRaw() == null) ? null : IndexKeys.prefix(r.toBytesRaw());
 
             return () -> new Iterator<>() {
                 final RocksIterator it = db.newIterator(idxCf);
@@ -213,7 +213,7 @@ public final class RocksJdbcExecutor {
 
                     while (it.isValid()) {
                         byte[] k = it.key();
-                        byte[] vprefix = IndexKeys.extractEncodedValuePrefix(k);
+                        byte[] vprefix = IndexKeys.escapedValuePart(k);
 
                         // lower bound handling: if exclusive and value == from -> skip
                         if (fromPrefix != null && !r.fromInclusive()) {
@@ -233,7 +233,7 @@ public final class RocksJdbcExecutor {
                             }
                         }
 
-                        byte[] pk = IndexKeys.extractPk(k);
+                        byte[] pk = IndexKeys.pkFromIndexKey(k);
                         it.next();
                         try {
                             byte[] pv = db.get(requireCf(cfsByName, table.cfName()), pk);
