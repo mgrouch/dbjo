@@ -1,9 +1,6 @@
 package org.github.dbjo.rdb.jdbc.catalog;
 
-import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
-import java.sql.Types;
 import java.util.*;
 
 /**
@@ -62,7 +59,7 @@ public final class RocksJdbcPlanner {
                 for (RocksJdbcWhereParser.Cmp c : eqs) {
                     Object v = c.lit().value();
                     if (v == null) return null;
-                    byte[] vb = encodeLiteral(table, c.col(), v);
+                    byte[] vb = RocksJdbcValueEncoder.encodeForColumn(columnFor(table, c.col()), v);
                     if (vb == null) return null;
                     vs.add(vb);
                 }
@@ -79,7 +76,7 @@ public final class RocksJdbcPlanner {
             Object v = c.lit().value();
             if (v == null) return null;
 
-            byte[] vb = encodeLiteral(table, c.col(), v);
+            byte[] vb = RocksJdbcValueEncoder.encodeForColumn(columnFor(table, c.col()), v);
             if (vb == null) return null;
 
             return switch (c.op()) {
@@ -101,7 +98,7 @@ public final class RocksJdbcPlanner {
             for (var l : in.values()) {
                 Object v = l.value();
                 if (v == null) return null;
-                byte[] vb = encodeLiteral(table, in.col(), v);
+                byte[] vb = RocksJdbcValueEncoder.encodeForColumn(columnFor(table, in.col()), v);
                 if (vb == null) return null;
                 vs.add(vb);
             }
@@ -116,8 +113,8 @@ public final class RocksJdbcPlanner {
             Object lo = b.lo().value();
             Object hi = b.hi().value();
             if (lo == null && hi == null) return null;
-            byte[] l = (lo == null) ? null : encodeLiteral(table, b.col(), lo);
-            byte[] h = (hi == null) ? null : encodeLiteral(table, b.col(), hi);
+            byte[] l = (lo == null) ? null : RocksJdbcValueEncoder.encodeForColumn(columnFor(table, b.col()), lo);
+            byte[] h = (hi == null) ? null : RocksJdbcValueEncoder.encodeForColumn(columnFor(table, b.col()), hi);
             if ((lo != null && l == null) || (hi != null && h == null)) return null;
             return new Candidate(650, new IndexRange(ix.indexName(), l, true, h, true));
         }
@@ -157,21 +154,6 @@ public final class RocksJdbcPlanner {
         return null;
     }
 
-    private static byte[] encodeLiteral(RocksJdbcTable table, String col, Object value) throws SQLException {
-        if (value == null) return null;
-        RocksJdbcColumn column = columnFor(table, col);
-        if (column == null) return null;
-
-        return switch (column.sqlType()) {
-            case Types.TINYINT, Types.SMALLINT, Types.INTEGER -> encodeInt32(coerceInt(value));
-            case Types.BIGINT -> encodeInt64(coerceLong(value));
-            case Types.BIT, Types.BOOLEAN -> encodeInt32(coerceBooleanAsInt(value));
-            case Types.CHAR, Types.NCHAR, Types.VARCHAR, Types.NVARCHAR, Types.LONGVARCHAR, Types.LONGNVARCHAR ->
-                    String.valueOf(value).getBytes(StandardCharsets.UTF_8);
-            default -> null;
-        };
-    }
-
     private static RocksJdbcColumn columnFor(RocksJdbcTable table, String col) {
         if (table == null || col == null) return null;
         String want = col.trim().toLowerCase(Locale.ROOT);
@@ -182,75 +164,5 @@ public final class RocksJdbcPlanner {
             }
         }
         return null;
-    }
-
-    private static int coerceInt(Object value) throws SQLException {
-        if (value instanceof Number n) {
-            long l = n.longValue();
-            if (l < Integer.MIN_VALUE || l > Integer.MAX_VALUE) {
-                throw new SQLException("Numeric literal out of int range: " + value);
-            }
-            return (int) l;
-        }
-        if (value instanceof BigDecimal bd) {
-            try {
-                return bd.intValueExact();
-            } catch (ArithmeticException ex) {
-                throw new SQLException("Numeric literal out of int range: " + value, ex);
-            }
-        }
-        try {
-            return Integer.parseInt(String.valueOf(value).trim());
-        } catch (NumberFormatException ex) {
-            throw new SQLException("Expected integer literal, got: " + value, ex);
-        }
-    }
-
-    private static long coerceLong(Object value) throws SQLException {
-        if (value instanceof Number n) return n.longValue();
-        if (value instanceof BigDecimal bd) {
-            try {
-                return bd.longValueExact();
-            } catch (ArithmeticException ex) {
-                throw new SQLException("Numeric literal out of long range: " + value, ex);
-            }
-        }
-        try {
-            return Long.parseLong(String.valueOf(value).trim());
-        } catch (NumberFormatException ex) {
-            throw new SQLException("Expected long literal, got: " + value, ex);
-        }
-    }
-
-    private static int coerceBooleanAsInt(Object value) throws SQLException {
-        if (value instanceof Boolean b) return b ? 1 : 0;
-        String s = String.valueOf(value).trim().toLowerCase(Locale.ROOT);
-        if ("true".equals(s) || "1".equals(s)) return 1;
-        if ("false".equals(s) || "0".equals(s)) return 0;
-        throw new SQLException("Expected boolean literal, got: " + value);
-    }
-
-    private static byte[] encodeInt32(int value) {
-        int x = value ^ 0x8000_0000;
-        return new byte[] {
-                (byte) (x >>> 24),
-                (byte) (x >>> 16),
-                (byte) (x >>> 8),
-                (byte) x
-        };
-    }
-
-    private static byte[] encodeInt64(long value) {
-        long x = value ^ 0x8000_0000_0000_0000L;
-        return new byte[] {
-                (byte) (x >>> 56),
-                (byte) (x >>> 48),
-                (byte) (x >>> 40),
-                (byte) (x >>> 32),
-                (byte) (x >>> 24),
-                (byte) (x >>> 16),
-                (byte) (x >>> 8),
-                (byte) x
-        };
     }
 }

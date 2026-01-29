@@ -16,11 +16,17 @@ import java.util.Locale;
 public final class RocksJdbcSqlParser {
     private RocksJdbcSqlParser() {}
 
+    public sealed interface SelectItem permits SelectColumn, SelectAgg {}
+    public record SelectColumn(String name) implements SelectItem {}
+    public record SelectAgg(AggFn fn, String column, boolean countStar) implements SelectItem {}
+    public enum AggFn { COUNT, MIN, MAX, SUM }
+
     public record Parsed(
-            boolean countStar,
             String tableName,
-            List<String> selectColumns,  // empty => *
+            List<SelectItem> selectItems,
+            boolean selectAll,
             String whereSql,             // null => none
+            List<String> groupByColumns,
             Integer limit                // null => none
     ) {}
 
@@ -50,49 +56,77 @@ public final class RocksJdbcSqlParser {
         Integer limit = null;
 
         int whereIdx = indexOfKeyword(tailU, " WHERE ");
+        int groupIdx = indexOfKeyword(tailU, " GROUP BY ");
         int limitIdx = indexOfKeyword(tailU, " LIMIT ");
 
-        if (whereIdx >= 0) {
-            table = tail.substring(0, whereIdx).trim();
-            String afterWhere = tail.substring(whereIdx + " WHERE ".length()).trim();
-            String afterWhereU = afterWhere.toUpperCase(Locale.ROOT);
+        int tableEnd = firstPos(tail.length(), whereIdx, groupIdx, limitIdx);
+        table = tail.substring(0, tableEnd).trim();
 
-            int limitIdx2 = indexOfKeyword(afterWhereU, " LIMIT ");
-            if (limitIdx2 >= 0) {
-                where = afterWhere.substring(0, limitIdx2).trim();
-                String lim = afterWhere.substring(limitIdx2 + " LIMIT ".length()).trim();
-                limit = parseLimit(lim);
-            } else {
-                where = afterWhere.isBlank() ? null : afterWhere;
-            }
-        } else if (limitIdx >= 0) {
-            table = tail.substring(0, limitIdx).trim();
-            String lim = tail.substring(limitIdx + " LIMIT ".length()).trim();
-            limit = parseLimit(lim);
-        } else {
-            table = tail.trim();
+        if (whereIdx >= 0) {
+            int whereStart = whereIdx + " WHERE ".length();
+            int whereEnd = firstPos(tail.length(), nextPosAfter(whereIdx, groupIdx), nextPosAfter(whereIdx, limitIdx));
+            where = tail.substring(whereStart, whereEnd).trim();
+            if (where.isBlank()) where = null;
         }
 
-        table = stripSchema(table);
-
-        boolean countStar = isCountStar(selectPart);
-
-        List<String> cols = new ArrayList<>();
-        if (!countStar) {
-            if (!selectPart.equals("*")) {
-                for (String c : selectPart.split(",")) {
-                    String cc = c.trim();
-                    if (!cc.isEmpty()) cols.add(stripIdentifierQuotes(cc));
+        List<String> groupBy = new ArrayList<>();
+        if (groupIdx >= 0) {
+            int groupStart = groupIdx + " GROUP BY ".length();
+            int groupEnd = firstPos(tail.length(), nextPosAfter(groupIdx, limitIdx));
+            String groupPart = tail.substring(groupStart, groupEnd).trim();
+            if (!groupPart.isBlank()) {
+                for (String g : groupPart.split(",")) {
+                    String gg = g.trim();
+                    if (!gg.isEmpty()) groupBy.add(stripIdentifierQuotes(gg));
                 }
             }
         }
 
-        return new Parsed(countStar, stripIdentifierQuotes(table), cols, where, limit);
+        if (limitIdx >= 0) {
+            int limitStart = limitIdx + " LIMIT ".length();
+            String lim = tail.substring(limitStart).trim();
+            limit = parseLimit(lim);
+        }
+
+        table = stripSchema(table);
+
+        boolean selectAll = selectPart.equals("*");
+        List<SelectItem> items = new ArrayList<>();
+
+        if (!selectAll) {
+            for (String part : splitSelect(selectPart)) {
+                String cc = part.trim();
+                if (cc.isEmpty()) continue;
+                SelectItem item = parseSelectItem(cc);
+                items.add(item);
+            }
+        }
+
+        return new Parsed(stripIdentifierQuotes(table), items, selectAll, where, groupBy, limit);
     }
 
-    private static boolean isCountStar(String selectPart) {
-        String u = selectPart.toUpperCase(Locale.ROOT).replace(" ", "");
-        return u.equals("COUNT(*)") || u.equals("COUNT(1)");
+    private static SelectItem parseSelectItem(String token) {
+        String trimmed = token.trim();
+        int lp = trimmed.indexOf('(');
+        int rp = trimmed.lastIndexOf(')');
+        if (lp > 0 && rp > lp) {
+            String fn = trimmed.substring(0, lp).trim().toUpperCase(Locale.ROOT);
+            String arg = trimmed.substring(lp + 1, rp).trim();
+            AggFn agg = switch (fn) {
+                case "COUNT" -> AggFn.COUNT;
+                case "MIN" -> AggFn.MIN;
+                case "MAX" -> AggFn.MAX;
+                case "SUM" -> AggFn.SUM;
+                default -> null;
+            };
+            if (agg != null) {
+                String argNorm = stripIdentifierQuotes(arg);
+                boolean countStar = argNorm.equals("*") || argNorm.equals("1");
+                String col = countStar ? null : argNorm;
+                return new SelectAgg(agg, col, countStar);
+            }
+        }
+        return new SelectColumn(stripIdentifierQuotes(trimmed));
     }
 
     private static Integer parseLimit(String lim) throws SQLException {
@@ -114,6 +148,36 @@ public final class RocksJdbcSqlParser {
 
     private static int indexOfKeyword(String upper, String kw) {
         return upper.indexOf(kw);
+    }
+
+    private static int firstPos(int fallback, int... positions) {
+        int best = fallback;
+        for (int p : positions) {
+            if (p >= 0 && p < best) best = p;
+        }
+        return best;
+    }
+
+    private static int nextPosAfter(int base, int candidate) {
+        if (candidate < 0) return -1;
+        return candidate > base ? candidate : -1;
+    }
+
+    private static List<String> splitSelect(String selectPart) {
+        ArrayList<String> out = new ArrayList<>();
+        int depth = 0;
+        int start = 0;
+        for (int i = 0; i < selectPart.length(); i++) {
+            char c = selectPart.charAt(i);
+            if (c == '(') depth++;
+            if (c == ')') depth = Math.max(0, depth - 1);
+            if (c == ',' && depth == 0) {
+                out.add(selectPart.substring(start, i));
+                start = i + 1;
+            }
+        }
+        out.add(selectPart.substring(start));
+        return out;
     }
 
     private static String stripSchema(String table) {
