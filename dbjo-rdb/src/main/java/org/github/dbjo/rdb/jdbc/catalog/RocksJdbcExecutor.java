@@ -14,6 +14,7 @@ import java.lang.reflect.Method;
 import java.math.BigDecimal;
 import java.sql.DatabaseMetaData;
 import java.sql.SQLException;
+import java.sql.Types;
 import java.util.*;
 
 /**
@@ -34,6 +35,9 @@ public final class RocksJdbcExecutor {
             int statementMaxRows
     ) throws SQLException {
         RocksJdbcSqlParser.Parsed p = RocksJdbcSqlParser.parse(sql);
+        if (isTablesQuery(p)) {
+            return listTables(catalog, limit(p.limit(), statementMaxRows), offset(p.offset()));
+        }
         RocksJdbcTable table = catalog.requireTable(p.tableName());
         ColumnFamilyHandle primaryCf = requireCf(cfsByName, table.cfName());
 
@@ -106,6 +110,51 @@ public final class RocksJdbcExecutor {
                     limit,
                     offset
             );
+        }
+
+        rs.beforeFirst();
+        return rs;
+    }
+
+    private static boolean isTablesQuery(RocksJdbcSqlParser.Parsed parsed) {
+        if (!"tables".equalsIgnoreCase(parsed.tableName())) {
+            return false;
+        }
+        if (!parsed.selectAll() || !parsed.selectItems().isEmpty()) {
+            return false;
+        }
+        return parsed.whereSql() == null
+                && parsed.havingSql() == null
+                && parsed.groupByColumns().isEmpty()
+                && parsed.orderBy().isEmpty();
+    }
+
+    private static CachedRowSet listTables(RocksJdbcCatalog catalog, int limit, int offset) throws SQLException {
+        CachedRowSet rs = RowSetProvider.newFactory().createCachedRowSet();
+        RowSetMetaDataImpl md = new RowSetMetaDataImpl();
+        md.setColumnCount(1);
+        md.setColumnName(1, "TABLE_NAME");
+        md.setColumnLabel(1, "TABLE_NAME");
+        md.setColumnType(1, Types.VARCHAR);
+        md.setColumnTypeName(1, "VARCHAR");
+        md.setColumnDisplaySize(1, 0);
+        md.setScale(1, 0);
+        md.setNullable(1, DatabaseMetaData.columnNoNulls);
+        rs.setMetaData(md);
+
+        int out = 0;
+        int skipped = 0;
+        for (RocksJdbcTable table : catalog.tables()) {
+            if (skipped < offset) {
+                skipped++;
+                continue;
+            }
+            if (out >= limit) break;
+            rs.moveToInsertRow();
+            rs.updateString(1, table.tableName());
+            rs.insertRow();
+            rs.moveToCurrentRow();
+            out++;
         }
 
         rs.beforeFirst();

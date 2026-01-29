@@ -70,6 +70,17 @@ final class RocksJdbcDriverTest {
         }
     }
 
+    @Test
+    void selectTablesListsCatalogEntries() throws Exception {
+        try (RocksJdbcEngine engine = new RocksJdbcEngine(new TestCatalog(), dir.toString(), false)) {
+            CachedRowSet rs = engine.query("select * from tables", 0);
+
+            assertTrue(rs.next());
+            assertEquals("items", rs.getString(1));
+            assertFalse(rs.next());
+        }
+    }
+
     private static void insertRows(RocksJdbcEngine engine) throws Exception {
         RocksDB db = engine.db();
         ColumnFamilyHandle cf = engine.cfsByName().get("items");
