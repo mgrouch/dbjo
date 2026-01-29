@@ -25,6 +25,7 @@ public final class SpecMapper {
         if (c instanceof In<B, ?> x) return new InSpec(x.prop().getPropertyName(), new ArrayList<>(x.values()));
         if (c instanceof Between<B, ?> x) return new BetweenSpec(x.prop().getPropertyName(), x.lo(), x.hi());
         if (c instanceof Cmp<B, ?> x) return new CmpSpec(x.prop().getPropertyName(), x.op().name(), x.value());
+        if (c instanceof Like<B> x) return new LikeSpec(x.prop().getPropertyName(), x.pattern());
 
         throw new IllegalArgumentException("Unsupported condition node: " + c.getClass().getName());
     }

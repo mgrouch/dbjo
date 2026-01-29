@@ -78,6 +78,13 @@ public final class Conditions {
         return new Cmp<>(prop, op, value);
     }
 
+    public static <B extends Serializable> Condition<B> like(PropertyMeta<B, String> prop, String pattern) {
+        Objects.requireNonNull(prop, "prop");
+        Objects.requireNonNull(pattern, "pattern");
+        requireLikeable(prop);
+        return new Like<>(prop, pattern);
+    }
+
     public static <B extends Serializable> Condition<B> and(Condition<B> a, Condition<B> b) {
         Objects.requireNonNull(a, "a");
         Objects.requireNonNull(b, "b");
@@ -100,6 +107,14 @@ public final class Conditions {
         var cls = prop.getPropertyClass();
         if (!Comparable.class.isAssignableFrom(cls)) {
             throw new IllegalArgumentException("Ordered operation requires Comparable property type: " +
+                    prop.getPropertyName() + " type=" + cls.getName());
+        }
+    }
+
+    private static <B extends Serializable> void requireLikeable(PropertyMeta<B, String> prop) {
+        var cls = prop.getPropertyClass();
+        if (!CharSequence.class.isAssignableFrom(cls)) {
+            throw new IllegalArgumentException("LIKE requires CharSequence property type: " +
                     prop.getPropertyName() + " type=" + cls.getName());
         }
     }

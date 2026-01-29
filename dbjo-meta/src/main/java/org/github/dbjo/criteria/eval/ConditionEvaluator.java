@@ -49,6 +49,11 @@ public final class ConditionEvaluator {
             if (v == null) return false;
             return cmpOp(x.prop(), v, x.op(), x.value());
         }
+        if (c instanceof Like<B> x) {
+            Object v = x.prop().get(bean);
+            if (v == null) return false;
+            return likeMatch(x.prop(), v, x.pattern());
+        }
 
         throw new IllegalArgumentException("Unsupported condition node: " + c.getClass().getName());
     }
@@ -73,5 +78,35 @@ public final class ConditionEvaluator {
             case GT -> d > 0;
             case GE -> d >= 0;
         };
+    }
+
+    private static boolean likeMatch(PropertyMeta<?, ?> prop, Object val, String pattern) {
+        if (!(val instanceof CharSequence cs)) {
+            throw new IllegalArgumentException("LIKE requires CharSequence at runtime: " + prop.getPropertyName());
+        }
+        String regex = likeToRegex(pattern);
+        return cs.toString().matches(regex);
+    }
+
+    private static String likeToRegex(String pattern) {
+        StringBuilder sb = new StringBuilder("^");
+        for (int i = 0; i < pattern.length(); i++) {
+            char c = pattern.charAt(i);
+            switch (c) {
+                case '%' -> sb.append(".*");
+                case '_' -> sb.append('.');
+                case '\\' -> {
+                    if (i + 1 < pattern.length()) {
+                        i++;
+                        sb.append(java.util.regex.Pattern.quote(String.valueOf(pattern.charAt(i))));
+                    } else {
+                        sb.append("\\\\");
+                    }
+                }
+                default -> sb.append(java.util.regex.Pattern.quote(String.valueOf(c)));
+            }
+        }
+        sb.append("$");
+        return sb.toString();
     }
 }

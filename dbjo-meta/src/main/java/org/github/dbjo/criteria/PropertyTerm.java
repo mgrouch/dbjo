@@ -27,4 +27,7 @@ public record PropertyTerm<B extends Serializable, V extends Serializable>(
     public Condition<B> le(V v) { return Conditions.le(prop, v); }
     public Condition<B> gt(V v) { return Conditions.gt(prop, v); }
     public Condition<B> ge(V v) { return Conditions.ge(prop, v); }
+
+    @SuppressWarnings("unchecked")
+    public Condition<B> like(String pattern) { return Conditions.like((PropertyMeta<B, String>) prop, pattern); }
 }
