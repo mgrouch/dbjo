@@ -10,10 +10,8 @@ import org.github.dbjo.generated.model.entity.Client;
 import org.github.dbjo.generated.model.entity.Product;
 import org.github.dbjo.generated.model.entity.Purchase;
 import org.github.dbjo.meta.jdbc.LoaderUtil;
-import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
-@Service
 public record HsqlToRocksLoader(ClientJdbcDao clientJdbcDao, ProductJdbcDao productJdbcDao,
                                 PurchaseJdbcDao purchaseJdbcDao, ClientDao clientDao, ProductDao productDao,
                                 PurchaseDao purchaseDao, TransactionTemplate rocksTransactionTemplate) {
