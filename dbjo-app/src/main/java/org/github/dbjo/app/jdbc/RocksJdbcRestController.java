@@ -35,9 +35,8 @@ public class RocksJdbcRestController {
 
     @PostMapping("/query")
     public RemoteRocksJdbcQueryResponse query(@RequestBody RemoteRocksJdbcQueryRequest request) {
-        try {
+        try (WebRowSet webRowSet = RowSetProvider.newFactory().createWebRowSet()) {
             CachedRowSet rowSet = engine.query(request.sql(), request.maxRows());
-            WebRowSet webRowSet = RowSetProvider.newFactory().createWebRowSet();
             webRowSet.populate(rowSet);
             StringWriter writer = new StringWriter();
             webRowSet.writeXml(writer);
