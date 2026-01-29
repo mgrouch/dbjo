@@ -106,6 +106,12 @@ public final class QueryBinder {
             var op = CmpOp.valueOf(e.op());
             return Conditions.cmp(p, op, v);
         }
+        if (c instanceof LikeSpec e) {
+            var p = registry.<B>property(entityId, e.property());
+            @SuppressWarnings("unchecked")
+            PropertyMeta<B, String> strProp = (PropertyMeta<B, String>) (PropertyMeta<?, ?>) p;
+            return Conditions.like(strProp, e.pattern());
+        }
         if (c instanceof NotSpec e) {
             Condition<B> inner = bindCond(entityId, e.inner());
             return inner.not();

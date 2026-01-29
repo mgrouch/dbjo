@@ -122,6 +122,12 @@ public final class SqlCriteriaCompiler {
             return sb.toString();
         }
 
+        if (cond instanceof Like e) {
+            String col = b.col(e.prop());
+            b.params.add(e.pattern());
+            return col + " LIKE ?";
+        }
+
         if (cond instanceof Not n) {
             String inner = compileCond(b, n.inner());
             if (inner.isEmpty()) return "";

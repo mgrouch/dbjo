@@ -5,7 +5,6 @@ import org.github.dbjo.criteria.Conditions;
 import org.github.dbjo.criteria.PropertyTerm;
 
 import java.io.Serializable;
-import java.lang.reflect.Method;
 import java.math.BigDecimal;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -268,12 +267,12 @@ public final class RocksJdbcWhereCompiler {
                 return term.in(arr);
             }
 
-            // LIKE 'pattern'  (best-effort; only if PropertyTerm has like(String))
+            // LIKE 'pattern'
             if (peekKw("like")) {
                 next();
                 Serializable v = readValue();
                 if (!(v instanceof String s)) throw new SQLException("LIKE expects string literal");
-                return invokeLike(term0, s);
+                return term.like(s);
             }
 
             // Comparison: = != <> < <= > >=
@@ -289,19 +288,6 @@ public final class RocksJdbcWhereCompiler {
                 case ">=" -> term.ge(v);
                 default -> throw new SQLException("Unsupported operator: " + op);
             };
-        }
-
-        @SuppressWarnings("unchecked")
-        private Condition<B> invokeLike(PropertyTerm<B, ? extends Serializable> term, String pattern) throws SQLException {
-            try {
-                Method m = term.getClass().getMethod("like", String.class);
-                Object out = m.invoke(term, pattern);
-                return (Condition<B>) out;
-            } catch (NoSuchMethodException e) {
-                throw new SQLException("LIKE not supported by PropertyTerm implementation: " + term.getClass().getName(), e);
-            } catch (ReflectiveOperationException e) {
-                throw new SQLException("LIKE invocation failed", e);
-            }
         }
 
         private PropertyTerm<B, ? extends Serializable> resolveTerm(String ident) {
