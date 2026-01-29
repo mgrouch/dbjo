@@ -34,7 +34,14 @@ public final class RemoteRocksJdbcDriver implements Driver {
         if (baseUrl.isBlank()) {
             throw new SQLException("Missing base URL in JDBC URL");
         }
-        HttpClient client = HttpClient.newHttpClient();
+        HttpClient.Builder clientBuilder = HttpClient.newBuilder();
+        if (baseUrl.startsWith("https://")) {
+            javax.net.ssl.SSLContext sslContext = RemoteRocksJdbcSsl.createSslContext(info);
+            if (sslContext != null) {
+                clientBuilder.sslContext(sslContext);
+            }
+        }
+        HttpClient client = clientBuilder.build();
         ObjectMapper mapper = new ObjectMapper();
         RemoteRocksJdbcClient remoteClient = new RemoteRocksJdbcClient(client, mapper, baseUrl);
         RemoteRocksJdbcCatalogDto dto = remoteClient.fetchCatalog();

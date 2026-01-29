@@ -240,3 +240,11 @@ jdbc:rocksdb+rest:http://localhost:8080/api/rocks-jdbc
 
 From IntelliJ/DataGrip you can register the same JARs as the local driver, but point the URL at
 the server endpoint.
+
+#### HTTPS configuration
+
+When connecting to HTTPS endpoints, you can pass JDBC properties to control trust behavior:
+
+* `ssl.trustAll=true` to trust any server certificate (useful for local development).
+* `ssl.trustStore=/path/to/truststore.jks` with optional
+  `ssl.trustStorePassword` and `ssl.trustStoreType` to use a specific trust store.
