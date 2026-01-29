@@ -12,13 +12,13 @@ import java.util.List;
 public class RocksDbConfig {
 
     @Bean(destroyMethod = "close")
-    public RocksDbHandle rocksDbHandle(RocksProps props, List<RocksSchema> schemas) throws RocksDBException {
+    public RocksDbHandle rocksDbHandle(RocksProps props, List<RocksSchema<?>> schemas) throws RocksDBException {
         return RocksDbBootstrap.open(props, schemas);
     }
 
     // Demo contributes its CF list in one line:
     @Bean
-    public RocksSchema userCfSchema() {
+    public RocksSchema<?> userCfSchema() {
         return RocksSchema.of(UserSchema.USERS_CF, UserSchema.IDX_EMAIL);
     }
 }

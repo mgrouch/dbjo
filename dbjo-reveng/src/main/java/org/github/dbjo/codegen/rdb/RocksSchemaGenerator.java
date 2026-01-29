@@ -136,11 +136,15 @@ public final class RocksSchemaGenerator {
         }
 
         sb.append("import org.rocksdb.ColumnFamilyHandle;\n");
+        sb.append("import java.util.Collection;\n");
         sb.append("import java.util.List;\n");
         if (needBase64) sb.append("import java.util.Base64;\n");
         sb.append("\n");
 
-        sb.append("public final class ").append(schemaClass).append(" {\n");
+        sb.append("public final class ").append(schemaClass)
+                .append(" implements RocksSchema<").append(beanClass).append("> {\n");
+        sb.append("    public static final ").append(schemaClass).append(" INSTANCE = new ").append(schemaClass)
+                .append("();\n");
         sb.append("    public static final String ").append(cfConst).append("  = \"").append(cfName).append("\";\n");
 
         for (GenIndex g : genIdx) {
@@ -148,6 +152,18 @@ public final class RocksSchemaGenerator {
                     .append(" = \"").append(g.constValue).append("\";\n");
         }
         sb.append("\n");
+
+        sb.append("    @Override\n");
+        sb.append("    public Collection<String> columnFamilies() {\n");
+        sb.append("        return List.of(\n");
+        sb.append("                ").append(cfConst);
+        for (GenIndex g : genIdx) {
+            sb.append(",\n");
+            sb.append("                ").append(g.constName);
+        }
+        sb.append("\n");
+        sb.append("        );\n");
+        sb.append("    }\n\n");
 
         // def(...)
         String cfParam = Naming.toLowerCamel(cfName) + "Cf"; // usersCf

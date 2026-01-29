@@ -11,7 +11,7 @@ import java.util.*;
 public final class RocksDbBootstrap {
     private RocksDbBootstrap() {}
 
-    public static RocksDbHandle open(RocksProps props, List<RocksSchema> schemas) throws RocksDBException {
+    public static RocksDbHandle open(RocksProps props, List<? extends RocksSchema<?>> schemas) throws RocksDBException {
         RocksDB.loadLibrary();
 
         Path dbPath = Path.of(props.path()).toAbsolutePath().normalize();
@@ -23,7 +23,7 @@ public final class RocksDbBootstrap {
         // collect CF names (dedupe + stable order)
         LinkedHashSet<String> names = new LinkedHashSet<>();
         names.add("default"); // always
-        for (RocksSchema s : schemas) {
+        for (RocksSchema<?> s : schemas) {
             for (String cf : s.columnFamilies()) {
                 if (cf != null && !cf.isBlank() && !"default".equals(cf)) names.add(cf);
             }

@@ -20,27 +20,23 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.transaction.PlatformTransactionManager;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
 
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(RocksProps.class)
 public class RocksDbAppConfig {
 
     @Bean
-    public List<RocksSchema> rocksSchemas() {
+    public List<RocksSchema<?>> rocksSchemas() {
         return List.of(
-                schemaFrom(ClientSchema.class),
-                schemaFrom(ProductSchema.class),
-                schemaFrom(PurchaseSchema.class)
+                ClientSchema.INSTANCE,
+                ProductSchema.INSTANCE,
+                PurchaseSchema.INSTANCE
         );
     }
 
     @Bean
-    public RocksDbHandle rocksDbHandle(RocksProps props, List<RocksSchema> schemas) throws RocksDBException {
+    public RocksDbHandle rocksDbHandle(RocksProps props, List<RocksSchema<?>> schemas) throws RocksDBException {
         return RocksDbBootstrap.open(props, schemas);
     }
 
@@ -74,25 +70,4 @@ public class RocksDbAppConfig {
         return new PurchaseDao(sessions, registry);
     }
 
-    private static RocksSchema schemaFrom(Class<?> schemaClass) {
-        Set<String> names = new LinkedHashSet<>();
-        for (Field field : schemaClass.getDeclaredFields()) {
-            if (!Modifier.isStatic(field.getModifiers())) {
-                continue;
-            }
-            if (field.getType() != String.class) {
-                continue;
-            }
-            try {
-                field.setAccessible(true);
-                String value = (String) field.get(null);
-                if (value != null && !value.isBlank()) {
-                    names.add(value);
-                }
-            } catch (IllegalAccessException ex) {
-                throw new IllegalStateException("Failed to read schema constants from " + schemaClass.getName(), ex);
-            }
-        }
-        return RocksSchema.of(names.toArray(String[]::new));
-    }
 }
