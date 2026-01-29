@@ -12,7 +12,7 @@ import org.github.dbjo.generated.model.entity.Purchase;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
+import org.springframework.jdbc.core.ResultSetExtractor;
 
 @Service
 public class HsqlToRocksLoader {
@@ -43,7 +43,7 @@ public class HsqlToRocksLoader {
     private void loadClients() {
         jdbcTemplate.query(
                 ClientDbMeta.INSTANCE.selectAllSql(),
-                (org.springframework.jdbc.core.ResultSetExtractor<Void>) rs -> {
+                (ResultSetExtractor<Void>) rs -> {
                     while (rs.next()) {
                         Client client = ClientDbMeta.INSTANCE.fromRow(rs);
                         clientDao.upsert(client.getId(), client);
@@ -56,7 +56,7 @@ public class HsqlToRocksLoader {
     private void loadProducts() {
         jdbcTemplate.query(
                 ProductDbMeta.INSTANCE.selectAllSql(),
-                (org.springframework.jdbc.core.ResultSetExtractor<Void>) rs -> {
+                (ResultSetExtractor<Void>) rs -> {
                     while (rs.next()) {
                         Product product = ProductDbMeta.INSTANCE.fromRow(rs);
                         productDao.upsert(product.getId(), product);
@@ -69,7 +69,7 @@ public class HsqlToRocksLoader {
     private void loadPurchases() {
         jdbcTemplate.query(
                 PurchaseDbMeta.INSTANCE.selectAllSql(),
-                (org.springframework.jdbc.core.ResultSetExtractor<Void>) rs -> {
+                (ResultSetExtractor<Void>) rs -> {
                     while (rs.next()) {
                         Purchase purchase = PurchaseDbMeta.INSTANCE.fromRow(rs);
                         purchaseDao.upsert(purchase.getId(), purchase);
