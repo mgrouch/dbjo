@@ -57,4 +57,12 @@ final class ConditionEvaluatorMoreTest {
         assertTrue(ConditionEvaluator.test(Conditions.eq(S, null), foo));
         assertFalse(ConditionEvaluator.test(Conditions.ne(S, null), foo));
     }
+
+    @Test
+    void like_matchesPercentUnderscoreAndEscapes() {
+        Foo foo = new Foo(1, "ab_c");
+        assertTrue(ConditionEvaluator.test(Conditions.like(S, "ab\\_c"), foo));
+        assertTrue(ConditionEvaluator.test(Conditions.like(S, "ab%"), foo));
+        assertFalse(ConditionEvaluator.test(Conditions.like(S, "ab_"), foo));
+    }
 }

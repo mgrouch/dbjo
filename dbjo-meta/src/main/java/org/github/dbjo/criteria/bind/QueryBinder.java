@@ -109,7 +109,7 @@ public final class QueryBinder {
         if (c instanceof LikeSpec e) {
             var p = registry.<B>property(entityId, e.property());
             @SuppressWarnings("unchecked")
-            PropertyMeta<B, String> strProp = (PropertyMeta<B, String>) p;
+            PropertyMeta<B, String> strProp = (PropertyMeta<B, String>) (PropertyMeta<?, ?>) p;
             return Conditions.like(strProp, e.pattern());
         }
         if (c instanceof NotSpec e) {

@@ -46,6 +46,7 @@ final class QueryBinderTest {
         private Integer id;
         private Boolean active;
         private Status status;
+        private String name;
 
         Integer getId() { return id; }
         void setId(Integer id) { this.id = id; }
@@ -55,6 +56,9 @@ final class QueryBinderTest {
 
         Status getStatus() { return status; }
         void setStatus(Status status) { this.status = status; }
+
+        String getName() { return name; }
+        void setName(String name) { this.name = name; }
     }
 
     private static DefaultMetaRegistry registry() {
@@ -67,11 +71,14 @@ final class QueryBinderTest {
         PropertyMeta<Bean, Status> statusMeta =
                 new PropertyMeta<>("status", Status.class, Bean::getStatus, Bean::setStatus);
 
+        PropertyMeta<Bean, String> nameMeta =
+                new PropertyMeta<>("name", String.class, Bean::getName, Bean::setName);
+
         @SuppressWarnings({ "rawtypes", "unchecked" })
         EntityMeta<Bean> em = new EntityMeta<>(
-                (List) List.of(idMeta, activeMeta, statusMeta),
-                List.of("id", "active", "status"),
-                List.of(Integer.class, Boolean.class, Status.class)
+                (List) List.of(idMeta, activeMeta, statusMeta, nameMeta),
+                List.of("id", "active", "status", "name"),
+                List.of(Integer.class, Boolean.class, Status.class, String.class)
         );
 
         return new DefaultMetaRegistry().register("T", em);
@@ -160,5 +167,18 @@ final class QueryBinderTest {
         assertEquals(Bound.INCLUSIVE, q.scan().range().lowerBound());
         assertEquals(20, q.scan().range().upper());
         assertEquals(Bound.EXCLUSIVE, q.scan().range().upperBound());
+    }
+
+    @Test
+    void bindsLikeSpec() {
+        QueryBinder qb = new QueryBinder(registry());
+
+        QuerySpec spec = new QuerySpec("T", new LikeSpec("name", "Al%"), null, null);
+        Query<Bean> q = qb.fromSpec(spec);
+
+        Bean b = new Bean();
+        b.setName("Alice");
+
+        assertTrue(ConditionEvaluator.test(q.where(), b));
     }
 }

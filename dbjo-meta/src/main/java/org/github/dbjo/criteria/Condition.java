@@ -4,7 +4,7 @@ import java.io.Serializable;
 
 public sealed interface Condition<B extends Serializable>
         permits TrueCond, FalseCond,
-        Eq, Ne, In, IsNull, IsNotNull,
+        Eq, Ne, In, IsNull, IsNotNull, Like,
         Between, Cmp,
         And, Or, Not {
 
