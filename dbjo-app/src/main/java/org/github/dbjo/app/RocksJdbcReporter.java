@@ -3,7 +3,6 @@ package org.github.dbjo.app;
 import org.github.dbjo.generated.model.rdb.jdbc.GeneratedRocksJdbcCatalog;
 import org.github.dbjo.meta.jdbc.JdbcUtil;
 import org.github.dbjo.rdb.RocksProps;
-import org.springframework.stereotype.Component;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -12,7 +11,6 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Properties;
 
-@Component
 public record RocksJdbcReporter(RocksProps rocksProps) {
 
     public void reportTables() throws SQLException {
