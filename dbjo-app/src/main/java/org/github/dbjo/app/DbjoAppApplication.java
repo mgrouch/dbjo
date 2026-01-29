@@ -4,6 +4,7 @@ import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
+import org.github.dbjo.rdb.RocksDbHandle;
 
 @SpringBootApplication
 public class DbjoAppApplication {
@@ -13,9 +14,10 @@ public class DbjoAppApplication {
     }
 
     @Bean
-    CommandLineRunner run(HsqlToRocksLoader loader, RocksJdbcReporter reporter) {
+    CommandLineRunner run(HsqlToRocksLoader loader, RocksJdbcReporter reporter, RocksDbHandle rocksDbHandle) {
         return args -> {
             loader.load();
+            rocksDbHandle.close();
             reporter.reportTables();
         };
     }

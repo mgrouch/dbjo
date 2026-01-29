@@ -117,6 +117,12 @@ public final class DbjoCodegen {
                 System.out.println();
             }
 
+            if (cfg.runMode().runJdbcDao()) {
+                int n = new org.github.dbjo.codegen.jdbc.JdbcDaoGenerator(cfg).generateAll(tables);
+                System.out.println("Generated JDBC DAO(s): " + n);
+                System.out.println();
+            }
+
             // 6) PROTO MAPPERS
             if (cfg.runMode().runMapper()) {
                 int n = new ProtoMapperGenerator(cfg).generateAll(tables);
