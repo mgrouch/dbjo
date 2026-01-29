@@ -10,5 +10,8 @@ spring:
       schema-locations: classpath:schema.sql
       data-locations: classpath:static-data.sql
 
+server:
+  port: 8433
+
 rocks:
   path: ./data/rocksdb
