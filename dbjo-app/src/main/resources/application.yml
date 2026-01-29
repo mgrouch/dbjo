@@ -1,0 +1,14 @@
+spring:
+  datasource:
+    url: jdbc:hsqldb:mem:dbjo;DB_CLOSE_DELAY=-1
+    driver-class-name: org.hsqldb.jdbc.JDBCDriver
+    username: SA
+    password:
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
+      data-locations: classpath:static-data.sql
+
+rocks:
+  path: ./data/rocksdb

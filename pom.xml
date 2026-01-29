@@ -13,6 +13,7 @@
     <module>dbjo-rdb</module>
     <module>dbjo-maven-plugins</module>
     <module>dbjo-sim-model</module>
+    <module>dbjo-app</module>
   </modules>
   <dependencyManagement>
     <dependencies>
