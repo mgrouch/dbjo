@@ -240,7 +240,7 @@ public final class RocksJdbcExecutor {
                             if (pv == null) continue;
                             next = new RowEntry(pk, pv);
                             return true;
-                        } catch (RocksDBException ex) {
+                        } catch (RocksDBException | SQLException ex) {
                             throw new RuntimeException(ex);
                         }
                     }
