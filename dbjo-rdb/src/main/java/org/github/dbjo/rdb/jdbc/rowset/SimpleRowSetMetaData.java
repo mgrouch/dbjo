@@ -69,7 +69,6 @@ public final class SimpleRowSetMetaData implements RowSetMetaData {
     @Override public boolean isSigned(int column) { return true; }
     @Override public int getPrecision(int column) throws SQLException { check(column); return sizes[column-1]; }
     @Override public String getSchemaName(int column) { return ""; }
-    @Override public int getColumnDisplaySize(int column) { return 0; }
     @Override public String getTableName(int column) { return ""; }
     @Override public String getCatalogName(int column) { return ""; }
     @Override public boolean isReadOnly(int column) { return true; }
@@ -77,7 +76,6 @@ public final class SimpleRowSetMetaData implements RowSetMetaData {
     @Override public boolean isDefinitelyWritable(int column) { return false; }
     @Override public String getColumnClassName(int column) { return "java.lang.Object"; }
 
-    @Override public int getColumnDisplaySize(int column) throws SQLException { check(column); return sizes[column-1]; }
 
     // unused setters required by interface:
     @Override public void setAutoIncrement(int column, boolean property) {}
@@ -89,10 +87,12 @@ public final class SimpleRowSetMetaData implements RowSetMetaData {
     @Override public void setSchemaName(int column, String schemaName) {}
     @Override public void setTableName(int column, String tableName) {}
     @Override public void setCatalogName(int column, String catalogName) {}
-    @Override public void setReadOnly(int column, boolean property) {}
-    @Override public void setWritable(int column, boolean property) {}
-    @Override public void setDefinitelyWritable(int column, boolean property) {}
-    @Override public void setColumnClassName(int column, String className) {}
+    @Override public void setColumnCount(int columnCount) throws SQLException {}
+
+    public void setReadOnly(int column, boolean property) {}
+    public void setWritable(int column, boolean property) {}
+    public void setDefinitelyWritable(int column, boolean property) {}
+    public void setColumnClassName(int column, String className) {}
 
     // wrappers:
     @Override public <T> T unwrap(Class<T> iface) throws SQLException { throw new SQLException("unwrap"); }
