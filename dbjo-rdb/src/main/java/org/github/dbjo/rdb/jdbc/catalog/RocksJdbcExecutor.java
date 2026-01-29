@@ -221,7 +221,10 @@ public final class RocksJdbcExecutor {
                 final RocksIterator it = db.newIterator(primaryCf);
                 { it.seekToFirst(); }
                 boolean closed = false;
-                @Override public boolean hasNext() { return it.isValid(); }
+                @Override public boolean hasNext() {
+                    if (closed) return false;
+                    return it.isValid();
+                }
                 @Override public RowEntry next() {
                     if (!it.isValid()) throw new NoSuchElementException();
                     byte[] k = it.key();
@@ -256,6 +259,7 @@ public final class RocksJdbcExecutor {
                 }
 
                 @Override public boolean hasNext() {
+                    if (closed) return false;
                     ensureInit();
                     if (!it.isValid()) return false;
                     return IndexKeys.startsWith(it.key(), prefix);
@@ -299,6 +303,7 @@ public final class RocksJdbcExecutor {
                 boolean closed = false;
 
                 @Override public boolean hasNext() {
+                    if (closed) return false;
                     if (next != null) return true;
 
                     while (true) {
@@ -374,6 +379,7 @@ public final class RocksJdbcExecutor {
                 }
 
                 @Override public boolean hasNext() {
+                    if (closed) return false;
                     if (next != null) return true;
                     ensureInit();
 
