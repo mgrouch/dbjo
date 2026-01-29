@@ -2,6 +2,7 @@ package org.github.dbjo.rdb;
 
 import org.github.dbjo.criteria.*;
 import org.github.dbjo.meta.entity.PropertyMeta;
+import org.github.dbjo.rdb.criteria.CriteriaIndexPlanner;
 import org.github.dbjo.rdb.criteria.CriteriaSupport;
 import org.rocksdb.ColumnFamilyHandle;
 
@@ -22,14 +23,15 @@ public abstract class IndexedRocksDao<T, K> extends AbstractRocksDao<T, K> {
     private static final byte[] EMPTY = new byte[0];
 
     // heuristic limits for union pushdown
-    private static final int MAX_IN_PUSHDOWN = 16;
-    private static final int MAX_OR_EQ_PUSHDOWN = 16;
+    private static final int MAX_IN_PUSHDOWN = CriteriaIndexPlanner.DEFAULT_MAX_IN_PUSHDOWN;
+    private static final int MAX_OR_EQ_PUSHDOWN = CriteriaIndexPlanner.DEFAULT_MAX_OR_EQ_PUSHDOWN;
 
     // ✅ IndexDef has 2 type params
     private final List<IndexDef<T, ?>> indexes;
 
     // cached lookup: propertyName (lower) -> indexdef
     private volatile Map<String, IndexDef<T, ?>> indexByPropLower;
+    private volatile Map<String, CriteriaIndexPlanner.IndexInfo> indexInfoByPropLower;
 
     protected IndexedRocksDao(
             RocksSessions sessions,
@@ -163,11 +165,26 @@ public abstract class IndexedRocksDao<T, K> extends AbstractRocksDao<T, K> {
         return tmp;
     }
 
-    private Plan<K> plan(org.github.dbjo.criteria.Query<?> cq) {
-        Candidate scanCand  = candidateFromScan(cq.scan());
-        Candidate whereCand = candidateFromWhere(cq.where());
+    private Map<String, CriteriaIndexPlanner.IndexInfo> indexInfoByPropLower() {
+        Map<String, CriteriaIndexPlanner.IndexInfo> m = indexInfoByPropLower;
+        if (m != null) return m;
 
-        Candidate best = better(scanCand, whereCand);
+        Map<String, IndexDef<T, ?>> defs = indexByPropLower();
+        HashMap<String, CriteriaIndexPlanner.IndexInfo> out = new HashMap<>();
+        for (Map.Entry<String, IndexDef<T, ?>> e : defs.entrySet()) {
+            IndexDef<T, ?> idx = e.getValue();
+            if (idx == null) continue;
+            out.put(e.getKey(), new CriteriaIndexPlanner.IndexInfo(idx.name(), idx::encodeAnyOrNull));
+        }
+        indexInfoByPropLower = out;
+        return out;
+    }
+
+    private Plan<K> plan(org.github.dbjo.criteria.Query<?> cq) {
+        CriteriaIndexPlanner.Candidate scanCand  = candidateFromScan(cq.scan());
+        CriteriaIndexPlanner.Candidate whereCand = candidateFromWhere(cq.where());
+
+        CriteriaIndexPlanner.Candidate best = better(scanCand, whereCand);
 
         if (best == null) {
             Query.Builder<K> b = Query.builder();
@@ -176,9 +193,9 @@ public abstract class IndexedRocksDao<T, K> extends AbstractRocksDao<T, K> {
         }
 
         // union case: multiple Rocks queries (each with exactly one IndexPredicate)
-        if (best.unionPredicates != null && !best.unionPredicates.isEmpty()) {
-            ArrayList<Query<K>> qs = new ArrayList<>(best.unionPredicates.size());
-            for (IndexPredicate ip : best.unionPredicates) {
+        if (!best.unionPredicates().isEmpty()) {
+            ArrayList<Query<K>> qs = new ArrayList<>(best.unionPredicates().size());
+            for (IndexPredicate ip : best.unionPredicates()) {
                 Query.Builder<K> b = Query.<K>builder().where(ip);
                 if (cq.limit() != null) b.limit(cq.limit());
                 qs.add(b.build());
@@ -186,18 +203,18 @@ public abstract class IndexedRocksDao<T, K> extends AbstractRocksDao<T, K> {
             return new Plan<>(qs);
         }
 
-        Query.Builder<K> b = Query.<K>builder().where(best.predicate);
+        Query.Builder<K> b = Query.<K>builder().where(best.predicate());
         if (cq.limit() != null) b.limit(cq.limit());
         return new Plan<>(List.of(b.build()));
     }
 
-    private static Candidate better(Candidate a, Candidate b) {
+    private static CriteriaIndexPlanner.Candidate better(CriteriaIndexPlanner.Candidate a, CriteriaIndexPlanner.Candidate b) {
         if (a == null) return b;
         if (b == null) return a;
-        return (b.score > a.score) ? b : a;
+        return (b.score() > a.score()) ? b : a;
     }
 
-    private Candidate candidateFromScan(Scan<?, ? extends Serializable> scan) {
+    private CriteriaIndexPlanner.Candidate candidateFromScan(Scan<?, ? extends Serializable> scan) {
         if (scan == null) return null;
 
         PropertyMeta<?, ?> prop = scan.prop();
@@ -212,195 +229,12 @@ public abstract class IndexedRocksDao<T, K> extends AbstractRocksDao<T, K> {
         IndexPredicate ip = toIndexRange(idx, scan.range());
         if (ip == null) return null;
 
-        return new Candidate(ip, 700);
+        return CriteriaIndexPlanner.Candidate.of(ip, 700);
     }
 
-    private Candidate candidateFromWhere(Condition<?> where) {
+    private CriteriaIndexPlanner.Candidate candidateFromWhere(Condition<?> where) {
         if (where == null) return null;
-        return candidateFromCond(where);
-    }
-
-    private Candidate candidateFromCond(Condition<?> c) {
-        if (c == null) return null;
-
-        // Eq
-        if (c instanceof Eq<?, ?> e) {
-            return candEq(e.prop(), e.value());
-        }
-
-        // Between (inclusive)
-        if (c instanceof Between<?, ?> b) {
-            return candBetween(b.prop(), b.lo(), b.hi());
-        }
-
-        // Cmp
-        if (c instanceof Cmp<?, ?> cmp) {
-            return candCmp(cmp.prop(), cmp.op(), cmp.value());
-        }
-
-        // In
-        if (c instanceof In<?, ?> in) {
-            return candIn(in.prop(), in.values());
-        }
-
-        // And: choose best child (binary)
-        if (c instanceof And<?> a) {
-            return better(candidateFromCond(a.left()), candidateFromCond(a.right()));
-        }
-
-        // Or: support OR of Eq on same property (as a union pushdown)
-        if (c instanceof Or<?> o) {
-            return candOrEqUnion(o);
-        }
-
-        return null;
-    }
-
-    private Candidate candEq(PropertyMeta<?, ?> prop, Object value) {
-        if (prop == null) return null;
-        String pn = prop.getPropertyName();
-        if (pn == null || pn.isBlank()) return null;
-
-        IndexDef<T, ?> idx = indexByPropLower().get(pn.trim().toLowerCase(Locale.ROOT));
-        if (idx == null) return null;
-
-        if (value == null) return null;
-
-        byte[] vb;
-        try {
-            vb = idx.encodeAnyOrNull(value);
-        } catch (ClassCastException ex) {
-            return null;
-        }
-        if (vb == null) return null;
-
-        return new Candidate(new IndexPredicate.Eq(idx.name(), vb), 1000);
-    }
-
-    private Candidate candBetween(PropertyMeta<?, ?> prop, Object lo, Object hi) {
-        if (prop == null) return null;
-        String pn = prop.getPropertyName();
-        if (pn == null || pn.isBlank()) return null;
-
-        IndexDef<T, ?> idx = indexByPropLower().get(pn.trim().toLowerCase(Locale.ROOT));
-        if (idx == null) return null;
-
-        byte[] from, to;
-        try {
-            from = (lo == null) ? null : idx.encodeAnyOrNull(lo);
-            to   = (hi == null) ? null : idx.encodeAnyOrNull(hi);
-        } catch (ClassCastException ex) {
-            return null;
-        }
-        if (from == null && to == null) return null;
-
-        IndexPredicate ip = new IndexPredicate.Range(idx.name(), from, true, to, true);
-        return new Candidate(ip, 650);
-    }
-
-    private Candidate candCmp(PropertyMeta<?, ?> prop, CmpOp op, Object v) {
-        if (prop == null || op == null) return null;
-        String pn = prop.getPropertyName();
-        if (pn == null || pn.isBlank()) return null;
-
-        IndexDef<T, ?> idx = indexByPropLower().get(pn.trim().toLowerCase(Locale.ROOT));
-        if (idx == null) return null;
-
-        if (v == null) return null;
-
-        byte[] b;
-        try {
-            b = idx.encodeAnyOrNull(v);
-        } catch (ClassCastException ex) {
-            return null;
-        }
-        if (b == null) return null;
-
-        return switch (op) {
-            case LT -> new Candidate(new IndexPredicate.Range(idx.name(), null, false, b, false), 600);
-            case LE -> new Candidate(new IndexPredicate.Range(idx.name(), null, false, b, true),  600);
-            case GT -> new Candidate(new IndexPredicate.Range(idx.name(), b, false, null, false), 600);
-            case GE -> new Candidate(new IndexPredicate.Range(idx.name(), b, true,  null, false), 600);
-        };
-    }
-
-    private Candidate candIn(PropertyMeta<?, ?> prop, List<?> values) {
-        if (prop == null || values == null || values.isEmpty()) return null;
-
-        String pn = prop.getPropertyName();
-        if (pn == null || pn.isBlank()) return null;
-
-        IndexDef<T, ?> idx = indexByPropLower().get(pn.trim().toLowerCase(Locale.ROOT));
-        if (idx == null) return null;
-
-        if (values.size() > MAX_IN_PUSHDOWN) return null;
-
-        ArrayList<IndexPredicate> ips = new ArrayList<>();
-        for (Object v : values) {
-            if (v == null) return null; // completeness: don't pushdown if null is present
-            byte[] b;
-            try {
-                b = idx.encodeAnyOrNull(v);
-            } catch (ClassCastException ex) {
-                return null;
-            }
-            if (b == null) return null;
-            ips.add(new IndexPredicate.Eq(idx.name(), b));
-        }
-
-        Candidate c = new Candidate(null, 900 - ips.size());
-        c.unionPredicates = ips;
-        return c;
-    }
-
-    private Candidate candOrEqUnion(Or<?> o) {
-        ArrayList<Eq<?, ?>> eqs = new ArrayList<>();
-        if (!collectEqFromOr(o, eqs)) return null;
-
-        if (eqs.isEmpty() || eqs.size() > MAX_OR_EQ_PUSHDOWN) return null;
-
-        PropertyMeta<?, ?> p0 = eqs.get(0).prop();
-        if (p0 == null || p0.getPropertyName() == null) return null;
-        String pn = p0.getPropertyName().trim().toLowerCase(Locale.ROOT);
-
-        for (Eq<?, ?> e : eqs) {
-            PropertyMeta<?, ?> p = e.prop();
-            if (p == null || p.getPropertyName() == null) return null;
-            if (!pn.equals(p.getPropertyName().trim().toLowerCase(Locale.ROOT))) return null;
-        }
-
-        IndexDef<T, ?> idx = indexByPropLower().get(pn);
-        if (idx == null) return null;
-
-        ArrayList<IndexPredicate> ips = new ArrayList<>();
-        for (Eq<?, ?> e : eqs) {
-            Object v = e.value();
-            if (v == null) return null;
-            byte[] b;
-            try {
-                b = idx.encodeAnyOrNull(v);
-            } catch (ClassCastException ex) {
-                return null;
-            }
-            if (b == null) return null;
-            ips.add(new IndexPredicate.Eq(idx.name(), b));
-        }
-
-        Candidate c = new Candidate(null, 880 - ips.size());
-        c.unionPredicates = ips;
-        return c;
-    }
-
-    /** Returns false if any OR branch is not Eq (or nested Or-of-Eq). */
-    private static boolean collectEqFromOr(Condition<?> c, List<Eq<?, ?>> out) {
-        if (c instanceof Eq<?, ?> e) {
-            out.add(e);
-            return true;
-        }
-        if (c instanceof Or<?> o) {
-            return collectEqFromOr(o.left(), out) && collectEqFromOr(o.right(), out);
-        }
-        return false;
+        return CriteriaIndexPlanner.bestCandidate(where, indexInfoByPropLower(), MAX_IN_PUSHDOWN, MAX_OR_EQ_PUSHDOWN);
     }
 
     private IndexPredicate toIndexRange(IndexDef<T, ?> idx, Range<? extends Serializable> r) {
@@ -441,17 +275,6 @@ public abstract class IndexedRocksDao<T, K> extends AbstractRocksDao<T, K> {
         final List<Query<K>> queries;
         Plan(List<Query<K>> queries) {
             this.queries = Objects.requireNonNull(queries, "queries");
-        }
-    }
-
-    private static final class Candidate {
-        final IndexPredicate predicate; // may be null when unionPredicates used
-        final int score;
-        List<IndexPredicate> unionPredicates; // optional
-
-        Candidate(IndexPredicate predicate, int score) {
-            this.predicate = predicate;
-            this.score = score;
         }
     }
 }

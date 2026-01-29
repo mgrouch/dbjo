@@ -1,8 +1,13 @@
 package org.github.dbjo.rdb.jdbc.catalog;
 
+import org.github.dbjo.criteria.PropertyTerm;
+
+import java.io.Serializable;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 
 public final class RocksJdbcTable {
@@ -21,6 +26,7 @@ public final class RocksJdbcTable {
     private final RocksJdbcIndex[] indexes;
 
     private final RocksJdbcDecoder decoder;
+    private final Map<String, PropertyTerm<?, ? extends Serializable>> termsByColumnLower;
 
     private final String[] names; // aliases for lookup (table, cf, class-name, etc.)
 
@@ -33,6 +39,7 @@ public final class RocksJdbcTable {
             String[] pkColumns,
             RocksJdbcIndex[] indexes,
             RocksJdbcDecoder decoder,
+            Map<String, ? extends PropertyTerm<?, ? extends Serializable>> termsByColumnLower,
             String[] names
     ) {
         this.schemaName = (schemaName == null || schemaName.isBlank()) ? "PUBLIC" : schemaName;
@@ -43,6 +50,7 @@ public final class RocksJdbcTable {
         this.pkColumns = (pkColumns == null) ? new String[0] : pkColumns.clone();
         this.indexes = (indexes == null) ? new RocksJdbcIndex[0] : indexes.clone();
         this.decoder = Objects.requireNonNull(decoder, "decoder");
+        this.termsByColumnLower = (termsByColumnLower == null) ? Map.of() : new HashMap<>(termsByColumnLower);
         this.names = (names == null || names.length == 0) ? new String[]{ tableName } : names.clone();
 
         this.columnNames = new String[this.columns.length];
@@ -71,6 +79,7 @@ public final class RocksJdbcTable {
     public RocksJdbcIndex[] indexes() { return indexes.clone(); }
 
     public RocksJdbcDecoder decoder() { return decoder; }
+    public Map<String, PropertyTerm<?, ? extends Serializable>> termsByColumnLower() { return Map.copyOf(termsByColumnLower); }
 
     public List<String> names() { return List.of(names); }
 

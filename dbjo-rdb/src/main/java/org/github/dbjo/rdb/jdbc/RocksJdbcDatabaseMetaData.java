@@ -71,7 +71,7 @@ public final class RocksJdbcDatabaseMetaData implements DatabaseMetaData {
     @Override public boolean storesMixedCaseQuotedIdentifiers() { return true; }
     @Override public String getIdentifierQuoteString() { return "\""; }
     @Override public String getSQLKeywords() { return ""; }
-    @Override public String getNumericFunctions() { return ""; }
+    @Override public String getNumericFunctions() { return "MIN,MAX,SUM,COUNT"; }
     @Override public String getStringFunctions() { return ""; }
     @Override public String getSystemFunctions() { return ""; }
     @Override public String getTimeDateFunctions() { return ""; }
@@ -92,7 +92,7 @@ public final class RocksJdbcDatabaseMetaData implements DatabaseMetaData {
     @Override public boolean supportsDifferentTableCorrelationNames() { return false; }
     @Override public boolean supportsExpressionsInOrderBy() { return false; }
     @Override public boolean supportsOrderByUnrelated() { return false; }
-    @Override public boolean supportsGroupBy() { return false; }
+    @Override public boolean supportsGroupBy() { return true; }
     @Override public boolean supportsGroupByUnrelated() { return false; }
     @Override public boolean supportsGroupByBeyondSelect() { return false; }
     @Override public boolean supportsLikeEscapeClause() { return false; }

@@ -135,6 +135,9 @@ This project includes a tiny read-only JDBC driver that lets IntelliJ/DataGrip b
 - `select * from tables`
 - `select * from <table_name>`
 - `select count(*) from <table_name>`
+- `select min(col), max(col), sum(col) from <table_name>`
+- `select col, count(*) from <table_name> group by col`
+- `select col, count(*) from <table_name> group by col having count > 1 order by col desc`
 
 ### 1) Build the driver and the generated catalog
 
@@ -192,3 +195,18 @@ select * from client;
 select count(*) from client;
 ```
 
+### Supported query features
+
+The JDBC driver is read-only and supports a small subset of SQL:
+
+* `SELECT *` or specific columns.
+* `WHERE` with `=`, `!=`, `<`, `<=`, `>`, `>=`, `BETWEEN`, `IN`, `IS NULL`, `IS NOT NULL`, `AND`, `OR`, `NOT`.
+* Aggregates: `COUNT`, `MIN`, `MAX`, `SUM`.
+* `GROUP BY` and `HAVING` (filters applied after aggregation).
+* `ORDER BY` for sorting results (applied after filtering/aggregation).
+* `LIMIT`.
+
+Notes:
+
+* `SELECT *` is not supported with `GROUP BY` or aggregate functions.
+* Mixing aggregates and non-aggregates without `GROUP BY` is not supported.

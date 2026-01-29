@@ -19,7 +19,7 @@ import java.util.*;
  * IMPORTANT:
  *  - No reflection: uses your Col accessors directly.
  *  - RocksJdbcTable ctor order matches your runtime:
- *      (schemaName, tableName, cfName, rowClass, columns, pkColumns, indexes, decoder, names)
+ *      (schemaName, tableName, cfName, rowClass, columns, pkColumns, indexes, decoder, terms, names)
  *  - RocksJdbcColumn ctor matches your record:
  *      (pos,name,sqlType,typeName,size,scale,nullable,isAutoIncrement,defaultValue,getterName)
  */
@@ -64,6 +64,8 @@ public final class RocksJdbcCatalogGenerator {
         sb.append("import org.github.dbjo.rdb.jdbc.catalog.RocksJdbcIndex;\n");
         sb.append("import org.github.dbjo.rdb.jdbc.catalog.RocksJdbcTable;\n\n");
 
+        sb.append("import org.github.dbjo.criteria.PropertyTerm;\n");
+        sb.append("import java.io.Serializable;\n");
         sb.append("import java.sql.SQLException;\n");
         sb.append("import java.util.*;\n\n");
 
@@ -72,8 +74,10 @@ public final class RocksJdbcCatalogGenerator {
         for (TableModel tm : tables) {
             String beanClass = Naming.toClassName(tm.table().table());
             String mapperClass = beanClass + cfg.protoMapperSuffix();
+            String queryClass = beanClass + effectiveQuerySuffix();
             extraImports.add(cfg.beanPkg() + "." + beanClass);
             extraImports.add(cfg.protoMapperPkg() + "." + mapperClass);
+            extraImports.add(effectiveQueryPkg() + "." + queryClass);
         }
         extraImports.add("com.google.protobuf.InvalidProtocolBufferException");
 
@@ -239,6 +243,20 @@ public final class RocksJdbcCatalogGenerator {
         sb.append("                ").append(jstr(beanClass)).append("\n");
         sb.append("        };\n\n");
 
+        String queryClass = beanClass + effectiveQuerySuffix();
+        sb.append("        Map<String, PropertyTerm<").append(beanClass).append(", ? extends Serializable>> terms = new HashMap<>();\n");
+        for (Col c : cols) {
+            if (c.colName() == null) continue;
+            String prop = Naming.sanitizeJavaIdentifier(Naming.toFieldName(c.colName()));
+            String constName = Naming.toUpperSnake(prop);
+            sb.append("        terms.put(")
+                    .append(jstr(c.colName().toLowerCase(Locale.ROOT)))
+                    .append(", ")
+                    .append(queryClass).append(".").append(constName)
+                    .append(");\n");
+        }
+        sb.append("\n");
+
         // IMPORTANT: ctor order matches runtime
         sb.append("        return new RocksJdbcTable(\n");
         sb.append("                ").append(jstr(schemaName)).append(",\n");
@@ -249,9 +267,41 @@ public final class RocksJdbcCatalogGenerator {
         sb.append("                pkCols,\n");
         sb.append("                indexes,\n");
         sb.append("                decoder,\n");
+        sb.append("                terms,\n");
         sb.append("                names\n");
         sb.append("        );\n");
         sb.append("    }\n\n");
+    }
+
+    private String effectiveQueryPkg() {
+        String qp = safeGet(cfg, "queryPkg");
+        if (qp != null && !qp.isBlank()) return qp.trim();
+
+        String mp = cfg.metaPkg();
+        if (mp == null || mp.isBlank()) return "query";
+
+        int lastDot = mp.lastIndexOf('.');
+        String lastSeg = lastDot >= 0 ? mp.substring(lastDot + 1) : mp;
+
+        if ("meta".equals(lastSeg)) {
+            return (lastDot >= 0 ? mp.substring(0, lastDot + 1) : "") + "query";
+        }
+        return mp + ".query";
+    }
+
+    private String effectiveQuerySuffix() {
+        String s = safeGet(cfg, "querySuffix");
+        return (s != null && !s.isBlank()) ? s.trim() : "Q";
+    }
+
+    private static String safeGet(Config cfg, String accessor) {
+        try {
+            var m = cfg.getClass().getMethod(accessor);
+            Object v = m.invoke(cfg);
+            return (v instanceof String s) ? s : null;
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     private static String toGetterName(String colName) {

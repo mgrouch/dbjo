@@ -1,8 +1,5 @@
 package org.github.dbjo.rdb.jdbc.catalog;
 
-import org.github.dbjo.rdb.IndexKeys;
-
-import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import java.util.*;
 
@@ -62,7 +59,9 @@ public final class RocksJdbcPlanner {
                 for (RocksJdbcWhereParser.Cmp c : eqs) {
                     Object v = c.lit().value();
                     if (v == null) return null;
-                    vs.add(String.valueOf(v).getBytes(StandardCharsets.UTF_8));
+                    byte[] vb = RocksJdbcValueEncoder.encodeForColumn(columnFor(table, c.col()), v);
+                    if (vb == null) return null;
+                    vs.add(vb);
                 }
                 return new Candidate(900 - vs.size(), new IndexIn(ix.indexName(), vs));
             }
@@ -77,7 +76,8 @@ public final class RocksJdbcPlanner {
             Object v = c.lit().value();
             if (v == null) return null;
 
-            byte[] vb = String.valueOf(v).getBytes(StandardCharsets.UTF_8);
+            byte[] vb = RocksJdbcValueEncoder.encodeForColumn(columnFor(table, c.col()), v);
+            if (vb == null) return null;
 
             return switch (c.op()) {
                 case EQ -> new Candidate(1000, new IndexEq(ix.indexName(), vb));
@@ -98,7 +98,9 @@ public final class RocksJdbcPlanner {
             for (var l : in.values()) {
                 Object v = l.value();
                 if (v == null) return null;
-                vs.add(String.valueOf(v).getBytes(StandardCharsets.UTF_8));
+                byte[] vb = RocksJdbcValueEncoder.encodeForColumn(columnFor(table, in.col()), v);
+                if (vb == null) return null;
+                vs.add(vb);
             }
             if (vs.isEmpty()) return null;
             return new Candidate(900 - vs.size(), new IndexIn(ix.indexName(), vs));
@@ -111,8 +113,9 @@ public final class RocksJdbcPlanner {
             Object lo = b.lo().value();
             Object hi = b.hi().value();
             if (lo == null && hi == null) return null;
-            byte[] l = (lo == null) ? null : String.valueOf(lo).getBytes(StandardCharsets.UTF_8);
-            byte[] h = (hi == null) ? null : String.valueOf(hi).getBytes(StandardCharsets.UTF_8);
+            byte[] l = (lo == null) ? null : RocksJdbcValueEncoder.encodeForColumn(columnFor(table, b.col()), lo);
+            byte[] h = (hi == null) ? null : RocksJdbcValueEncoder.encodeForColumn(columnFor(table, b.col()), hi);
+            if ((lo != null && l == null) || (hi != null && h == null)) return null;
             return new Candidate(650, new IndexRange(ix.indexName(), l, true, h, true));
         }
 
@@ -146,6 +149,18 @@ public final class RocksJdbcPlanner {
             if (cols == null || cols.length == 0) continue;
             if (cols[0] != null && cols[0].trim().toUpperCase(Locale.ROOT).equals(want)) {
                 return ix;
+            }
+        }
+        return null;
+    }
+
+    private static RocksJdbcColumn columnFor(RocksJdbcTable table, String col) {
+        if (table == null || col == null) return null;
+        String want = col.trim().toLowerCase(Locale.ROOT);
+        if (want.isEmpty()) return null;
+        for (RocksJdbcColumn c : table.columns()) {
+            if (c != null && c.name().trim().equalsIgnoreCase(want)) {
+                return c;
             }
         }
         return null;
