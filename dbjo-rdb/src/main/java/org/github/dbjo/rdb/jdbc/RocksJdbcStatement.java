@@ -9,15 +9,21 @@ public final class RocksJdbcStatement implements Statement {
     private boolean closed = false;
     private int maxRows = 0;
     private final int resultSetType;
+    private final int resultSetHoldability;
     private CachedRowSet last;
 
     public RocksJdbcStatement(RocksJdbcConnection conn) {
-        this(conn, ResultSet.TYPE_SCROLL_INSENSITIVE);
+        this(conn, ResultSet.TYPE_SCROLL_INSENSITIVE, conn.getHoldability());
     }
 
     public RocksJdbcStatement(RocksJdbcConnection conn, int resultSetType) {
+        this(conn, resultSetType, conn.getHoldability());
+    }
+
+    public RocksJdbcStatement(RocksJdbcConnection conn, int resultSetType, int resultSetHoldability) {
         this.conn = Objects.requireNonNull(conn, "conn");
         this.resultSetType = resultSetType;
+        this.resultSetHoldability = resultSetHoldability;
     }
 
     private void checkOpen() throws SQLException {
@@ -72,7 +78,7 @@ public final class RocksJdbcStatement implements Statement {
     @Override public int executeUpdate(String sql, int[] columnIndexes) throws SQLException { throw new SQLFeatureNotSupportedException(); }
     @Override public int executeUpdate(String sql, String[] columnNames) throws SQLException { throw new SQLFeatureNotSupportedException(); }
 
-    @Override public int getResultSetHoldability() { return ResultSet.HOLD_CURSORS_OVER_COMMIT; }
+    @Override public int getResultSetHoldability() { return resultSetHoldability; }
     @Override public boolean getMoreResults(int current) { return false; }
 
     @Override

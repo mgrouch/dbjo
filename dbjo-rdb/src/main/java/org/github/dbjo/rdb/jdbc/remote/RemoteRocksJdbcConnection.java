@@ -20,6 +20,7 @@ public final class RemoteRocksJdbcConnection implements Connection {
     private final String defaultSchema;
     private boolean closed;
     private String schema;
+    private int holdability = ResultSet.HOLD_CURSORS_OVER_COMMIT;
 
     RemoteRocksJdbcConnection(String url, Properties info, RemoteRocksJdbcClient client, RocksJdbcCatalog catalog) {
         this.url = Objects.requireNonNull(url, "url");
@@ -68,20 +69,28 @@ public final class RemoteRocksJdbcConnection implements Connection {
     @Override
     public Statement createStatement(int resultSetType, int resultSetConcurrency) throws SQLException {
         checkOpen();
-        validateResultSetConfig(resultSetType, resultSetConcurrency, ResultSet.HOLD_CURSORS_OVER_COMMIT);
-        return new RemoteRocksJdbcStatement(this, resultSetType);
+        validateResultSetConfig(resultSetType, resultSetConcurrency, holdability);
+        return new RemoteRocksJdbcStatement(this, resultSetType, holdability);
     }
 
     @Override
     public Statement createStatement(int resultSetType, int resultSetConcurrency, int resultSetHoldability) throws SQLException {
         checkOpen();
         validateResultSetConfig(resultSetType, resultSetConcurrency, resultSetHoldability);
-        return new RemoteRocksJdbcStatement(this, resultSetType);
+        return new RemoteRocksJdbcStatement(this, resultSetType, resultSetHoldability);
     }
     @Override public Map<String, Class<?>> getTypeMap() { return Map.of(); }
     @Override public void setTypeMap(Map<String, Class<?>> map) {}
-    @Override public void setHoldability(int holdability) {}
-    @Override public int getHoldability() { return ResultSet.HOLD_CURSORS_OVER_COMMIT; }
+    @Override
+    public void setHoldability(int holdability) throws SQLException {
+        if (holdability != ResultSet.HOLD_CURSORS_OVER_COMMIT
+                && holdability != ResultSet.CLOSE_CURSORS_AT_COMMIT) {
+            throw new SQLFeatureNotSupportedException("ResultSet holdability not supported");
+        }
+        this.holdability = holdability;
+    }
+
+    @Override public int getHoldability() { return holdability; }
     @Override public Savepoint setSavepoint() throws SQLException { throw new SQLFeatureNotSupportedException(); }
     @Override public Savepoint setSavepoint(String name) throws SQLException { throw new SQLFeatureNotSupportedException(); }
     @Override public void rollback(Savepoint savepoint) {}
@@ -130,7 +139,8 @@ public final class RemoteRocksJdbcConnection implements Connection {
 
     private static void validateResultSetConfig(int resultSetType, int resultSetConcurrency, int resultSetHoldability)
             throws SQLFeatureNotSupportedException {
-        if (resultSetHoldability != ResultSet.HOLD_CURSORS_OVER_COMMIT) {
+        if (resultSetHoldability != ResultSet.HOLD_CURSORS_OVER_COMMIT
+                && resultSetHoldability != ResultSet.CLOSE_CURSORS_AT_COMMIT) {
             throw new SQLFeatureNotSupportedException("ResultSet holdability not supported");
         }
         if (resultSetConcurrency != ResultSet.CONCUR_READ_ONLY) {
