@@ -68,6 +68,24 @@ final class ConditionEvaluatorMoreTest {
 
     @Test
     @SuppressWarnings({"rawtypes", "unchecked"})
+    void eq_allowsNumericTypeMismatches() {
+        Foo foo = new Foo(5, null);
+        Condition<Foo> eq = new Eq((PropertyMeta) N, 5L);
+        Condition<Foo> ne = new Ne((PropertyMeta) N, 6L);
+        assertTrue(ConditionEvaluator.test(eq, foo));
+        assertTrue(ConditionEvaluator.test(ne, foo));
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void in_allowsNumericTypeMismatches() {
+        Foo foo = new Foo(5, null);
+        Condition<Foo> in = new In((PropertyMeta) N, List.of(1L, 5L, 9L));
+        assertTrue(ConditionEvaluator.test(in, foo));
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
     void cmp_allowsNumericTypeMismatches() {
         Foo foo = new Foo(5, null);
         Condition<Foo> gt = new Cmp((PropertyMeta) N, CmpOp.GT, 1L);
