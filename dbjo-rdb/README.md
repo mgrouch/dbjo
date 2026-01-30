@@ -255,6 +255,12 @@ Quick checklist for clients:
    does not require auth.
 4. Run a simple keep-alive/verification query like `select * from tables` to confirm the
    catalog loads and the connection stays warm.
+5. Use a Java 21 runtime for the driver (the project compiles with `--release 21`); configure
+   IntelliJ/DataGrip to use a JDK 21 runtime for this driver if needed.
+
+If you see columns but no rows, confirm the server is pointing at a populated RocksDB path and
+the catalog class used by the server matches the one you generated for the data. A quick check is
+`select count(*) from <table>` or `select * from tables` against the same endpoint.
 
 #### HTTPS configuration
 
