@@ -223,11 +223,13 @@ public final class RocksJdbcDatabaseMetaData implements DatabaseMetaData {
         md.setColumnName(2, "TABLE_CATALOG"); md.setColumnType(2, Types.VARCHAR);
         rs.setMetaData(md);
 
-        rs.moveToInsertRow();
-        rs.updateString(1, "PUBLIC");
-        rs.updateString(2, null);
-        rs.insertRow();
-        rs.moveToCurrentRow();
+        for (String schema : catalog().schemaNames()) {
+            rs.moveToInsertRow();
+            rs.updateString(1, schema);
+            rs.updateString(2, null);
+            rs.insertRow();
+            rs.moveToCurrentRow();
+        }
 
         rs.beforeFirst();
         return rs;
@@ -242,9 +244,10 @@ public final class RocksJdbcDatabaseMetaData implements DatabaseMetaData {
         md.setColumnName(2, "TABLE_CATALOG"); md.setColumnType(2, Types.VARCHAR);
         rs.setMetaData(md);
 
-        if (match(schemaPattern, "PUBLIC")) {
+        for (String schema : catalog().schemaNames()) {
+            if (!match(schemaPattern, schema)) continue;
             rs.moveToInsertRow();
-            rs.updateString(1, "PUBLIC");
+            rs.updateString(1, schema);
             rs.updateString(2, null);
             rs.insertRow();
             rs.moveToCurrentRow();
@@ -351,7 +354,7 @@ public final class RocksJdbcDatabaseMetaData implements DatabaseMetaData {
 
     @Override
     public ResultSet getPrimaryKeys(String catalog, String schema, String table) throws SQLException {
-        RocksJdbcTable t = catalog().requireTable(table);
+        RocksJdbcTable t = requireTable(schema, table);
 
         CachedRowSet rs = RowSetProvider.newFactory().createCachedRowSet();
         RowSetMetaDataImpl md = new RowSetMetaDataImpl();
@@ -381,7 +384,7 @@ public final class RocksJdbcDatabaseMetaData implements DatabaseMetaData {
 
     @Override
     public ResultSet getIndexInfo(String catalog, String schema, String table, boolean unique, boolean approximate) throws SQLException {
-        RocksJdbcTable t = catalog().requireTable(table);
+        RocksJdbcTable t = requireTable(schema, table);
 
         CachedRowSet rs = RowSetProvider.newFactory().createCachedRowSet();
         RowSetMetaDataImpl md = new RowSetMetaDataImpl();
@@ -568,6 +571,16 @@ public final class RocksJdbcDatabaseMetaData implements DatabaseMetaData {
             if (t != null && t.equalsIgnoreCase(want)) return true;
         }
         return false;
+    }
+
+    private RocksJdbcTable requireTable(String schema, String table) throws SQLException {
+        if (table == null || table.isBlank()) throw new SQLException("Unknown table: " + table);
+        if (schema == null || schema.isBlank()) return catalog().requireTable(table);
+        for (RocksJdbcTable t : catalog().tables()) {
+            if (!t.schemaName().equalsIgnoreCase(schema)) continue;
+            if (t.nameMatches(table)) return t;
+        }
+        throw new SQLException("Unknown table: " + schema + "." + table);
     }
 
     // -------------------------------------------------------------------------
