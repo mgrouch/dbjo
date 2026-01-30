@@ -8,7 +8,7 @@ spring:
     init:
       mode: always
       schema-locations: classpath:schema.sql
-      data-locations: classpath:static-data.sql
+      data-locations: classpath:data.sql
 
 server:
   port: 8433
