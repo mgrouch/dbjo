@@ -38,6 +38,9 @@ public final class RocksJdbcExecutor {
         if (isTablesQuery(p)) {
             return listTables(catalog, limit(p.limit(), statementMaxRows), offset(p.offset()));
         }
+        if (isTablesCountQuery(p)) {
+            return countTables(catalog);
+        }
         RocksJdbcTable table = catalog.requireTable(p.tableName());
         ColumnFamilyHandle primaryCf = requireCf(cfsByName, table.cfName());
         QueryPlan plan = planQuery(table, p, statementMaxRows);
@@ -98,6 +101,26 @@ public final class RocksJdbcExecutor {
                 && parsed.orderBy().isEmpty();
     }
 
+    private static boolean isTablesCountQuery(RocksJdbcSqlParser.Parsed parsed) {
+        if (!"tables".equalsIgnoreCase(parsed.tableName())) {
+            return false;
+        }
+        if (parsed.selectAll() || parsed.selectItems().size() != 1) {
+            return false;
+        }
+        RocksJdbcSqlParser.SelectItem item = parsed.selectItems().getFirst();
+        if (!(item instanceof RocksJdbcSqlParser.SelectAgg agg)) {
+            return false;
+        }
+        if (agg.fn() != RocksJdbcSqlParser.AggFn.COUNT || !agg.countStar()) {
+            return false;
+        }
+        return parsed.whereSql() == null
+                && parsed.havingSql() == null
+                && parsed.groupByColumns().isEmpty()
+                && parsed.orderBy().isEmpty();
+    }
+
     private static CachedRowSet listTables(RocksJdbcCatalog catalog, int limit, int offset) throws SQLException {
         CachedRowSet rs = RowSetProvider.newFactory().createCachedRowSet();
         RowSetMetaDataImpl md = new RowSetMetaDataImpl();
@@ -125,6 +148,28 @@ public final class RocksJdbcExecutor {
             rs.moveToCurrentRow();
             out++;
         }
+
+        rs.beforeFirst();
+        return rs;
+    }
+
+    private static CachedRowSet countTables(RocksJdbcCatalog catalog) throws SQLException {
+        CachedRowSet rs = RowSetProvider.newFactory().createCachedRowSet();
+        RowSetMetaDataImpl md = new RowSetMetaDataImpl();
+        md.setColumnCount(1);
+        md.setColumnName(1, "COUNT");
+        md.setColumnLabel(1, "COUNT");
+        md.setColumnType(1, Types.BIGINT);
+        md.setColumnTypeName(1, "BIGINT");
+        md.setColumnDisplaySize(1, 0);
+        md.setScale(1, 0);
+        md.setNullable(1, DatabaseMetaData.columnNoNulls);
+        rs.setMetaData(md);
+
+        rs.moveToInsertRow();
+        rs.updateLong(1, catalog.tables().size());
+        rs.insertRow();
+        rs.moveToCurrentRow();
 
         rs.beforeFirst();
         return rs;
