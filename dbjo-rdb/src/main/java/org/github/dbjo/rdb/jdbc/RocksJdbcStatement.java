@@ -8,10 +8,16 @@ public final class RocksJdbcStatement implements Statement {
     private final RocksJdbcConnection conn;
     private boolean closed = false;
     private int maxRows = 0;
+    private final int resultSetType;
     private CachedRowSet last;
 
     public RocksJdbcStatement(RocksJdbcConnection conn) {
+        this(conn, ResultSet.TYPE_FORWARD_ONLY);
+    }
+
+    public RocksJdbcStatement(RocksJdbcConnection conn, int resultSetType) {
         this.conn = Objects.requireNonNull(conn, "conn");
+        this.resultSetType = resultSetType;
     }
 
     private void checkOpen() throws SQLException {
@@ -50,7 +56,7 @@ public final class RocksJdbcStatement implements Statement {
     @Override public int getFetchSize() { return 0; }
     @Override public void setFetchSize(int rows) {}
     @Override public int getResultSetConcurrency() { return ResultSet.CONCUR_READ_ONLY; }
-    @Override public int getResultSetType() { return ResultSet.TYPE_FORWARD_ONLY; }
+    @Override public int getResultSetType() { return resultSetType; }
     @Override public int getUpdateCount() { return -1; }
     @Override public boolean getMoreResults() { return false; }
     @Override public void setQueryTimeout(int seconds) {}

@@ -179,11 +179,15 @@ public final class RocksJdbcDatabaseMetaData implements DatabaseMetaData {
     // ResultSet support
     // -------------------------------------------------------------------------
 
-    @Override public boolean supportsResultSetType(int type) { return type == ResultSet.TYPE_FORWARD_ONLY; }
+    @Override
+    public boolean supportsResultSetType(int type) {
+        return type == ResultSet.TYPE_FORWARD_ONLY || type == ResultSet.TYPE_SCROLL_INSENSITIVE;
+    }
 
     @Override
     public boolean supportsResultSetConcurrency(int type, int concurrency) {
-        return type == ResultSet.TYPE_FORWARD_ONLY && concurrency == ResultSet.CONCUR_READ_ONLY;
+        return (type == ResultSet.TYPE_FORWARD_ONLY || type == ResultSet.TYPE_SCROLL_INSENSITIVE)
+                && concurrency == ResultSet.CONCUR_READ_ONLY;
     }
 
     @Override public boolean ownUpdatesAreVisible(int type) { return false; }
