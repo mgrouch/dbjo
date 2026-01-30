@@ -12,7 +12,7 @@ public final class RocksJdbcStatement implements Statement {
     private CachedRowSet last;
 
     public RocksJdbcStatement(RocksJdbcConnection conn) {
-        this(conn, ResultSet.TYPE_FORWARD_ONLY);
+        this(conn, ResultSet.TYPE_SCROLL_INSENSITIVE);
     }
 
     public RocksJdbcStatement(RocksJdbcConnection conn, int resultSetType) {

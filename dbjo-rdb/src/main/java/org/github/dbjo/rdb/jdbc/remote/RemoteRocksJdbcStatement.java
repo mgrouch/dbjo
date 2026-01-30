@@ -12,7 +12,7 @@ public final class RemoteRocksJdbcStatement implements Statement {
     private CachedRowSet last;
 
     RemoteRocksJdbcStatement(RemoteRocksJdbcConnection conn) {
-        this(conn, ResultSet.TYPE_FORWARD_ONLY);
+        this(conn, ResultSet.TYPE_SCROLL_INSENSITIVE);
     }
 
     RemoteRocksJdbcStatement(RemoteRocksJdbcConnection conn, int resultSetType) {
@@ -43,7 +43,7 @@ public final class RemoteRocksJdbcStatement implements Statement {
     @Override public boolean isClosed() { return closed; }
 
     @Override public int getMaxRows() { return maxRows; }
-    @Override public void setMaxRows(int max) { this.maxRows = max; }
+    @Override public void setMaxRows(int max) { this.maxRows = Math.max(0, max); }
 
     @Override public void setFetchSize(int rows) {}
     @Override public int getFetchSize() { return 0; }
