@@ -4,6 +4,8 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * Metadata-only catalog: generated code implements this.
@@ -16,6 +18,19 @@ public interface RocksJdbcCatalog {
     RocksJdbcTable table(String name);
 
     RocksJdbcTable requireTable(String name) throws SQLException;
+
+    default List<String> schemaNames() {
+        Set<String> names = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+        for (RocksJdbcTable table : tables()) {
+            String schema = table.schemaName();
+            if (schema == null || schema.isBlank()) continue;
+            names.add(schema);
+        }
+        if (names.isEmpty()) {
+            names.add("PUBLIC");
+        }
+        return List.copyOf(names);
+    }
 
     /**
      * Table meta for DatabaseMetaData / tooling.
