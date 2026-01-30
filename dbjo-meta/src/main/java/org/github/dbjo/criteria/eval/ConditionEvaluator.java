@@ -27,16 +27,27 @@ public final class ConditionEvaluator {
         }
         if (c instanceof Eq<B, ?> x) {
             Object v = x.prop().get(bean);
-            return Objects.equals(v, x.value());
+            return valuesEqual(v, x.value());
         }
         if (c instanceof Ne<B, ?> x) {
             Object v = x.prop().get(bean);
-            return !Objects.equals(v, x.value());
+            return !valuesEqual(v, x.value());
         }
         if (c instanceof In<B, ?> x) {
             Object v = x.prop().get(bean);
             if (v == null) return false;
             // values list is typically small
+            if (v instanceof Number vn) {
+                for (Object candidate : x.values()) {
+                    if (candidate instanceof Number cn && numbersEqual(vn, cn)) {
+                        return true;
+                    }
+                    if (Objects.equals(v, candidate)) {
+                        return true;
+                    }
+                }
+                return false;
+            }
             return x.values().contains(v);
         }
         if (c instanceof Between<B, ?> x) {
@@ -95,6 +106,17 @@ public final class ConditionEvaluator {
 
     private static java.math.BigDecimal toBigDecimal(Number number) {
         return new java.math.BigDecimal(number.toString());
+    }
+
+    private static boolean valuesEqual(Object left, Object right) {
+        if (left instanceof Number ln && right instanceof Number rn) {
+            return numbersEqual(ln, rn);
+        }
+        return Objects.equals(left, right);
+    }
+
+    private static boolean numbersEqual(Number left, Number right) {
+        return toBigDecimal(left).compareTo(toBigDecimal(right)) == 0;
     }
 
     private static boolean likeMatch(PropertyMeta<?, ?> prop, Object val, String pattern) {
