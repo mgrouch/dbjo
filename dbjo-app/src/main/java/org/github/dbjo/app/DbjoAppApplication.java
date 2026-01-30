@@ -4,6 +4,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.boot.CommandLineRunner;
+import org.springframework.boot.sql.init.dependency.DependsOnDatabaseInitialization;
 import org.springframework.context.annotation.Bean;
 import org.github.dbjo.generated.model.dao.jdbc.ClientJdbcDao;
 import org.github.dbjo.generated.model.dao.jdbc.ProductJdbcDao;
@@ -40,6 +41,7 @@ public class DbjoAppApplication {
     }
 
     @Bean
+    @DependsOnDatabaseInitialization
     CommandLineRunner loadRocksDb(DataSource dataSource, RocksProps rocksProps) {
         return args -> {
             List<RocksSchema<?>> schemas = List.of(
