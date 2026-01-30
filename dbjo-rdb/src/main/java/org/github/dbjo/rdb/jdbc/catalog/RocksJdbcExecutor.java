@@ -46,6 +46,7 @@ public final class RocksJdbcExecutor {
         QueryPlan plan = planQuery(table, p, statementMaxRows);
 
         CachedRowSet rs = RowSetProvider.newFactory().createCachedRowSet();
+        configureRowSet(rs);
         RowAccessor acc = new RowAccessor(table.rowClass(), table.columns());
 
         rs.setMetaData(plan.meta());
@@ -123,6 +124,7 @@ public final class RocksJdbcExecutor {
 
     private static CachedRowSet listTables(RocksJdbcCatalog catalog, int limit, int offset) throws SQLException {
         CachedRowSet rs = RowSetProvider.newFactory().createCachedRowSet();
+        configureRowSet(rs);
         RowSetMetaDataImpl md = new RowSetMetaDataImpl();
         md.setColumnCount(1);
         md.setColumnName(1, "TABLE_NAME");
@@ -155,6 +157,7 @@ public final class RocksJdbcExecutor {
 
     private static CachedRowSet countTables(RocksJdbcCatalog catalog) throws SQLException {
         CachedRowSet rs = RowSetProvider.newFactory().createCachedRowSet();
+        configureRowSet(rs);
         RowSetMetaDataImpl md = new RowSetMetaDataImpl();
         md.setColumnCount(1);
         md.setColumnName(1, "COUNT");
@@ -917,6 +920,7 @@ public final class RocksJdbcExecutor {
 
     private static CachedRowSet singleLong(String name, long v) throws SQLException {
         CachedRowSet rs = RowSetProvider.newFactory().createCachedRowSet();
+        configureRowSet(rs);
         RowSetMetaDataImpl md = new RowSetMetaDataImpl();
         md.setColumnCount(1);
         md.setColumnName(1, name);
@@ -936,6 +940,11 @@ public final class RocksJdbcExecutor {
     private static void applyOrderBy(List<RowResult> rows, List<RocksJdbcSqlParser.OrderItem> orderBy) {
         if (orderBy == null || orderBy.isEmpty() || rows.isEmpty()) return;
         rows.sort((a, b) -> compareRow(a, b, orderBy));
+    }
+
+    private static void configureRowSet(CachedRowSet rs) throws SQLException {
+        rs.setType(java.sql.ResultSet.TYPE_SCROLL_INSENSITIVE);
+        rs.setConcurrency(java.sql.ResultSet.CONCUR_READ_ONLY);
     }
 
     private static String normalizeHavingSql(String havingSql) {
