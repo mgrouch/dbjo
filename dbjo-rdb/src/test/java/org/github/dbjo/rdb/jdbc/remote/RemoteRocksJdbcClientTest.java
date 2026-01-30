@@ -70,28 +70,29 @@ class RemoteRocksJdbcClientTest {
 
         RemoteRocksJdbcCatalogDto fetched = client.fetchCatalog();
         assertThat(fetched.tables()).hasSize(1);
-        CachedRowSet rowSet = client.query("select * from client", 0);
-
-        rowSet.next();
-        assertThat(rowSet.getInt("id")).isEqualTo(42);
-        assertThat(rowSet.next()).isFalse();
+        try (CachedRowSet rowSet = client.query("select * from client", 0)) {
+            rowSet.next();
+            assertThat(rowSet.getInt("id")).isEqualTo(42);
+            assertThat(rowSet.next()).isFalse();
+        }
     }
 
     private static String buildRowSetXml() throws SQLException {
-        WebRowSet rowSet = RowSetProvider.newFactory().createWebRowSet();
-        RowSetMetaDataImpl meta = new RowSetMetaDataImpl();
-        meta.setColumnCount(1);
-        meta.setColumnName(1, "id");
-        meta.setColumnType(1, Types.INTEGER);
-        rowSet.setMetaData(meta);
-        rowSet.moveToInsertRow();
-        rowSet.updateInt(1, 42);
-        rowSet.insertRow();
-        rowSet.moveToCurrentRow();
-        rowSet.beforeFirst();
-        StringWriter writer = new StringWriter();
-        rowSet.writeXml(writer);
-        return writer.toString();
+        try (WebRowSet rowSet = RowSetProvider.newFactory().createWebRowSet()) {
+            RowSetMetaDataImpl meta = new RowSetMetaDataImpl();
+            meta.setColumnCount(1);
+            meta.setColumnName(1, "id");
+            meta.setColumnType(1, Types.INTEGER);
+            rowSet.setMetaData(meta);
+            rowSet.moveToInsertRow();
+            rowSet.updateInt(1, 42);
+            rowSet.insertRow();
+            rowSet.moveToCurrentRow();
+            rowSet.beforeFirst();
+            StringWriter writer = new StringWriter();
+            rowSet.writeXml(writer);
+            return writer.toString();
+        }
     }
 
     private static void writeJson(HttpExchange exchange, ObjectMapper mapper, Object body) throws IOException {

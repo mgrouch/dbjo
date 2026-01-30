@@ -909,7 +909,7 @@ public final class RocksJdbcExecutor {
                     "(?i)" + fn + "\\s*\\(\\s*(\\*|1)\\s*\\)"
             );
             java.util.regex.Matcher starMatcher = starPattern.matcher(normalized);
-            StringBuffer sbStar = new StringBuffer();
+            StringBuilder sbStar = new StringBuilder();
             while (starMatcher.find()) {
                 starMatcher.appendReplacement(sbStar, fn);
             }
@@ -920,7 +920,7 @@ public final class RocksJdbcExecutor {
                 "(?i)" + fn + "\\s*\\(\\s*([^\\)]+)\\s*\\)"
         );
         java.util.regex.Matcher colMatcher = colPattern.matcher(normalized);
-        StringBuffer sbCol = new StringBuffer();
+        StringBuilder sbCol = new StringBuilder();
         while (colMatcher.find()) {
             String raw = colMatcher.group(1);
             String col = normalizeIdentifier(raw);

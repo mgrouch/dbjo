@@ -70,8 +70,8 @@ final class ConditionEvaluatorMoreTest {
     @SuppressWarnings({"rawtypes", "unchecked"})
     void eq_allowsNumericTypeMismatches() {
         Foo foo = new Foo(5, null);
-        Condition<Foo> eq = new Eq((PropertyMeta) N, 5L);
-        Condition<Foo> ne = new Ne((PropertyMeta) N, 6L);
+        Condition<Foo> eq = new Eq(N, 5L);
+        Condition<Foo> ne = new Ne(N, 6L);
         assertTrue(ConditionEvaluator.test(eq, foo));
         assertTrue(ConditionEvaluator.test(ne, foo));
     }
@@ -80,7 +80,7 @@ final class ConditionEvaluatorMoreTest {
     @SuppressWarnings({"rawtypes", "unchecked"})
     void in_allowsNumericTypeMismatches() {
         Foo foo = new Foo(5, null);
-        Condition<Foo> in = new In((PropertyMeta) N, List.of(1L, 5L, 9L));
+        Condition<Foo> in = new In(N, List.of(1L, 5L, 9L));
         assertTrue(ConditionEvaluator.test(in, foo));
     }
 
@@ -88,9 +88,9 @@ final class ConditionEvaluatorMoreTest {
     @SuppressWarnings({"rawtypes", "unchecked"})
     void cmp_allowsNumericTypeMismatches() {
         Foo foo = new Foo(5, null);
-        Condition<Foo> gt = new Cmp((PropertyMeta) N, CmpOp.GT, 1L);
-        Condition<Foo> le = new Cmp((PropertyMeta) N, CmpOp.LE, 5L);
-        Condition<Foo> between = new Between((PropertyMeta) N, 1L, 10L);
+        Condition<Foo> gt = new Cmp(N, CmpOp.GT, 1L);
+        Condition<Foo> le = new Cmp(N, CmpOp.LE, 5L);
+        Condition<Foo> between = new Between(N, 1L, 10L);
         assertTrue(ConditionEvaluator.test(gt, foo));
         assertTrue(ConditionEvaluator.test(le, foo));
         assertTrue(ConditionEvaluator.test(between, foo));
