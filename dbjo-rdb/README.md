@@ -232,6 +232,12 @@ Driver class:
 org.github.dbjo.rdb.jdbc.remote.RemoteRocksJdbcDriver
 ```
 
+JDBC URL format:
+
+```text
+jdbc:rocksdb+rest:http(s)://<host>:<port>/api/rocks-jdbc
+```
+
 Example JDBC URL:
 
 ```text
@@ -240,6 +246,15 @@ jdbc:rocksdb+rest:http://localhost:8080/api/rocks-jdbc
 
 From IntelliJ/DataGrip you can register the same JARs as the local driver, but point the URL at
 the server endpoint.
+
+Quick checklist for clients:
+
+1. Register the driver class above (same JARs as the local Rocks JDBC driver).
+2. Use the URL format shown above with the `/api/rocks-jdbc` base endpoint.
+3. Disable authentication in the client (or leave username/password blank) if your server
+   does not require auth.
+4. Run a simple keep-alive/verification query like `select * from tables` to confirm the
+   catalog loads and the connection stays warm.
 
 #### HTTPS configuration
 
