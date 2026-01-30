@@ -8,6 +8,8 @@ import javax.sql.rowset.CachedRowSet;
 import javax.sql.rowset.RowSetProvider;
 import javax.sql.rowset.RowSetMetaDataImpl;
 import java.sql.*;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -227,12 +229,15 @@ public final class RocksJdbcDatabaseMetaData implements DatabaseMetaData {
         md.setColumnName(2, "TABLE_CATALOG"); md.setColumnType(2, Types.VARCHAR);
         rs.setMetaData(md);
 
-        for (String schema : catalog().schemaNames()) {
+        List<String> schemas = new ArrayList<>(catalog().schemaNames());
+        schemas.sort(String.CASE_INSENSITIVE_ORDER);
+        for (String schema : schemas) {
             rs.moveToInsertRow();
             rs.updateString(1, schema);
             rs.updateString(2, null);
             rs.insertRow();
             rs.moveToCurrentRow();
+            rs.last();
         }
 
         rs.beforeFirst();
@@ -248,13 +253,16 @@ public final class RocksJdbcDatabaseMetaData implements DatabaseMetaData {
         md.setColumnName(2, "TABLE_CATALOG"); md.setColumnType(2, Types.VARCHAR);
         rs.setMetaData(md);
 
-        for (String schema : catalog().schemaNames()) {
+        List<String> schemas = new ArrayList<>(catalog().schemaNames());
+        schemas.sort(String.CASE_INSENSITIVE_ORDER);
+        for (String schema : schemas) {
             if (!match(schemaPattern, schema)) continue;
             rs.moveToInsertRow();
             rs.updateString(1, schema);
             rs.updateString(2, null);
             rs.insertRow();
             rs.moveToCurrentRow();
+            rs.last();
         }
 
         rs.beforeFirst();
