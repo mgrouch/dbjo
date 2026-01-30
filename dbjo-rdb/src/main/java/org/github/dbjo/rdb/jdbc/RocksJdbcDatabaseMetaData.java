@@ -4,10 +4,9 @@ import org.github.dbjo.rdb.jdbc.catalog.RocksJdbcCatalog;
 import org.github.dbjo.rdb.jdbc.catalog.RocksJdbcColumn;
 import org.github.dbjo.rdb.jdbc.catalog.RocksJdbcIndex;
 import org.github.dbjo.rdb.jdbc.catalog.RocksJdbcTable;
-import org.github.dbjo.rdb.jdbc.rowset.SimpleRowSetMetaData;
-
 import javax.sql.rowset.CachedRowSet;
 import javax.sql.rowset.RowSetProvider;
+import javax.sql.rowset.RowSetMetaDataImpl;
 import java.sql.*;
 import java.util.Objects;
 
@@ -206,7 +205,8 @@ public final class RocksJdbcDatabaseMetaData implements DatabaseMetaData {
     @Override
     public ResultSet getCatalogs() throws SQLException {
         CachedRowSet rs = RowSetProvider.newFactory().createCachedRowSet();
-        SimpleRowSetMetaData md = new SimpleRowSetMetaData(1);
+        RowSetMetaDataImpl md = new RowSetMetaDataImpl();
+        md.setColumnCount(1);
         md.setColumnName(1, "TABLE_CAT");
         md.setColumnType(1, Types.VARCHAR);
         rs.setMetaData(md);
@@ -217,7 +217,8 @@ public final class RocksJdbcDatabaseMetaData implements DatabaseMetaData {
     @Override
     public ResultSet getSchemas() throws SQLException {
         CachedRowSet rs = RowSetProvider.newFactory().createCachedRowSet();
-        SimpleRowSetMetaData md = new SimpleRowSetMetaData(2);
+        RowSetMetaDataImpl md = new RowSetMetaDataImpl();
+        md.setColumnCount(2);
         md.setColumnName(1, "TABLE_SCHEM"); md.setColumnType(1, Types.VARCHAR);
         md.setColumnName(2, "TABLE_CATALOG"); md.setColumnType(2, Types.VARCHAR);
         rs.setMetaData(md);
@@ -235,7 +236,8 @@ public final class RocksJdbcDatabaseMetaData implements DatabaseMetaData {
     @Override
     public ResultSet getSchemas(String catalog, String schemaPattern) throws SQLException {
         CachedRowSet rs = RowSetProvider.newFactory().createCachedRowSet();
-        SimpleRowSetMetaData md = new SimpleRowSetMetaData(2);
+        RowSetMetaDataImpl md = new RowSetMetaDataImpl();
+        md.setColumnCount(2);
         md.setColumnName(1, "TABLE_SCHEM"); md.setColumnType(1, Types.VARCHAR);
         md.setColumnName(2, "TABLE_CATALOG"); md.setColumnType(2, Types.VARCHAR);
         rs.setMetaData(md);
@@ -255,7 +257,8 @@ public final class RocksJdbcDatabaseMetaData implements DatabaseMetaData {
     @Override
     public ResultSet getTableTypes() throws SQLException {
         CachedRowSet rs = RowSetProvider.newFactory().createCachedRowSet();
-        SimpleRowSetMetaData md = new SimpleRowSetMetaData(1);
+        RowSetMetaDataImpl md = new RowSetMetaDataImpl();
+        md.setColumnCount(1);
         md.setColumnName(1, "TABLE_TYPE");
         md.setColumnType(1, Types.VARCHAR);
         rs.setMetaData(md);
@@ -272,7 +275,8 @@ public final class RocksJdbcDatabaseMetaData implements DatabaseMetaData {
     @Override
     public ResultSet getTables(String catalog, String schemaPattern, String tableNamePattern, String[] types) throws SQLException {
         CachedRowSet rs = RowSetProvider.newFactory().createCachedRowSet();
-        SimpleRowSetMetaData md = new SimpleRowSetMetaData(5);
+        RowSetMetaDataImpl md = new RowSetMetaDataImpl();
+        md.setColumnCount(5);
         md.setColumnName(1, "TABLE_CAT");   md.setColumnType(1, Types.VARCHAR);
         md.setColumnName(2, "TABLE_SCHEM"); md.setColumnType(2, Types.VARCHAR);
         md.setColumnName(3, "TABLE_NAME");  md.setColumnType(3, Types.VARCHAR);
@@ -306,7 +310,8 @@ public final class RocksJdbcDatabaseMetaData implements DatabaseMetaData {
     @Override
     public ResultSet getColumns(String catalog, String schemaPattern, String tableNamePattern, String columnNamePattern) throws SQLException {
         CachedRowSet rs = RowSetProvider.newFactory().createCachedRowSet();
-        SimpleRowSetMetaData md = new SimpleRowSetMetaData(9);
+        RowSetMetaDataImpl md = new RowSetMetaDataImpl();
+        md.setColumnCount(9);
         md.setColumnName(1, "TABLE_SCHEM"); md.setColumnType(1, Types.VARCHAR);
         md.setColumnName(2, "TABLE_NAME");  md.setColumnType(2, Types.VARCHAR);
         md.setColumnName(3, "COLUMN_NAME"); md.setColumnType(3, Types.VARCHAR);
@@ -349,7 +354,8 @@ public final class RocksJdbcDatabaseMetaData implements DatabaseMetaData {
         RocksJdbcTable t = catalog().requireTable(table);
 
         CachedRowSet rs = RowSetProvider.newFactory().createCachedRowSet();
-        SimpleRowSetMetaData md = new SimpleRowSetMetaData(5);
+        RowSetMetaDataImpl md = new RowSetMetaDataImpl();
+        md.setColumnCount(5);
         md.setColumnName(1, "TABLE_SCHEM"); md.setColumnType(1, Types.VARCHAR);
         md.setColumnName(2, "TABLE_NAME");  md.setColumnType(2, Types.VARCHAR);
         md.setColumnName(3, "COLUMN_NAME"); md.setColumnType(3, Types.VARCHAR);
@@ -378,7 +384,8 @@ public final class RocksJdbcDatabaseMetaData implements DatabaseMetaData {
         RocksJdbcTable t = catalog().requireTable(table);
 
         CachedRowSet rs = RowSetProvider.newFactory().createCachedRowSet();
-        SimpleRowSetMetaData md = new SimpleRowSetMetaData(6);
+        RowSetMetaDataImpl md = new RowSetMetaDataImpl();
+        md.setColumnCount(6);
         md.setColumnName(1, "TABLE_SCHEM"); md.setColumnType(1, Types.VARCHAR);
         md.setColumnName(2, "TABLE_NAME");  md.setColumnType(2, Types.VARCHAR);
         md.setColumnName(3, "NON_UNIQUE");  md.setColumnType(3, Types.BOOLEAN);
@@ -432,7 +439,8 @@ public final class RocksJdbcDatabaseMetaData implements DatabaseMetaData {
     @Override
     public ResultSet getTypeInfo() throws SQLException {
         CachedRowSet rs = RowSetProvider.newFactory().createCachedRowSet();
-        SimpleRowSetMetaData md = new SimpleRowSetMetaData(6);
+        RowSetMetaDataImpl md = new RowSetMetaDataImpl();
+        md.setColumnCount(6);
         md.setColumnName(1, "TYPE_NAME"); md.setColumnType(1, Types.VARCHAR);
         md.setColumnName(2, "DATA_TYPE"); md.setColumnType(2, Types.INTEGER);
         md.setColumnName(3, "PRECISION"); md.setColumnType(3, Types.INTEGER);
