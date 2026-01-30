@@ -512,12 +512,26 @@ public final class RocksJdbcExecutor {
             }
         }
 
-        List<RowResult> rows = collectRows(db, cfsByName, table, primaryCf, acc, criteria, legacyWhere, access, selected, orderExtras, labels);
-        if (rows.isEmpty()
-                && !(access instanceof RocksJdbcPlanner.FullScan)
-                && (criteria != null || legacyWhere != null)) {
-            rows = collectRows(db, cfsByName, table, primaryCf, acc, criteria, legacyWhere,
-                    new RocksJdbcPlanner.FullScan(), selected, orderExtras, labels);
+        List<RowResult> rows = new ArrayList<>();
+        try (CloseableIterator<RowEntry> it = scan(db, cfsByName, table, primaryCf, access)) {
+            while (it.hasNext()) {
+                RowEntry e = it.next();
+                if (e == null) continue;
+
+                Object bean = decode(table, e.valueBytes());
+                if (!matchesWhere(bean, acc, criteria, legacyWhere)) continue;
+
+                Object[] values = new Object[selected.size()];
+                for (int i = 0; i < selected.size(); i++) {
+                    RocksJdbcColumn c = selected.get(i);
+                    values[i] = acc.getByGetter(bean, c.getterName());
+                }
+                Map<String, Object> extraValues = new HashMap<>();
+                for (String col : orderExtras) {
+                    extraValues.put(col.trim().toLowerCase(Locale.ROOT), acc.get(bean, col));
+                }
+                rows.add(new RowResult(labels, values, extraValues));
+            }
         }
 
         applyOrderBy(rows, orderBy);
@@ -582,13 +596,23 @@ public final class RocksJdbcExecutor {
             }
         }
 
-        Map<GroupKey, AggState> groups = collectGroups(db, cfsByName, table, primaryCf, acc, criteria, legacyWhere,
-                access, groupByCols, items);
-        if (groups.isEmpty()
-                && !(access instanceof RocksJdbcPlanner.FullScan)
-                && (criteria != null || legacyWhere != null)) {
-            groups = collectGroups(db, cfsByName, table, primaryCf, acc, criteria, legacyWhere,
-                    new RocksJdbcPlanner.FullScan(), groupByCols, items);
+        Map<GroupKey, AggState> groups = new LinkedHashMap<>();
+
+        try (CloseableIterator<RowEntry> it = scan(db, cfsByName, table, primaryCf, access)) {
+            while (it.hasNext()) {
+                RowEntry e = it.next();
+                if (e == null) continue;
+                Object bean = decode(table, e.valueBytes());
+                if (!matchesWhere(bean, acc, criteria, legacyWhere)) continue;
+
+                Object[] groupValues = new Object[groupByCols.size()];
+                for (int i = 0; i < groupByCols.size(); i++) {
+                    groupValues[i] = acc.get(bean, groupByCols.get(i));
+                }
+                GroupKey key = new GroupKey(groupValues);
+                AggState state = groups.computeIfAbsent(key, k -> AggState.create(groupValues, groupByCols, items));
+                state.accumulate(bean, acc);
+            }
         }
 
         if (groups.isEmpty() && groupByCols.isEmpty()) {
@@ -640,75 +664,6 @@ public final class RocksJdbcExecutor {
             rs.moveToCurrentRow();
             out++;
         }
-    }
-
-    private static List<RowResult> collectRows(
-            RocksDB db,
-            Map<String, ColumnFamilyHandle> cfsByName,
-            RocksJdbcTable table,
-            ColumnFamilyHandle primaryCf,
-            RowAccessor acc,
-            Condition<?> criteria,
-            RocksJdbcWhereParser.Expr legacyWhere,
-            RocksJdbcPlanner.Access access,
-            List<RocksJdbcColumn> selected,
-            List<String> orderExtras,
-            List<String> labels
-    ) throws SQLException {
-        List<RowResult> rows = new ArrayList<>();
-        try (CloseableIterator<RowEntry> it = scan(db, cfsByName, table, primaryCf, access)) {
-            while (it.hasNext()) {
-                RowEntry e = it.next();
-                if (e == null) continue;
-
-                Object bean = decode(table, e.valueBytes());
-                if (!matchesWhere(bean, acc, criteria, legacyWhere)) continue;
-
-                Object[] values = new Object[selected.size()];
-                for (int i = 0; i < selected.size(); i++) {
-                    RocksJdbcColumn c = selected.get(i);
-                    values[i] = acc.getByGetter(bean, c.getterName());
-                }
-                Map<String, Object> extraValues = new HashMap<>();
-                for (String col : orderExtras) {
-                    extraValues.put(col.trim().toLowerCase(Locale.ROOT), acc.get(bean, col));
-                }
-                rows.add(new RowResult(labels, values, extraValues));
-            }
-        }
-        return rows;
-    }
-
-    private static Map<GroupKey, AggState> collectGroups(
-            RocksDB db,
-            Map<String, ColumnFamilyHandle> cfsByName,
-            RocksJdbcTable table,
-            ColumnFamilyHandle primaryCf,
-            RowAccessor acc,
-            Condition<?> criteria,
-            RocksJdbcWhereParser.Expr legacyWhere,
-            RocksJdbcPlanner.Access access,
-            List<String> groupByCols,
-            List<RocksJdbcSqlParser.SelectItem> items
-    ) throws SQLException {
-        Map<GroupKey, AggState> groups = new LinkedHashMap<>();
-        try (CloseableIterator<RowEntry> it = scan(db, cfsByName, table, primaryCf, access)) {
-            while (it.hasNext()) {
-                RowEntry e = it.next();
-                if (e == null) continue;
-                Object bean = decode(table, e.valueBytes());
-                if (!matchesWhere(bean, acc, criteria, legacyWhere)) continue;
-
-                Object[] groupValues = new Object[groupByCols.size()];
-                for (int i = 0; i < groupByCols.size(); i++) {
-                    groupValues[i] = acc.get(bean, groupByCols.get(i));
-                }
-                GroupKey key = new GroupKey(groupValues);
-                AggState state = groups.computeIfAbsent(key, k -> AggState.create(groupValues, groupByCols, items));
-                state.accumulate(bean, acc);
-            }
-        }
-        return groups;
     }
 
     private static boolean matchesWhere(
