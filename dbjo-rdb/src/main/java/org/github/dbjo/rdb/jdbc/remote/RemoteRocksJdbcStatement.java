@@ -9,15 +9,21 @@ public final class RemoteRocksJdbcStatement implements Statement {
     private boolean closed;
     private int maxRows;
     private final int resultSetType;
+    private final int resultSetHoldability;
     private CachedRowSet last;
 
     RemoteRocksJdbcStatement(RemoteRocksJdbcConnection conn) {
-        this(conn, ResultSet.TYPE_FORWARD_ONLY);
+        this(conn, ResultSet.TYPE_SCROLL_INSENSITIVE, conn.getHoldability());
     }
 
     RemoteRocksJdbcStatement(RemoteRocksJdbcConnection conn, int resultSetType) {
+        this(conn, resultSetType, conn.getHoldability());
+    }
+
+    RemoteRocksJdbcStatement(RemoteRocksJdbcConnection conn, int resultSetType, int resultSetHoldability) {
         this.conn = Objects.requireNonNull(conn, "conn");
         this.resultSetType = resultSetType;
+        this.resultSetHoldability = resultSetHoldability;
     }
 
     private void checkOpen() throws SQLException {
@@ -43,7 +49,7 @@ public final class RemoteRocksJdbcStatement implements Statement {
     @Override public boolean isClosed() { return closed; }
 
     @Override public int getMaxRows() { return maxRows; }
-    @Override public void setMaxRows(int max) { this.maxRows = max; }
+    @Override public void setMaxRows(int max) { this.maxRows = Math.max(0, max); }
 
     @Override public void setFetchSize(int rows) {}
     @Override public int getFetchSize() { return 0; }
@@ -51,7 +57,7 @@ public final class RemoteRocksJdbcStatement implements Statement {
     @Override public int getFetchDirection() { return ResultSet.FETCH_FORWARD; }
     @Override public int getResultSetType() { return resultSetType; }
     @Override public int getResultSetConcurrency() { return ResultSet.CONCUR_READ_ONLY; }
-    @Override public int getResultSetHoldability() { return ResultSet.HOLD_CURSORS_OVER_COMMIT; }
+    @Override public int getResultSetHoldability() { return resultSetHoldability; }
 
     @Override public void cancel() {}
     @Override public void clearWarnings() {}

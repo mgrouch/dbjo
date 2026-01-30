@@ -42,6 +42,18 @@ public final class RocksJdbcDatabaseMetaData implements DatabaseMetaData {
         return new SQLFeatureNotSupportedException("Not supported");
     }
 
+    private int connHoldability() {
+        try {
+            return conn.getHoldability();
+        } catch (SQLException e) {
+            return ResultSet.HOLD_CURSORS_OVER_COMMIT;
+        }
+    }
+
+    private boolean holdsCursorsAcrossCommit() {
+        return connHoldability() == ResultSet.HOLD_CURSORS_OVER_COMMIT;
+    }
+
     // -------------------------------------------------------------------------
     // Identity
     // -------------------------------------------------------------------------
@@ -142,10 +154,10 @@ public final class RocksJdbcDatabaseMetaData implements DatabaseMetaData {
     @Override public boolean supportsCorrelatedSubqueries() { return false; }
     @Override public boolean supportsUnion() { return false; }
     @Override public boolean supportsUnionAll() { return false; }
-    @Override public boolean supportsOpenCursorsAcrossCommit() { return false; }
-    @Override public boolean supportsOpenCursorsAcrossRollback() { return false; }
-    @Override public boolean supportsOpenStatementsAcrossCommit() { return false; }
-    @Override public boolean supportsOpenStatementsAcrossRollback() { return false; }
+    @Override public boolean supportsOpenCursorsAcrossCommit() { return holdsCursorsAcrossCommit(); }
+    @Override public boolean supportsOpenCursorsAcrossRollback() { return holdsCursorsAcrossCommit(); }
+    @Override public boolean supportsOpenStatementsAcrossCommit() { return holdsCursorsAcrossCommit(); }
+    @Override public boolean supportsOpenStatementsAcrossRollback() { return holdsCursorsAcrossCommit(); }
 
     @Override public int getMaxBinaryLiteralLength() { return 0; }
     @Override public int getMaxCharLiteralLength() { return 0; }
@@ -508,8 +520,13 @@ public final class RocksJdbcDatabaseMetaData implements DatabaseMetaData {
     @Override public ResultSet getSuperTables(String catalog, String schemaPattern, String tableNamePattern) throws SQLException { throw unsup(); }
     @Override public ResultSet getAttributes(String catalog, String schemaPattern, String typeNamePattern, String attributeNamePattern) throws SQLException { throw unsup(); }
 
-    @Override public boolean supportsResultSetHoldability(int holdability) { return holdability == ResultSet.HOLD_CURSORS_OVER_COMMIT; }
-    @Override public int getResultSetHoldability() { return ResultSet.HOLD_CURSORS_OVER_COMMIT; }
+    @Override
+    public boolean supportsResultSetHoldability(int holdability) {
+        return holdability == ResultSet.HOLD_CURSORS_OVER_COMMIT
+                || holdability == ResultSet.CLOSE_CURSORS_AT_COMMIT;
+    }
+
+    @Override public int getResultSetHoldability() { return connHoldability(); }
     @Override public int getDatabaseMajorVersion() { return 1; }
     @Override public int getDatabaseMinorVersion() { return 0; }
     @Override public int getJDBCMajorVersion() { return 4; }
