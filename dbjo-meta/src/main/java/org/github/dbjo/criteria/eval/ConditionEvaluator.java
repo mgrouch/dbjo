@@ -60,24 +60,41 @@ public final class ConditionEvaluator {
 
     @SuppressWarnings({"unchecked"})
     private static boolean cmpBetween(PropertyMeta<?, ?> prop, Object val, Object lo, Object hi) {
-        if (!(val instanceof Comparable c)) {
-            throw new IllegalArgumentException("Not comparable at runtime: " + prop.getPropertyName());
-        }
-        return c.compareTo(lo) >= 0 && c.compareTo(hi) <= 0;
+        return compare(prop, val, lo) >= 0 && compare(prop, val, hi) <= 0;
     }
 
     @SuppressWarnings({"unchecked"})
     private static boolean cmpOp(PropertyMeta<?, ?> prop, Object val, CmpOp op, Object rhs) {
-        if (!(val instanceof Comparable c)) {
-            throw new IllegalArgumentException("Not comparable at runtime: " + prop.getPropertyName());
-        }
-        int d = c.compareTo(rhs);
+        int d = compare(prop, val, rhs);
         return switch (op) {
             case LT -> d < 0;
             case LE -> d <= 0;
             case GT -> d > 0;
             case GE -> d >= 0;
         };
+    }
+
+    @SuppressWarnings({"unchecked"})
+    private static int compare(PropertyMeta<?, ?> prop, Object left, Object right) {
+        if (left instanceof Number ln && right instanceof Number rn) {
+            return toBigDecimal(ln).compareTo(toBigDecimal(rn));
+        }
+        if (!(left instanceof Comparable c)) {
+            throw new IllegalArgumentException("Not comparable at runtime: " + prop.getPropertyName());
+        }
+        try {
+            return c.compareTo(right);
+        } catch (ClassCastException ex) {
+            throw new IllegalArgumentException(
+                    "Not comparable at runtime: " + prop.getPropertyName()
+                            + " (" + left.getClass().getSimpleName()
+                            + " vs " + (right == null ? "null" : right.getClass().getSimpleName()) + ")",
+                    ex);
+        }
+    }
+
+    private static java.math.BigDecimal toBigDecimal(Number number) {
+        return new java.math.BigDecimal(number.toString());
     }
 
     private static boolean likeMatch(PropertyMeta<?, ?> prop, Object val, String pattern) {

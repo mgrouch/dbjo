@@ -65,4 +65,16 @@ final class ConditionEvaluatorMoreTest {
         assertTrue(ConditionEvaluator.test(Conditions.like(S, "ab%"), foo));
         assertFalse(ConditionEvaluator.test(Conditions.like(S, "ab_"), foo));
     }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void cmp_allowsNumericTypeMismatches() {
+        Foo foo = new Foo(5, null);
+        Condition<Foo> gt = new Cmp((PropertyMeta) N, CmpOp.GT, 1L);
+        Condition<Foo> le = new Cmp((PropertyMeta) N, CmpOp.LE, 5L);
+        Condition<Foo> between = new Between((PropertyMeta) N, 1L, 10L);
+        assertTrue(ConditionEvaluator.test(gt, foo));
+        assertTrue(ConditionEvaluator.test(le, foo));
+        assertTrue(ConditionEvaluator.test(between, foo));
+    }
 }
