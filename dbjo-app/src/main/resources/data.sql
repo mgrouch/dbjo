@@ -9,7 +9,7 @@ INSERT INTO product (sku, title, price_cents) VALUES
   ('SKU-GRN-003', 'Green Widget', 999);
 
 INSERT INTO purchase (client_id, product_id, qty, ordered_at) VALUES
-  (0, 0, 1, CURRENT_TIMESTAMP),
-  (0, 1, 0, CURRENT_TIMESTAMP),
-  (0, 2, 1, CURRENT_TIMESTAMP),
-  (2, 0, 0, CURRENT_TIMESTAMP);
+  (0, 0, 1, CURRENT_TIMESTAMP);
+--  (0, 1, 0, CURRENT_TIMESTAMP),
+--  (0, 2, 1, CURRENT_TIMESTAMP),
+--  (2, 0, 0, CURRENT_TIMESTAMP);
