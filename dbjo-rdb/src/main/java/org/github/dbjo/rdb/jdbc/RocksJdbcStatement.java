@@ -35,9 +35,7 @@ public final class RocksJdbcStatement implements Statement {
     @Override
     public boolean execute(String sql) throws SQLException {
         checkOpen();
-        try (ResultSet rs = executeQuery(sql)) {
-            return rs != null;
-        }
+        return executeQuery(sql) != null;
     }
 
     @Override public ResultSet getResultSet() { return last; }
