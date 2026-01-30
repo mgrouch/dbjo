@@ -23,6 +23,7 @@ public final class RocksJdbcEngine implements AutoCloseable {
     private final DBOptions dbOptions;
     private final List<ColumnFamilyHandle> handles;
     private final Map<String, ColumnFamilyHandle> cfsByName;
+    private final boolean ownsDb;
 
     public RocksJdbcEngine(RocksJdbcCatalog catalog, String dbPath, boolean rebuildIndexes) throws SQLException {
         this(catalog, dbPath, rebuildIndexes, false);
@@ -77,6 +78,7 @@ public final class RocksJdbcEngine implements AutoCloseable {
                 map.put(n, handles.get(i));
             }
             this.cfsByName = Collections.unmodifiableMap(map);
+            this.ownsDb = true;
 
             if (rebuildIndexes) {
                 rebuildAllIndexes();
@@ -84,6 +86,16 @@ public final class RocksJdbcEngine implements AutoCloseable {
         } catch (RocksDBException ex) {
             throw new SQLException("Failed to open RocksDB: " + dbPath, ex);
         }
+    }
+
+    public RocksJdbcEngine(RocksJdbcCatalog catalog, RocksDB db, Map<String, ColumnFamilyHandle> cfsByName) {
+        this.catalog = Objects.requireNonNull(catalog, "catalog");
+        this.db = Objects.requireNonNull(db, "db");
+        this.cfsByName = Collections.unmodifiableMap(new HashMap<>(
+                Objects.requireNonNull(cfsByName, "cfsByName")));
+        this.dbOptions = null;
+        this.handles = List.of();
+        this.ownsDb = false;
     }
 
     public RocksJdbcCatalog catalog() { return catalog; }
@@ -270,14 +282,18 @@ public final class RocksJdbcEngine implements AutoCloseable {
 
     @Override
     public void close() {
-        // close handles, db, options
+        if (!ownsDb) {
+            return;
+        }
         try {
             for (ColumnFamilyHandle h : handles) {
                 try { h.close(); } catch (Throwable ignore) {}
             }
         } finally {
             try { db.close(); } catch (Throwable ignore) {}
-            try { dbOptions.close(); } catch (Throwable ignore) {}
+            if (dbOptions != null) {
+                try { dbOptions.close(); } catch (Throwable ignore) {}
+            }
         }
     }
 }
