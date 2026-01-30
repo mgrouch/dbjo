@@ -75,8 +75,19 @@ public final class RocksJdbcConnection implements Connection {
     @Override public SQLWarning getWarnings() { return null; }
     @Override public void clearWarnings() {}
 
-    @Override public Statement createStatement(int resultSetType, int resultSetConcurrency) throws SQLException { return createStatement(); }
-    @Override public Statement createStatement(int resultSetType, int resultSetConcurrency, int resultSetHoldability) throws SQLException { return createStatement(); }
+    @Override
+    public Statement createStatement(int resultSetType, int resultSetConcurrency) throws SQLException {
+        checkOpen();
+        validateResultSetConfig(resultSetType, resultSetConcurrency, ResultSet.HOLD_CURSORS_OVER_COMMIT);
+        return new RocksJdbcStatement(this, resultSetType);
+    }
+
+    @Override
+    public Statement createStatement(int resultSetType, int resultSetConcurrency, int resultSetHoldability) throws SQLException {
+        checkOpen();
+        validateResultSetConfig(resultSetType, resultSetConcurrency, resultSetHoldability);
+        return new RocksJdbcStatement(this, resultSetType);
+    }
 
     @Override public Map<String, Class<?>> getTypeMap() { return Map.of(); }
     @Override public void setTypeMap(Map<String, Class<?>> map) {}
@@ -137,4 +148,17 @@ public final class RocksJdbcConnection implements Connection {
 
     @Override public CallableStatement prepareCall(String sql, int resultSetType, int resultSetConcurrency) throws SQLException { throw new SQLFeatureNotSupportedException(); }
     @Override public CallableStatement prepareCall(String sql, int resultSetType, int resultSetConcurrency, int resultSetHoldability) throws SQLException { throw new SQLFeatureNotSupportedException(); }
+
+    private static void validateResultSetConfig(int resultSetType, int resultSetConcurrency, int resultSetHoldability)
+            throws SQLFeatureNotSupportedException {
+        if (resultSetHoldability != ResultSet.HOLD_CURSORS_OVER_COMMIT) {
+            throw new SQLFeatureNotSupportedException("ResultSet holdability not supported");
+        }
+        if (resultSetConcurrency != ResultSet.CONCUR_READ_ONLY) {
+            throw new SQLFeatureNotSupportedException("ResultSet concurrency not supported");
+        }
+        if (resultSetType != ResultSet.TYPE_FORWARD_ONLY && resultSetType != ResultSet.TYPE_SCROLL_INSENSITIVE) {
+            throw new SQLFeatureNotSupportedException("ResultSet type not supported");
+        }
+    }
 }
