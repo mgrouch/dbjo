@@ -244,12 +244,13 @@ public final class RocksJdbcDatabaseMetaData implements DatabaseMetaData {
         List<String> schemas = new ArrayList<>(catalog().schemaNames());
         schemas.sort(String.CASE_INSENSITIVE_ORDER);
         for (String schema : schemas) {
+            rs.moveToCurrentRow();
+            rs.afterLast();
             rs.moveToInsertRow();
             rs.updateString(1, schema);
             rs.updateString(2, null);
             rs.insertRow();
             rs.moveToCurrentRow();
-            rs.last();
         }
 
         rs.beforeFirst();
@@ -269,12 +270,13 @@ public final class RocksJdbcDatabaseMetaData implements DatabaseMetaData {
         schemas.sort(String.CASE_INSENSITIVE_ORDER);
         for (String schema : schemas) {
             if (!match(schemaPattern, schema)) continue;
+            rs.moveToCurrentRow();
+            rs.afterLast();
             rs.moveToInsertRow();
             rs.updateString(1, schema);
             rs.updateString(2, null);
             rs.insertRow();
             rs.moveToCurrentRow();
-            rs.last();
         }
 
         rs.beforeFirst();
