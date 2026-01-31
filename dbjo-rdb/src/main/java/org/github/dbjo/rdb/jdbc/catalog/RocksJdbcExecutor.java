@@ -13,6 +13,7 @@ import javax.sql.rowset.RowSetMetaDataImpl;
 import java.lang.reflect.Method;
 import java.math.BigDecimal;
 import java.sql.DatabaseMetaData;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Types;
 import java.util.*;
@@ -45,7 +46,7 @@ public final class RocksJdbcExecutor {
         ColumnFamilyHandle primaryCf = requireCf(cfsByName, table.cfName());
         QueryPlan plan = planQuery(table, p, statementMaxRows);
 
-        CachedRowSet rs = RowSetProvider.newFactory().createCachedRowSet();
+        CachedRowSet rs = newRowSet();
         configureRowSet(rs);
         RowAccessor acc = new RowAccessor(table.rowClass(), table.columns());
 
@@ -89,6 +90,7 @@ public final class RocksJdbcExecutor {
         return rs;
     }
 
+
     private static boolean isTablesQuery(RocksJdbcSqlParser.Parsed parsed) {
         if (!"tables".equalsIgnoreCase(parsed.tableName())) {
             return false;
@@ -122,8 +124,14 @@ public final class RocksJdbcExecutor {
                 && parsed.orderBy().isEmpty();
     }
 
-    private static CachedRowSet listTables(RocksJdbcCatalog catalog, int limit, int offset) throws SQLException {
+    private static CachedRowSet newRowSet() throws SQLException {
         CachedRowSet rs = RowSetProvider.newFactory().createCachedRowSet();
+        rs.setType(ResultSet.TYPE_SCROLL_INSENSITIVE);
+        return rs;
+    }
+
+    private static CachedRowSet listTables(RocksJdbcCatalog catalog, int limit, int offset) throws SQLException {
+        CachedRowSet rs = newRowSet();
         configureRowSet(rs);
         RowSetMetaDataImpl md = new RowSetMetaDataImpl();
         md.setColumnCount(1);
@@ -156,7 +164,7 @@ public final class RocksJdbcExecutor {
     }
 
     private static CachedRowSet countTables(RocksJdbcCatalog catalog) throws SQLException {
-        CachedRowSet rs = RowSetProvider.newFactory().createCachedRowSet();
+        CachedRowSet rs = newRowSet();
         configureRowSet(rs);
         RowSetMetaDataImpl md = new RowSetMetaDataImpl();
         md.setColumnCount(1);
@@ -919,7 +927,7 @@ public final class RocksJdbcExecutor {
     }
 
     private static CachedRowSet singleLong(String name, long v) throws SQLException {
-        CachedRowSet rs = RowSetProvider.newFactory().createCachedRowSet();
+        CachedRowSet rs = newRowSet();
         configureRowSet(rs);
         RowSetMetaDataImpl md = new RowSetMetaDataImpl();
         md.setColumnCount(1);
