@@ -157,6 +157,9 @@
     <profiles>
         <profile>
             <id>jdbc-remote</id>
+            <activation>
+                <activeByDefault/>
+            </activation>
             <build>
                 <plugins>
                     <plugin>
