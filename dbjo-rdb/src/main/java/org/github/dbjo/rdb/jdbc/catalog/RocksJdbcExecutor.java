@@ -600,8 +600,6 @@ public final class RocksJdbcExecutor {
                 continue;
             }
             if (out >= limit) break;
-            rs.moveToCurrentRow();
-            rs.afterLast();
             rs.moveToInsertRow();
             for (int i = 0; i < row.values().length; i++) {
                 rs.updateObject(i + 1, row.values()[i]);
@@ -710,8 +708,6 @@ public final class RocksJdbcExecutor {
                 continue;
             }
             if (out >= limit) break;
-            rs.moveToCurrentRow();
-            rs.afterLast();
             rs.moveToInsertRow();
             for (int i = 0; i < row.values().length; i++) {
                 rs.updateObject(i + 1, row.values()[i]);
