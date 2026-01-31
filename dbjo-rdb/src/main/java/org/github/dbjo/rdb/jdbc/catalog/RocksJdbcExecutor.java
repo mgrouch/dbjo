@@ -944,7 +944,6 @@ public final class RocksJdbcExecutor {
 
     private static void configureRowSet(CachedRowSet rs) throws SQLException {
         rs.setType(java.sql.ResultSet.TYPE_SCROLL_INSENSITIVE);
-        rs.setConcurrency(java.sql.ResultSet.CONCUR_READ_ONLY);
     }
 
     private static String normalizeHavingSql(String havingSql) {
