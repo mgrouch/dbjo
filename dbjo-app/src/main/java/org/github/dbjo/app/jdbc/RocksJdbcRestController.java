@@ -17,6 +17,7 @@ import javax.sql.rowset.CachedRowSet;
 import javax.sql.rowset.RowSetProvider;
 import javax.sql.rowset.WebRowSet;
 import java.io.StringWriter;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 
 @RestController
@@ -36,6 +37,7 @@ public class RocksJdbcRestController {
     @PostMapping("/query")
     public RemoteRocksJdbcQueryResponse query(@RequestBody RemoteRocksJdbcQueryRequest request) {
         try (WebRowSet webRowSet = RowSetProvider.newFactory().createWebRowSet()) {
+            webRowSet.setType(ResultSet.TYPE_SCROLL_INSENSITIVE);
             CachedRowSet rowSet = engine.query(request.sql(), request.maxRows());
             rowSet.beforeFirst();
             webRowSet.populate(rowSet);

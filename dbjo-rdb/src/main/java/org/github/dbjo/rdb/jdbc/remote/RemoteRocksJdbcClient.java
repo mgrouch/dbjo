@@ -68,8 +68,8 @@ final class RemoteRocksJdbcClient {
                     mapper.readValue(response.body(), RemoteRocksJdbcQueryResponse.class);
             WebRowSet rowSet = RowSetProvider.newFactory().createWebRowSet();
             rowSet.setType(ResultSet.TYPE_SCROLL_INSENSITIVE);
-            rowSet.readXml(new StringReader(queryResponse.rowsetXml()));
             rowSet.beforeFirst();
+            rowSet.readXml(new StringReader(queryResponse.rowsetXml()));
             return rowSet;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

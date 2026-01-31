@@ -21,6 +21,7 @@ import java.io.OutputStream;
 import java.io.StringWriter;
 import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Types;
 import java.util.List;
@@ -79,6 +80,7 @@ class RemoteRocksJdbcClientTest {
 
     private static String buildRowSetXml() throws SQLException {
         try (WebRowSet rowSet = RowSetProvider.newFactory().createWebRowSet()) {
+            rowSet.setType(ResultSet.TYPE_SCROLL_INSENSITIVE);
             RowSetMetaDataImpl meta = new RowSetMetaDataImpl();
             meta.setColumnCount(1);
             meta.setColumnName(1, "id");
