@@ -249,7 +249,6 @@ public final class RocksJdbcDatabaseMetaData implements DatabaseMetaData {
             rs.updateString(2, null);
             rs.insertRow();
             rs.moveToCurrentRow();
-            rs.last();
         }
 
         rs.beforeFirst();
@@ -274,7 +273,6 @@ public final class RocksJdbcDatabaseMetaData implements DatabaseMetaData {
             rs.updateString(2, null);
             rs.insertRow();
             rs.moveToCurrentRow();
-            rs.last();
         }
 
         rs.beforeFirst();
