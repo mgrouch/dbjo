@@ -17,6 +17,7 @@ import java.net.http.HttpResponse;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.util.Objects;
+import java.sql.ResultSet;
 
 final class RemoteRocksJdbcClient {
     private final HttpClient client;
@@ -66,6 +67,7 @@ final class RemoteRocksJdbcClient {
             RemoteRocksJdbcQueryResponse queryResponse =
                     mapper.readValue(response.body(), RemoteRocksJdbcQueryResponse.class);
             WebRowSet rowSet = RowSetProvider.newFactory().createWebRowSet();
+            rowSet.setType(ResultSet.TYPE_SCROLL_INSENSITIVE);
             rowSet.readXml(new StringReader(queryResponse.rowsetXml()));
             rowSet.beforeFirst();
             return rowSet;
