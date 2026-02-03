@@ -18,8 +18,11 @@ import java.sql.SQLException;
 import java.time.Duration;
 import java.util.Objects;
 import java.sql.ResultSet;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 final class RemoteRocksJdbcClient {
+    private static final Logger LOGGER = Logger.getLogger(RemoteRocksJdbcClient.class.getName());
     private final HttpClient client;
     private final ObjectMapper mapper;
     private final String baseUrl;
@@ -31,6 +34,7 @@ final class RemoteRocksJdbcClient {
     }
 
     RemoteRocksJdbcCatalogDto fetchCatalog() throws SQLException {
+        LOGGER.info(() -> "Fetching remote catalog from " + baseUrl);
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(baseUrl + "/catalog"))
                 .timeout(Duration.ofSeconds(30))
@@ -38,10 +42,13 @@ final class RemoteRocksJdbcClient {
                 .build();
         try {
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            LOGGER.info(() -> "Remote catalog response status=" + response.statusCode());
             if (response.statusCode() >= 300) {
                 throw new SQLException("Remote catalog request failed: HTTP " + response.statusCode());
             }
-            return mapper.readValue(response.body(), RemoteRocksJdbcCatalogDto.class);
+            RemoteRocksJdbcCatalogDto dto = mapper.readValue(response.body(), RemoteRocksJdbcCatalogDto.class);
+            LOGGER.fine(() -> "Remote catalog parsed tables=" + dto.tables().size());
+            return dto;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new SQLException("Remote catalog request failed", e);
@@ -51,6 +58,7 @@ final class RemoteRocksJdbcClient {
     }
 
     CachedRowSet query(String sql, int maxRows) throws SQLException {
+        LOGGER.info(() -> "Executing remote query maxRows=" + maxRows + " sql=" + sql);
         RemoteRocksJdbcQueryRequest body = new RemoteRocksJdbcQueryRequest(sql, maxRows);
         try {
             String payload = mapper.writeValueAsString(body);
@@ -61,6 +69,7 @@ final class RemoteRocksJdbcClient {
                     .POST(HttpRequest.BodyPublishers.ofString(payload))
                     .build();
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            LOGGER.info(() -> "Remote query response status=" + response.statusCode());
             if (response.statusCode() >= 300) {
                 throw new SQLException("Remote query failed: HTTP " + response.statusCode());
             }
@@ -70,12 +79,19 @@ final class RemoteRocksJdbcClient {
             rowSet.setType(ResultSet.TYPE_SCROLL_INSENSITIVE);
             rowSet.readXml(new StringReader(queryResponse.rowsetXml()));
             rowSet.beforeFirst();
-            return rowSet;
+            CachedRowSet cachedRowSet = RowSetProvider.newFactory().createCachedRowSet();
+            cachedRowSet.populate(rowSet);
+            cachedRowSet.beforeFirst();
+            LOGGER.fine(() -> "Remote query returned rows=" + cachedRowSet.size());
+            return RawSetWrapper.wrap(cachedRowSet, LOGGER);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new SQLException("Remote query failed", e);
         } catch (IOException e) {
             throw new SQLException("Remote query failed", e);
+        } catch (SQLException e) {
+            LOGGER.log(Level.WARNING, "Remote query rowset conversion failed", e);
+            throw e;
         }
     }
 }
