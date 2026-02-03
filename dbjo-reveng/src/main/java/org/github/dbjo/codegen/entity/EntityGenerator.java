@@ -53,11 +53,27 @@ public final class EntityGenerator {
         imports.add("java.util.Objects");
 
         List<Field> fields = new ArrayList<>();
+        boolean hasVersioned = false;
+        boolean hasPartitioned = false;
         for (Col c : tm.cols()) {
-            JavaType jt = mapSqlTypeToJava(c.sqlType(), imports);
             String fieldName = Naming.sanitizeJavaIdentifier(Naming.toFieldName(c.colName()));
+            boolean isVersion = isVersionField(c, fieldName);
+            JavaType jt = resolveJavaType(c, fieldName, imports);
             boolean isPk = tm.pkColsUpper().contains(c.colName().toUpperCase(Locale.ROOT));
             fields.add(new Field(fieldName, jt.javaType, jt.classLiteral, c, isPk));
+            if (isVersion) {
+                hasVersioned = true;
+            }
+            if (isPartitionKeyColumn(c) && "String".equals(jt.javaType)) {
+                hasPartitioned = true;
+            }
+        }
+
+        if (hasVersioned) {
+            imports.add("org.github.dbjo.meta.features.Versioned");
+        }
+        if (hasPartitioned) {
+            imports.add("org.github.dbjo.meta.features.Partitioned");
         }
 
         StringBuilder sb = new StringBuilder(10_000);
@@ -68,7 +84,18 @@ public final class EntityGenerator {
         sb.append("/**\n");
         sb.append(" * Auto-generated bean for ").append(tm.table().schema()).append(".").append(tm.table().table()).append("\n");
         sb.append(" */\n");
-        sb.append("public class ").append(className).append(" implements Serializable {\n\n");
+        List<String> interfaceNames = new ArrayList<>();
+        interfaceNames.add("Serializable");
+        if (hasVersioned) {
+            interfaceNames.add("Versioned");
+        }
+        if (hasPartitioned) {
+            interfaceNames.add("Partitioned");
+        }
+        sb.append("public class ").append(className)
+                .append(" implements ")
+                .append(String.join(", ", interfaceNames))
+                .append(" {\n\n");
         sb.append("  private static final long serialVersionUID = 1L;\n\n");
 
         for (Field f : fields) {
@@ -162,7 +189,7 @@ public final class EntityGenerator {
         List<MetaProp> props = new ArrayList<>();
         for (Col c : tm.cols()) {
             String propName = Naming.sanitizeJavaIdentifier(Naming.toFieldName(c.colName()));
-            JavaType jt = mapSqlTypeToJava(c.sqlType(), imports);
+            JavaType jt = resolveJavaType(c, propName, imports);
             boolean isPk = tm.pkColsUpper().contains(c.colName().toUpperCase(Locale.ROOT));
 
             String constName = Naming.toUpperSnake(propName);
@@ -257,6 +284,21 @@ public final class EntityGenerator {
 
             default -> new JavaType("String", "String.class");
         };
+    }
+
+    private static JavaType resolveJavaType(Col col, String fieldName, Set<String> imports) {
+        if (isVersionField(col, fieldName)) {
+            return new JavaType("int", "int.class");
+        }
+        return mapSqlTypeToJava(col.sqlType(), imports);
+    }
+
+    private static boolean isVersionField(Col col, String fieldName) {
+        return "version".equals(fieldName) && col.sqlType() == Types.INTEGER;
+    }
+
+    private static boolean isPartitionKeyColumn(Col col) {
+        return "partition_key".equalsIgnoreCase(col.colName());
     }
 
     private record JavaType(String javaType, String classLiteral) {}
