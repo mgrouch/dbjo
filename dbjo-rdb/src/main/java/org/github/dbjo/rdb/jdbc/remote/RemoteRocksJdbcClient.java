@@ -79,7 +79,7 @@ final class RemoteRocksJdbcClient {
             rowSet.readXml(new StringReader(queryResponse.rowsetXml()));
             rowSet.beforeFirst();
             LOGGER.fine(() -> "Remote query returned rows=" + rowSet.size());
-            return RocksJdbcResultSet.wrap(rowSet, LOGGER);
+            return RocksJdbcResultSet.wrap(rowSet);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new SQLException("Remote query failed", e);
