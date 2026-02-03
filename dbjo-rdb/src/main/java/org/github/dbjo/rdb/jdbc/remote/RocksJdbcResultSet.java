@@ -313,6 +313,10 @@ final class RocksJdbcResultSet implements ResultSet {
 
     @Override
     public boolean absolute(int row) throws SQLException {
+        if (row == 0) {
+            delegate.beforeFirst();
+            return true;
+        }
         return delegate.absolute(row);
     }
 
