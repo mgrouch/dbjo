@@ -5,7 +5,6 @@ import org.github.dbjo.rdb.jdbc.remote.dto.RemoteRocksJdbcCatalogDto;
 import org.github.dbjo.rdb.jdbc.remote.dto.RemoteRocksJdbcQueryRequest;
 import org.github.dbjo.rdb.jdbc.remote.dto.RemoteRocksJdbcQueryResponse;
 
-import javax.sql.rowset.CachedRowSet;
 import javax.sql.rowset.RowSetProvider;
 import javax.sql.rowset.WebRowSet;
 import java.io.IOException;
@@ -14,10 +13,10 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.util.Objects;
-import java.sql.ResultSet;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -57,7 +56,7 @@ final class RemoteRocksJdbcClient {
         }
     }
 
-    CachedRowSet query(String sql, int maxRows) throws SQLException {
+    ResultSet query(String sql, int maxRows) throws SQLException {
         LOGGER.info(() -> "Executing remote query maxRows=" + maxRows + " sql=" + sql);
         RemoteRocksJdbcQueryRequest body = new RemoteRocksJdbcQueryRequest(sql, maxRows);
         try {
@@ -79,11 +78,8 @@ final class RemoteRocksJdbcClient {
             rowSet.setType(ResultSet.TYPE_SCROLL_INSENSITIVE);
             rowSet.readXml(new StringReader(queryResponse.rowsetXml()));
             rowSet.beforeFirst();
-            CachedRowSet cachedRowSet = RowSetProvider.newFactory().createCachedRowSet();
-            cachedRowSet.populate(rowSet);
-            cachedRowSet.beforeFirst();
-            LOGGER.fine(() -> "Remote query returned rows=" + cachedRowSet.size());
-            return RawSetWrapper.wrap(cachedRowSet, LOGGER);
+            LOGGER.fine(() -> "Remote query returned rows=" + rowSet.size());
+            return RocksJdbcResultSet.wrap(rowSet, LOGGER);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new SQLException("Remote query failed", e);

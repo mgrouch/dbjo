@@ -12,7 +12,6 @@ import org.github.dbjo.rdb.jdbc.remote.dto.RemoteRocksJdbcTableDto;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-import javax.sql.rowset.CachedRowSet;
 import javax.sql.rowset.RowSetMetaDataImpl;
 import javax.sql.rowset.RowSetProvider;
 import javax.sql.rowset.WebRowSet;
@@ -71,7 +70,7 @@ class RemoteRocksJdbcClientTest {
 
         RemoteRocksJdbcCatalogDto fetched = client.fetchCatalog();
         assertThat(fetched.tables()).hasSize(1);
-        try (CachedRowSet rowSet = client.query("select * from client", 0)) {
+        try (ResultSet rowSet = client.query("select * from client", 0)) {
             rowSet.next();
             assertThat(rowSet.getInt("id")).isEqualTo(42);
             assertThat(rowSet.next()).isFalse();

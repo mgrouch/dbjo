@@ -3,7 +3,6 @@ package org.github.dbjo.rdb.jdbc.remote;
 import org.github.dbjo.rdb.jdbc.RocksJdbcDatabaseMetaData;
 import org.github.dbjo.rdb.jdbc.catalog.RocksJdbcCatalog;
 
-import javax.sql.rowset.CachedRowSet;
 import java.sql.*;
 import java.util.List;
 import java.util.Map;
@@ -32,7 +31,7 @@ public final class RemoteRocksJdbcConnection implements Connection {
         this.schema = defaultSchema;
     }
 
-    CachedRowSet runQuery(String sql, int maxRows) throws SQLException {
+    ResultSet runQuery(String sql, int maxRows) throws SQLException {
         checkOpen();
         return client.query(sql, maxRows);
     }
