@@ -16,6 +16,12 @@ import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Types;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.OffsetDateTime;
+import java.time.OffsetTime;
 import java.util.*;
 
 /**
@@ -604,7 +610,7 @@ public final class RocksJdbcExecutor {
             rs.afterLast();
             rs.moveToInsertRow();
             for (int i = 0; i < row.values().length; i++) {
-                rs.updateObject(i + 1, row.values()[i]);
+                rs.updateObject(i + 1, normalizeRowSetValue(row.values()[i]));
             }
             rs.insertRow();
             rs.moveToCurrentRow();
@@ -714,7 +720,7 @@ public final class RocksJdbcExecutor {
             rs.afterLast();
             rs.moveToInsertRow();
             for (int i = 0; i < row.values().length; i++) {
-                rs.updateObject(i + 1, row.values()[i]);
+                rs.updateObject(i + 1, normalizeRowSetValue(row.values()[i]));
             }
             rs.insertRow();
             rs.moveToCurrentRow();
@@ -738,6 +744,29 @@ public final class RocksJdbcExecutor {
             return legacyWhere.eval(colName -> acc.get(bean, colName));
         }
         return true;
+    }
+
+    private static Object normalizeRowSetValue(Object value) {
+        if (value == null) return null;
+        if (value instanceof LocalDate date) {
+            return java.sql.Date.valueOf(date);
+        }
+        if (value instanceof LocalDateTime dateTime) {
+            return java.sql.Timestamp.valueOf(dateTime);
+        }
+        if (value instanceof LocalTime time) {
+            return java.sql.Time.valueOf(time);
+        }
+        if (value instanceof OffsetDateTime dateTime) {
+            return java.sql.Timestamp.from(dateTime.toInstant());
+        }
+        if (value instanceof OffsetTime time) {
+            return java.sql.Time.valueOf(time.toLocalTime());
+        }
+        if (value instanceof Instant instant) {
+            return java.sql.Timestamp.from(instant);
+        }
+        return value;
     }
 
     private static int limit(Integer sqlLimit, int stmtMaxRows) {
