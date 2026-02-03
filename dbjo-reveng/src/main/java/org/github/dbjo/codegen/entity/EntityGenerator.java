@@ -57,10 +57,11 @@ public final class EntityGenerator {
         boolean hasPartitioned = false;
         for (Col c : tm.cols()) {
             String fieldName = Naming.sanitizeJavaIdentifier(Naming.toFieldName(c.colName()));
-            JavaType jt = mapSqlTypeToJava(c.sqlType(), imports);
+            boolean isVersion = isVersionField(c, fieldName);
+            JavaType jt = resolveJavaType(c, fieldName, imports);
             boolean isPk = tm.pkColsUpper().contains(c.colName().toUpperCase(Locale.ROOT));
             fields.add(new Field(fieldName, jt.javaType, jt.classLiteral, c, isPk));
-            if (isVersionField(c, fieldName)) {
+            if (isVersion) {
                 hasVersioned = true;
             }
             if (isPartitionKeyColumn(c) && "String".equals(jt.javaType)) {
@@ -205,7 +206,7 @@ public final class EntityGenerator {
         List<MetaProp> props = new ArrayList<>();
         for (Col c : tm.cols()) {
             String propName = Naming.sanitizeJavaIdentifier(Naming.toFieldName(c.colName()));
-            JavaType jt = mapSqlTypeToJava(c.sqlType(), imports);
+            JavaType jt = resolveJavaType(c, propName, imports);
             boolean isPk = tm.pkColsUpper().contains(c.colName().toUpperCase(Locale.ROOT));
             String constName = Naming.toUpperSnake(propName);
             String getterName = "get" + Naming.capitalize(propName);
@@ -305,6 +306,13 @@ public final class EntityGenerator {
 
             default -> new JavaType("String", "String.class");
         };
+    }
+
+    private static JavaType resolveJavaType(Col col, String fieldName, Set<String> imports) {
+        if (isVersionField(col, fieldName)) {
+            return new JavaType("int", "int.class");
+        }
+        return mapSqlTypeToJava(col.sqlType(), imports);
     }
 
     private static boolean isVersionField(Col col, String fieldName) {
