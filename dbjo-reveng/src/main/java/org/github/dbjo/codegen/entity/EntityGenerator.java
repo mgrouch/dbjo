@@ -310,7 +310,7 @@ public final class EntityGenerator {
 
     private static JavaType resolveJavaType(Col col, String fieldName, Set<String> imports) {
         if (isVersionField(col, fieldName)) {
-            return new JavaType("int", "int.class");
+            return new JavaType("Integer", "Integer.class");
         }
         return mapSqlTypeToJava(col.sqlType(), imports);
     }
