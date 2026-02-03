@@ -119,6 +119,23 @@ public final class EntityGenerator {
 
         for (Field f : fields) {
             String cap = Naming.capitalize(f.name);
+            if (isVersionField(f.col, f.name)) {
+                sb.append("  @Override\n");
+                sb.append("  public int get").append(cap).append("() {\n")
+                        .append("    return ").append(f.name).append(" == null ? 0 : ").append(f.name).append(";\n")
+                        .append("  }\n\n");
+                sb.append("  @Override\n");
+                sb.append("  public void set").append(cap).append("(int ").append(f.name).append(") {\n")
+                        .append("    this.").append(f.name).append(" = ").append(f.name).append(";\n")
+                        .append("  }\n\n");
+                sb.append("  public ").append(f.javaType).append(" get").append(cap).append("Boxed() {\n")
+                        .append("    return ").append(f.name).append(";\n")
+                        .append("  }\n\n");
+                sb.append("  public void set").append(cap).append("Boxed(").append(f.javaType).append(" ").append(f.name).append(") {\n")
+                        .append("    this.").append(f.name).append(" = ").append(f.name).append(";\n")
+                        .append("  }\n\n");
+                continue;
+            }
             sb.append("  public ").append(f.javaType).append(" get").append(cap).append("() {\n")
                     .append("    return ").append(f.name).append(";\n")
                     .append("  }\n\n");
@@ -191,9 +208,14 @@ public final class EntityGenerator {
             String propName = Naming.sanitizeJavaIdentifier(Naming.toFieldName(c.colName()));
             JavaType jt = resolveJavaType(c, propName, imports);
             boolean isPk = tm.pkColsUpper().contains(c.colName().toUpperCase(Locale.ROOT));
-
             String constName = Naming.toUpperSnake(propName);
-            props.add(new MetaProp(constName, propName, jt.javaType, jt.classLiteral, c, isPk));
+            String getterName = "get" + Naming.capitalize(propName);
+            String setterName = "set" + Naming.capitalize(propName);
+            if (isVersionField(c, propName)) {
+                getterName += "Boxed";
+                setterName += "Boxed";
+            }
+            props.add(new MetaProp(constName, propName, jt.javaType, jt.classLiteral, c, isPk, getterName, setterName));
         }
 
         StringBuilder sb = new StringBuilder(12_000);
@@ -216,8 +238,8 @@ public final class EntityGenerator {
                     .append(p.constName).append(" = new PropertyMeta<>(")
                     .append("\"").append(p.propName).append("\", ")
                     .append(p.classLiteral).append(", ")
-                    .append(beanClass).append("::get").append(Naming.capitalize(p.propName)).append(", ")
-                    .append(beanClass).append("::set").append(Naming.capitalize(p.propName))
+                    .append(beanClass).append("::").append(p.getterName).append(", ")
+                    .append(beanClass).append("::").append(p.setterName)
                     .append(");\n\n");
         }
 
@@ -303,5 +325,14 @@ public final class EntityGenerator {
 
     private record JavaType(String javaType, String classLiteral) {}
     private record Field(String name, String javaType, String classLiteral, Col col, boolean isPk) {}
-    private record MetaProp(String constName, String propName, String javaType, String classLiteral, Col col, boolean isPk) {}
+    private record MetaProp(
+            String constName,
+            String propName,
+            String javaType,
+            String classLiteral,
+            Col col,
+            boolean isPk,
+            String getterName,
+            String setterName
+    ) {}
 }

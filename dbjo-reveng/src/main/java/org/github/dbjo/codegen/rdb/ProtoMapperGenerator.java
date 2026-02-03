@@ -11,6 +11,7 @@ import org.github.dbjo.codegen.util.Naming;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.Types;
 import java.util.*;
 
 public final class ProtoMapperGenerator {
@@ -79,6 +80,7 @@ public final class ProtoMapperGenerator {
                 boolean nullable,
                 boolean hasPresence,
                 boolean isEnum,
+                boolean isVersion,
                 EnumIndex.Binding enumBinding
         ) {}
         List<FieldInfo> fields = new ArrayList<>();
@@ -98,7 +100,9 @@ public final class ProtoMapperGenerator {
             EnumIndex.Binding eb = (enumIndex == null) ? null : enumIndex.find(schema, table, c.colName());
             boolean isEnum = eb != null;
 
-            fields.add(new FieldInfo(prop, cap, jt, pt, nullable, hasPresence, isEnum, eb));
+            boolean isVersion = isVersionField(c, prop);
+
+            fields.add(new FieldInfo(prop, cap, jt, pt, nullable, hasPresence, isEnum, isVersion, eb));
 
             // imports needed by helper conversions for NON-enum java types
             if (!isEnum) {
@@ -141,7 +145,7 @@ public final class ProtoMapperGenerator {
         sb.append("        var b = ").append(protoFqn).append(".newBuilder();\n\n");
 
         for (FieldInfo f : fields) {
-            String getter = "pojo.get" + f.cap + "()";
+            String getter = f.isVersion ? "pojo.get" + f.cap + "Boxed()" : "pojo.get" + f.cap + "()";
             if (f.isEnum) {
                 // enum -> key
                 String keyExpr = getter + "." + f.enumBinding.keyGetterMethod() + "()";
@@ -161,7 +165,7 @@ public final class ProtoMapperGenerator {
         sb.append("        ").append(beanClass).append(" u = new ").append(beanClass).append("();\n");
 
         for (FieldInfo f : fields) {
-            String setter = "u.set" + f.cap;
+            String setter = f.isVersion ? "u.set" + f.cap + "Boxed" : "u.set" + f.cap;
             String protoGet = "p.get" + f.cap + "()";
 
             if (f.isEnum) {
@@ -219,6 +223,10 @@ public final class ProtoMapperGenerator {
 
         sb.append("}\n");
         return sb.toString();
+    }
+
+    private static boolean isVersionField(Col col, String fieldName) {
+        return "version".equals(fieldName) && col.sqlType() == Types.INTEGER;
     }
 
     private static String toProtoExpr(String javaType, String getterExpr) {
