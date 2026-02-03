@@ -1,6 +1,5 @@
 package org.github.dbjo.rdb.jdbc.remote;
 
-import javax.sql.rowset.CachedRowSet;
 import java.sql.*;
 import java.util.Objects;
 
@@ -10,7 +9,7 @@ public final class RemoteRocksJdbcStatement implements Statement {
     private int maxRows;
     private final int resultSetType;
     private final int resultSetHoldability;
-    private CachedRowSet last;
+    private ResultSet last;
 
     RemoteRocksJdbcStatement(RemoteRocksJdbcConnection conn) {
         this(conn, ResultSet.TYPE_SCROLL_INSENSITIVE, conn.getHoldability());

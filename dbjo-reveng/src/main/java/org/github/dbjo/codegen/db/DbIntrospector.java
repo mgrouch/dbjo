@@ -70,8 +70,8 @@ public final class DbIntrospector {
 
         List<TableRef> out = new ArrayList<>();
 
-        // Most drivers: (catalog, schemaPattern=null, tablePattern="%", types={"TABLE"})
-        try (ResultSet rs = meta.getTables(catalog, null, "%", new String[]{"TABLE"})) {
+        // Most drivers: (catalog, schemaPattern=null, tablePattern="%", types={"TABLE","VIEW"})
+        try (ResultSet rs = meta.getTables(catalog, null, "%", new String[]{"TABLE", "VIEW"})) {
             while (rs.next()) {
                 String schema = rs.getString("TABLE_SCHEM");
                 String table  = rs.getString("TABLE_NAME");
