@@ -6,6 +6,9 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.sql.init.dependency.DependsOnDatabaseInitialization;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.DependsOn;
+import org.springframework.core.annotation.Order;
+import org.springframework.core.Ordered;
 import org.github.dbjo.generated.model.dao.jdbc.ClientJdbcDao;
 import org.github.dbjo.generated.model.dao.jdbc.ProductJdbcDao;
 import org.github.dbjo.generated.model.dao.jdbc.PurchaseJdbcDao;
@@ -56,7 +59,18 @@ public class DbjoAppApplication {
     }
 
     @Bean
+    @Order(Ordered.HIGHEST_PRECEDENCE)
+    CommandLineRunner hsqlScriptInitializer(DataSource dataSource) {
+        return args -> HsqlScriptRunner.runScripts(
+                dataSource,
+                List.of("classpath:schema.sql", "classpath:data.sql")
+        );
+    }
+
+    @Bean
     @DependsOnDatabaseInitialization
+    @DependsOn("hsqlScriptInitializer")
+    @Order(Ordered.LOWEST_PRECEDENCE)
     CommandLineRunner loadRocksDb(DataSource dataSource, RocksDbHandle rocksDbHandle, RocksJdbcEngine rocksJdbcEngine) {
         return args -> {
             PlatformTransactionManager transactionManager = new RocksDbTransactionManager(rocksDbHandle.db());

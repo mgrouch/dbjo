@@ -6,9 +6,7 @@ spring:
     password:
   sql:
     init:
-      mode: always
-      schema-locations: classpath:schema.sql
-      data-locations: classpath:data.sql
+      mode: never
 
 server:
   port: 8433
