@@ -1,5 +1,8 @@
--- Demo tables: client, product, purchase
--- (HSQLDB supports INFORMATION_SCHEMA for introspection.)
+CREATE FUNCTION PARTITION_ID(key VARCHAR(8000), parts INTEGER)
+  RETURNS INTEGER
+  LANGUAGE JAVA
+  DETERMINISTIC
+  EXTERNAL NAME 'CLASSPATH:org.github.dbjo.meta.features.PartitionId.partition';
 
 DROP TABLE IF EXISTS purchase;
 DROP TABLE IF EXISTS product;
