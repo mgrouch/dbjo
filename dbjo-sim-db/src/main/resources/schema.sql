@@ -19,7 +19,7 @@ CREATE FUNCTION PARTITION_ID(key VARCHAR(8000), parts INTEGER)
       SET h = MOD(h * 16777619, 4294967296);
       SET i = i + 1;
     END WHILE;
-    RETURN CAST(MOD(h, parts) AS INTEGER);
+    RETURN MOD(h, parts);
   END;
 
 DROP TABLE IF EXISTS purchase;

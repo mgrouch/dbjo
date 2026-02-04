@@ -79,6 +79,9 @@ public final class StartHsqldbMojo extends AbstractMojo {
             getLog().info("  methods  = " + (methodClassNames == null ? "" : methodClassNames));
 
             HsqlProperties properties = new HsqlProperties();
+            if (methodClassNames != null && !methodClassNames.isBlank()) {
+                properties.setProperty("hsqldb.method_class_names", methodClassNames);
+            }
 
             Server server = new Server();
             server.setProperties(properties);
