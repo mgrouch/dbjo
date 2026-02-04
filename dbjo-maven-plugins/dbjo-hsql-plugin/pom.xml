@@ -46,6 +46,11 @@
             <artifactId>hsqldb</artifactId>
             <version>${hsqldb.version}</version>
         </dependency>
+        <dependency>
+            <groupId>org.github.dbjo</groupId>
+            <artifactId>dbjo-meta</artifactId>
+            <version>${project.version}</version>
+        </dependency>
     </dependencies>
 
     <build>
