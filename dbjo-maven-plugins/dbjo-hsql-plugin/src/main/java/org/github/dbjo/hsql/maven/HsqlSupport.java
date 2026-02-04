@@ -34,13 +34,12 @@ final class HsqlSupport {
         String sql = loadScriptText(scriptLocation);
         if (sql.isBlank()) return;
 
-        // Very simple splitter: works for typical schema.sql without semicolons in strings.
-        String[] stmts = sql.split(";");
+        String[] stmts = splitStatements(stripComments(sql));
         try (Statement st = conn.createStatement()) {
-            for (String raw : stmts) {
-                String s = stripComments(raw).trim();
-                if (s.isBlank()) continue;
-                st.execute(s);
+            for (String s : stmts) {
+                String trimmed = s.trim();
+                if (trimmed.isBlank()) continue;
+                st.execute(trimmed);
             }
         }
     }
@@ -54,6 +53,71 @@ final class HsqlSupport {
             out.append(line).append('\n');
         }
         return out.toString();
+    }
+
+    private static String[] splitStatements(String sql) {
+        StringBuilder current = new StringBuilder(sql.length());
+        java.util.List<String> statements = new java.util.ArrayList<>();
+        boolean inString = false;
+        int depth = 0;
+
+        for (int i = 0; i < sql.length(); i++) {
+            char ch = sql.charAt(i);
+            current.append(ch);
+
+            if (ch == '\'') {
+                inString = !inString;
+                continue;
+            }
+
+            if (inString) {
+                continue;
+            }
+
+            if (ch == ';' && depth == 0) {
+                statements.add(current.substring(0, current.length() - 1));
+                current.setLength(0);
+                continue;
+            }
+
+            if (isKeywordAt(sql, i, "BEGIN")) {
+                int next = skipWhitespace(sql, i + "BEGIN".length());
+                if (isKeywordAt(sql, next, "ATOMIC")) {
+                    depth++;
+                }
+            } else if (isKeywordAt(sql, i, "END") && depth > 0) {
+                int next = skipWhitespace(sql, i + "END".length());
+                if (!isKeywordAt(sql, next, "IF")
+                        && !isKeywordAt(sql, next, "WHILE")
+                        && !isKeywordAt(sql, next, "LOOP")
+                        && !isKeywordAt(sql, next, "CASE")) {
+                    depth--;
+                }
+            }
+        }
+
+        if (current.length() > 0) {
+            statements.add(current.toString());
+        }
+
+        return statements.toArray(new String[0]);
+    }
+
+    private static boolean isKeywordAt(String sql, int index, String keyword) {
+        int len = keyword.length();
+        if (index < 0 || index + len > sql.length()) return false;
+        if (!sql.regionMatches(true, index, keyword, 0, len)) return false;
+        if (index > 0 && Character.isLetterOrDigit(sql.charAt(index - 1))) return false;
+        if (index + len < sql.length() && Character.isLetterOrDigit(sql.charAt(index + len))) return false;
+        return true;
+    }
+
+    private static int skipWhitespace(String sql, int index) {
+        int i = index;
+        while (i < sql.length() && Character.isWhitespace(sql.charAt(i))) {
+            i++;
+        }
+        return i;
     }
 
     private static String loadScriptText(String loc) throws Exception {
