@@ -242,19 +242,21 @@ public final class DbMetaGenerator {
             String prop = Naming.sanitizeJavaIdentifier(Naming.toFieldName(c.colName()));
             String cap  = Naming.capitalize(prop);
             boolean nullable = isNullable(c);
+            boolean isVersionField = isVersionField(c, prop);
+            String setterName = "set" + cap + (isVersionField && nullable ? "Boxed" : "");
 
             EnumOverrideIndex.Binding eb = (enumOverrides == null) ? null : enumOverrides.find(schema, table, c.colName());
             if (eb != null) {
                 TypeMappings.JavaType jt = TypeMappings.mapSqlTypeToJava(c.sqlType(), c.typeName(), null);
                 String rawExpr = rsReadExpr(jt.javaType(), nullable, "rs", "i");
-                sb.append("        e.set").append(cap).append("(")
+                sb.append("        e.").append(setterName).append("(")
                         .append(eb.enumJavaSimple()).append(".").append(eb.lookupNullableMethod())
                         .append("(").append(rawExpr).append("))")
                         .append(";\n");
             } else {
                 TypeMappings.JavaType jt = TypeMappings.mapSqlTypeToJava(c.sqlType(), c.typeName(), null);
                 String readExpr = rsReadExpr(jt.javaType(), nullable, "rs", "i");
-                sb.append("        e.set").append(cap).append("(").append(readExpr).append(");\n");
+                sb.append("        e.").append(setterName).append("(").append(readExpr).append(");\n");
             }
             sb.append("        i++;\n");
         }
@@ -778,6 +780,10 @@ public final class DbMetaGenerator {
             case "UUID"           -> rs + ".getObject(" + idxVar + ", java.util.UUID.class)";
             default -> rs + ".getObject(" + idxVar + ")";
         };
+    }
+
+    private static boolean isVersionField(Col col, String fieldName) {
+        return "version".equals(fieldName) && col.sqlType() == Types.INTEGER;
     }
 
     private static String nz(String s) { return s == null ? "" : s; }
