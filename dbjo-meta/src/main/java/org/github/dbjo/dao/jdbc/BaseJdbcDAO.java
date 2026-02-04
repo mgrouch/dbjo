@@ -11,8 +11,10 @@ import java.sql.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.regex.Pattern;
 
 public abstract class BaseJdbcDAO<T, K> {
+    private static final Pattern WHERE_PATTERN = Pattern.compile("\\bwhere\\b", Pattern.CASE_INSENSITIVE);
     protected final DataSource ds;
     protected final DbDialect dialect;
     protected final DbMeta<T> meta;
@@ -66,6 +68,34 @@ public abstract class BaseJdbcDAO<T, K> {
             while (rs.next()) out.add(meta.fromRow(rs));
             return out;
         }
+    }
+
+    public List<T> selectAllByPartition(int partitionNum, int totalPartitions) throws SQLException {
+        try (Connection c = ds.getConnection()) {
+            return selectAllByPartition(c, partitionNum, totalPartitions);
+        }
+    }
+
+    public List<T> selectAllByPartition(Connection c, int partitionNum, int totalPartitions) throws SQLException {
+        String sql = withPartitionPredicate(meta.selectAllBaseSql());
+        try (PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setInt(1, totalPartitions);
+            ps.setInt(2, partitionNum);
+            try (ResultSet rs = ps.executeQuery()) {
+                List<T> out = new ArrayList<>();
+                while (rs.next()) out.add(meta.fromRow(rs));
+                return out;
+            }
+        }
+    }
+
+    private static String withPartitionPredicate(String sql) {
+        String trimmed = sql.trim();
+        String predicate = "partition_id(partition_key, ?) = ?";
+        if (WHERE_PATTERN.matcher(trimmed).find()) {
+            return trimmed + " AND " + predicate;
+        }
+        return trimmed + " WHERE " + predicate;
     }
 
     // Criteria -> SQL bridge (property-name based)

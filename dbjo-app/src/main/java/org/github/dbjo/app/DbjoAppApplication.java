@@ -4,6 +4,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.boot.CommandLineRunner;
+import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.sql.init.dependency.DependsOnDatabaseInitialization;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.DependsOn;
@@ -71,12 +72,14 @@ public class DbjoAppApplication {
     @DependsOnDatabaseInitialization
     @DependsOn("hsqlScriptInitializer")
     @Order(Ordered.LOWEST_PRECEDENCE)
-    CommandLineRunner loadRocksDb(DataSource dataSource, RocksDbHandle rocksDbHandle, RocksJdbcEngine rocksJdbcEngine) {
+    CommandLineRunner loadRocksDb(DataSource dataSource, RocksDbHandle rocksDbHandle, RocksJdbcEngine rocksJdbcEngine,
+                                  ApplicationArguments applicationArguments) {
         return args -> {
             PlatformTransactionManager transactionManager = new RocksDbTransactionManager(rocksDbHandle.db());
             TransactionTemplate rocksTransactionTemplate = new TransactionTemplate(transactionManager);
             RocksSessions sessions = new SpringRocksSessions(rocksDbHandle.db());
             DaoRegistry registry = new DaoRegistry(rocksDbHandle.db(), rocksDbHandle.cfByName(), true);
+            PartitionArgs partitionArgs = PartitionArgs.from(applicationArguments);
 
             ClientJdbcDao clientJdbcDao = new ClientJdbcDao(dataSource, DbDialect.HSQL);
             ProductJdbcDao productJdbcDao = new ProductJdbcDao(dataSource, DbDialect.HSQL);
@@ -93,7 +96,9 @@ public class DbjoAppApplication {
                     clientDao,
                     productDao,
                     purchaseDao,
-                    rocksTransactionTemplate
+                    rocksTransactionTemplate,
+                    partitionArgs.partitionNum(),
+                    partitionArgs.totalPartitions()
             );
             RocksJdbcReporter reporter = new RocksJdbcReporter(rocksJdbcEngine);
             loader.load();
