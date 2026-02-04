@@ -47,6 +47,11 @@ public final class StartHsqldbMojo extends AbstractMojo {
     @Parameter(property = "dbjo.hsqldb.waitMs", defaultValue = "15000")
     private long waitMs;
 
+    /** Allowed Java class names for stored procedures / functions. */
+    @Parameter(property = "dbjo.hsqldb.methodClassNames",
+            defaultValue = "org.github.dbjo.meta.features.PartitionId")
+    private String methodClassNames;
+
     @Override
     public void execute() throws MojoExecutionException {
         try {
@@ -60,9 +65,15 @@ public final class StartHsqldbMojo extends AbstractMojo {
             getLog().info("  port     = " + port);
             getLog().info("  jdbcUrl  = " + url);
             getLog().info("  block    = " + block);
+            getLog().info("  methods  = " + (methodClassNames == null ? "" : methodClassNames));
+
+            HsqlProperties properties = new HsqlProperties();
+            if (methodClassNames != null && !methodClassNames.isBlank()) {
+                properties.setProperty("hsqldb.method_class_names", methodClassNames);
+            }
 
             Server server = new Server();
-            server.setProperties(new HsqlProperties());
+            server.setProperties(properties);
             server.setSilent(true);
             server.setTrace(false);
 
