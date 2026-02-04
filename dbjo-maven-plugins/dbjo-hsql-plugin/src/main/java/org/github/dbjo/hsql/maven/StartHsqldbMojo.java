@@ -61,7 +61,13 @@ public final class StartHsqldbMojo extends AbstractMojo {
 
             getLog().info("Starting HSQLDB Server");
             getLog().info("  dbName   = " + dbName);
-            getLog().info("  dbPath   = " + dbPath);
+            String resolvedDbPath = dbPath;
+            if (methodClassNames != null && !methodClassNames.isBlank()
+                    && !dbPath.contains("hsqldb.method_class_names")) {
+                resolvedDbPath = dbPath + ";hsqldb.method_class_names=" + methodClassNames;
+            }
+
+            getLog().info("  dbPath   = " + resolvedDbPath);
             getLog().info("  port     = " + port);
             getLog().info("  jdbcUrl  = " + url);
             getLog().info("  block    = " + block);
@@ -78,7 +84,7 @@ public final class StartHsqldbMojo extends AbstractMojo {
             server.setTrace(false);
 
             server.setDatabaseName(0, dbName);
-            server.setDatabasePath(0, dbPath);
+            server.setDatabasePath(0, resolvedDbPath);
             server.setPort(port);
 
             server.start();
