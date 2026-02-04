@@ -47,6 +47,11 @@ public final class StartHsqldbMojo extends AbstractMojo {
     @Parameter(property = "dbjo.hsqldb.waitMs", defaultValue = "15000")
     private long waitMs;
 
+    /** Allowed Java class names for stored procedures / functions. */
+    @Parameter(property = "dbjo.hsqldb.methodClassNames",
+            defaultValue = "org.github.dbjo.meta.features.PartitionId")
+    private String methodClassNames;
+
     @Override
     public void execute() throws MojoExecutionException {
         try {
@@ -56,18 +61,32 @@ public final class StartHsqldbMojo extends AbstractMojo {
 
             getLog().info("Starting HSQLDB Server");
             getLog().info("  dbName   = " + dbName);
-            getLog().info("  dbPath   = " + dbPath);
+            String resolvedDbPath = dbPath;
+            if (methodClassNames != null && !methodClassNames.isBlank()
+                    && !dbPath.contains("hsqldb.method_class_names")) {
+                resolvedDbPath = dbPath + ";hsqldb.method_class_names=" + methodClassNames;
+            }
+
+            getLog().info("  dbPath   = " + resolvedDbPath);
             getLog().info("  port     = " + port);
+            if (methodClassNames != null && !methodClassNames.isBlank()
+                    && !url.contains("hsqldb.method_class_names")) {
+                url = url + ";hsqldb.method_class_names=" + methodClassNames;
+            }
+
             getLog().info("  jdbcUrl  = " + url);
             getLog().info("  block    = " + block);
+            getLog().info("  methods  = " + (methodClassNames == null ? "" : methodClassNames));
+
+            HsqlProperties properties = new HsqlProperties();
 
             Server server = new Server();
-            server.setProperties(new HsqlProperties());
+            server.setProperties(properties);
             server.setSilent(true);
             server.setTrace(false);
 
             server.setDatabaseName(0, dbName);
-            server.setDatabasePath(0, dbPath);
+            server.setDatabasePath(0, resolvedDbPath);
             server.setPort(port);
 
             server.start();
