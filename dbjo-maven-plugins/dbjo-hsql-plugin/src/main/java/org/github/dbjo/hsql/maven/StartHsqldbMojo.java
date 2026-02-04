@@ -69,6 +69,11 @@ public final class StartHsqldbMojo extends AbstractMojo {
 
             getLog().info("  dbPath   = " + resolvedDbPath);
             getLog().info("  port     = " + port);
+            if (methodClassNames != null && !methodClassNames.isBlank()
+                    && !url.contains("hsqldb.method_class_names")) {
+                url = url + ";hsqldb.method_class_names=" + methodClassNames;
+            }
+
             getLog().info("  jdbcUrl  = " + url);
             getLog().info("  block    = " + block);
             getLog().info("  methods  = " + (methodClassNames == null ? "" : methodClassNames));
