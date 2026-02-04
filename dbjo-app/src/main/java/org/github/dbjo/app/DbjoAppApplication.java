@@ -63,7 +63,7 @@ public class DbjoAppApplication {
     CommandLineRunner hsqlScriptInitializer(DataSource dataSource) {
         return args -> HsqlScriptRunner.runScripts(
                 dataSource,
-                List.of("classpath:schema.sql", "classpath:data.sql")
+                List.of("classpath:functions.sql", "classpath:schema.sql", "classpath:data.sql")
         );
     }
 

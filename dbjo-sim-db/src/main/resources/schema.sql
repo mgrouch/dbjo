@@ -1,26 +1,3 @@
-CREATE FUNCTION PARTITION_ID(key VARCHAR(8000), parts INTEGER)
-  RETURNS INTEGER
-  LANGUAGE SQL
-  DETERMINISTIC
-  BEGIN ATOMIC
-    DECLARE h BIGINT;
-    DECLARE i INTEGER;
-    DECLARE len INTEGER;
-    DECLARE b INTEGER;
-    IF key IS NULL OR parts IS NULL OR parts <= 0 THEN
-      RETURN NULL;
-    END IF;
-    SET h = 2166136261;
-    SET i = 1;
-    SET len = OCTET_LENGTH(key);
-    WHILE i <= len DO
-      SET b = ASCII(SUBSTRING(key, i, 1));
-      SET h = BITXOR(h, b);
-      SET h = MOD(h * 16777619, 4294967296);
-      SET i = i + 1;
-    END WHILE;
-    RETURN CAST(MOD(h, parts) AS INTEGER);
-  END;
 
 DROP TABLE IF EXISTS purchase;
 DROP TABLE IF EXISTS product;
