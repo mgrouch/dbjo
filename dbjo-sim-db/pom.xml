@@ -15,6 +15,11 @@
       <groupId>org.hsqldb</groupId>
       <artifactId>hsqldb</artifactId>
     </dependency>
+    <dependency>
+      <groupId>org.github.dbjo</groupId>
+      <artifactId>dbjo-meta</artifactId>
+      <version>${project.version}</version>
+    </dependency>
   </dependencies>
 
   <build>
