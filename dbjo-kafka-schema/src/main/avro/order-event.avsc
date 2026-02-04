@@ -1,0 +1,23 @@
+{
+  "type": "record",
+  "name": "OrderEvent",
+  "namespace": "org.github.dbjo.kafka.avro",
+  "doc": "Shared event payload for Kafka publishing and listening.",
+  "fields": [
+    {
+      "name": "eventId",
+      "type": "string",
+      "doc": "Unique identifier for the event."
+    },
+    {
+      "name": "eventType",
+      "type": "string",
+      "doc": "Type name for the event."
+    },
+    {
+      "name": "occurredAtEpochMs",
+      "type": "long",
+      "doc": "Event timestamp in epoch milliseconds."
+    }
+  ]
+}

@@ -15,6 +15,11 @@
     <module>dbjo-sim-model</module>
     <module>dbjo-app</module>
     <module>dbjo-app-client</module>
+    <module>dbjo-kafka-schema</module>
+    <module>dbjo-kafka-listener</module>
+    <module>dbjo-kafka-publisher</module>
+    <module>dbjo-kafka-listener-app</module>
+    <module>dbjo-kafka-publisher-app</module>
   </modules>
   <dependencyManagement>
     <dependencies>
