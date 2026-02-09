@@ -2,6 +2,7 @@ package org.github.dbjo.codegen;
 
 import org.github.dbjo.codegen.db.DbIntrospector;
 import org.github.dbjo.codegen.db.DbMetaGenerator;
+import org.github.dbjo.codegen.db.DbSchemaGenerator;
 import org.github.dbjo.codegen.entity.EntityGenerator;
 import org.github.dbjo.codegen.entity.PojoValidatorGenerator;
 import org.github.dbjo.meta.db.TableModel;
@@ -121,6 +122,12 @@ public final class DbjoCodegen {
             if (cfg.runMode().runJdbcDao()) {
                 int n = new org.github.dbjo.codegen.jdbc.JdbcDaoGenerator(cfg).generateAll(tables);
                 System.out.println("Generated JDBC DAO(s): " + n);
+                System.out.println();
+            }
+
+            if (cfg.runMode().runSchema() || cfg.runMode().runValidator()) {
+                int n = new DbSchemaGenerator(cfg.codegenOutJava(), cfg.dbSchemaPkg(), cfg.overwrite()).generateAll(tables);
+                System.out.println("Generated DB schema table metadata: " + n);
                 System.out.println();
             }
 
