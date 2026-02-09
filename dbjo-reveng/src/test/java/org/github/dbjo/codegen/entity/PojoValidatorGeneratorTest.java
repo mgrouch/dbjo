@@ -32,18 +32,40 @@ class PojoValidatorGeneratorTest {
         String src = PojoValidatorGenerator.renderValidator(
                 "org.example.validator",
                 "org.example.bean",
+                "org.example.dbschema",
                 "Client",
                 "ClientValidator",
                 tm
         );
 
-        assertTrue(src.contains("if (pojo.getId() == null) errors.add(\"ID must not be null\")"));
-        assertTrue(src.contains("if (pojo.getName() == null) errors.add(\"NAME must not be null\")"));
-        assertTrue(src.contains("if (pojo.getName() != null && pojo.getName().length() > 32) errors.add(\"NAME length must be <= 32\")"));
-        assertTrue(src.contains("if (pojo.getEmail() != null && pojo.getEmail().length() > 128) errors.add(\"EMAIL length must be <= 128\")"));
+        assertTrue(src.contains("private static final Map<String, Col> COLS_BY_NAME = ValidationSupport.colsByName("));
+        assertTrue(src.contains("ValidationSupport.validateNullableAndLength(errors, \"ID\", COLS_BY_NAME.get(\"ID\"), pojo.getId());"));
+        assertTrue(src.contains("ValidationSupport.validateNullableAndLength(errors, \"NAME\", COLS_BY_NAME.get(\"NAME\"), pojo.getName());"));
+        assertTrue(src.contains("ValidationSupport.validateNullableAndLength(errors, \"EMAIL\", COLS_BY_NAME.get(\"EMAIL\"), pojo.getEmail());"));
         assertTrue(src.contains("if (pojo.getAmount() != null && pojo.getAmount().scale() > 2) errors.add(\"AMOUNT scale must be <= 2\")"));
         assertTrue(src.contains("if (pojo.getAmount() != null && pojo.getAmount().precision() > 10) errors.add(\"AMOUNT precision must be <= 10\")"));
         assertTrue(src.contains("if (pojo.getBirthDate() != null && !ValidationSupport.isValidYyyyMmDd(pojo.getBirthDate())) errors.add(\"BIRTH_DATE must be a valid date in yyyyMMdd format\")"));
         assertTrue(src.contains("ValidationSupport.throwIfAny(validate(pojo));"));
+    }
+
+    @Test
+    void renderValidator_usesBoxedVersionGetter() {
+        TableModel tm = new TableModel(
+                new TableRef("PUBLIC", "CLIENT"),
+                List.of(new Col(1, "VERSION", Types.INTEGER, "INTEGER", 10, 0, Nullability.NULLABLE, false, null)),
+                Set.of(),
+                List.of()
+        );
+
+        String src = PojoValidatorGenerator.renderValidator(
+                "org.example.validator",
+                "org.example.bean",
+                "org.example.dbschema",
+                "Client",
+                "ClientValidator",
+                tm
+        );
+
+        assertTrue(src.contains("ValidationSupport.validateNullableAndLength(errors, \"VERSION\", COLS_BY_NAME.get(\"VERSION\"), pojo.getVersionBoxed());"));
     }
 }

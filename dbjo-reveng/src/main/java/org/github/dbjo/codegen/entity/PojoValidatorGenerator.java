@@ -34,7 +34,7 @@ public final class PojoValidatorGenerator {
             String beanClass = Naming.toClassName(tm.table().table());
             String validatorClass = beanClass + cfg.validatorSuffix();
 
-            String src = renderValidator(cfg.validatorPkg(), cfg.beanPkg(), beanClass, validatorClass, tm);
+            String src = renderValidator(cfg.validatorPkg(), cfg.beanPkg(), cfg.dbSchemaPkg(), beanClass, validatorClass, tm);
             Path outFile = outDir.resolve(validatorClass + ".java");
             FilesUtil.writeString(outFile, src, cfg.overwrite());
             System.out.println("Wrote: " + outFile);
@@ -43,31 +43,20 @@ public final class PojoValidatorGenerator {
         return count;
     }
 
-    static String renderValidator(String validatorPkg, String beanPkg, String beanClass, String validatorClass, TableModel tm) {
+    static String renderValidator(String validatorPkg, String beanPkg, String dbSchemaPkg, String beanClass, String validatorClass, TableModel tm) {
         List<String> checks = new ArrayList<>();
+        String tableClass = tableMetaClassName(tm.table().schema(), tm.table().table());
 
         for (Col c : tm.cols()) {
             String field = Naming.sanitizeJavaIdentifier(Naming.toFieldName(c.colName()));
             String cap = Naming.capitalize(field);
-            String getter = "pojo.get" + cap + "()";
+            String getter = "pojo.get" + cap + (isVersionField(c, field) ? "Boxed" : "") + "()";
             String dbCol = c.colName();
 
-            if (!c.nullable()) {
-                checks.add("        if (" + getter + " == null) errors.add(\"" + dbCol + " must not be null\");");
-            }
+            checks.add("        ValidationSupport.validateNullableAndLength(errors, \"" + dbCol + "\", COLS_BY_NAME.get(\"" + dbCol.toUpperCase(Locale.ROOT) + "\"), " + getter + ");");
 
             TypeMappings.JavaType jt = TypeMappings.mapSqlTypeToJava(c.sqlType(), c.typeName(), null);
             String javaType = jt.javaType();
-
-            if ((c.sqlType() == Types.CHAR || c.sqlType() == Types.VARCHAR || c.sqlType() == Types.NCHAR || c.sqlType() == Types.NVARCHAR
-                    || c.sqlType() == Types.LONGVARCHAR || c.sqlType() == Types.LONGNVARCHAR)
-                    && c.size() > 0) {
-                checks.add("        if (" + getter + " != null && " + getter + ".length() > " + c.size() + ") errors.add(\"" + dbCol + " length must be <= " + c.size() + "\");");
-            }
-
-            if ("byte[]".equals(javaType) && c.size() > 0) {
-                checks.add("        if (" + getter + " != null && " + getter + ".length > " + c.size() + ") errors.add(\"" + dbCol + " byte length must be <= " + c.size() + "\");");
-            }
 
             if (c.scale() >= 0 && (c.sqlType() == Types.DECIMAL || c.sqlType() == Types.NUMERIC)) {
                 checks.add("        if (" + getter + " != null && " + getter + ".scale() > " + c.scale() + ") errors.add(\"" + dbCol + " scale must be <= " + c.scale() + "\");");
@@ -85,7 +74,10 @@ public final class PojoValidatorGenerator {
         sb.append("package ").append(validatorPkg).append(";\n\n");
         sb.append("import java.util.ArrayList;\n");
         sb.append("import java.util.List;\n");
+        sb.append("import java.util.Map;\n");
+        sb.append("import org.github.dbjo.meta.db.Col;\n");
         sb.append("import org.github.dbjo.meta.validation.ValidationSupport;\n");
+        sb.append("import ").append(dbSchemaPkg).append(".tables.").append(tableClass).append(";\n");
         if (!validatorPkg.equals(beanPkg)) {
             sb.append("import ").append(beanPkg).append('.').append(beanClass).append(";\n");
         }
@@ -96,6 +88,7 @@ public final class PojoValidatorGenerator {
         sb.append(" */\n");
         sb.append("public final class ").append(validatorClass).append(" {\n\n");
         sb.append("    private ").append(validatorClass).append("() {}\n\n");
+        sb.append("    private static final Map<String, Col> COLS_BY_NAME = ValidationSupport.colsByName(").append(tableClass).append(".MODEL);\n\n");
 
         sb.append("    public static List<String> validate(").append(beanClass).append(" pojo) {\n");
         sb.append("        List<String> errors = new ArrayList<>();\n");
@@ -131,5 +124,31 @@ public final class PojoValidatorGenerator {
             return false;
         }
         return dbCol.toLowerCase(Locale.ROOT).endsWith("_date");
+    }
+
+    private static boolean isVersionField(Col c, String fieldName) {
+        return "version".equals(fieldName) && c.sqlType() == Types.INTEGER;
+    }
+
+    private static String tableMetaClassName(String schema, String table) {
+        String s = (schema == null || schema.isBlank()) ? "" : safeClassPart(schema);
+        String t = safeClassPart(table);
+        return s + t + "Table";
+    }
+
+    private static String safeClassPart(String raw) {
+        String cls = Naming.toClassName(raw);
+        if (cls.isBlank()) cls = "X";
+        if (!Character.isJavaIdentifierStart(cls.charAt(0))) cls = "_" + cls;
+
+        StringBuilder b = new StringBuilder(cls.length());
+        for (int i = 0; i < cls.length(); i++) {
+            char ch = cls.charAt(i);
+            b.append(Character.isJavaIdentifierPart(ch) ? ch : '_');
+        }
+        cls = b.toString();
+
+        if (Naming.JAVA_KEYWORDS.contains(cls.toLowerCase(Locale.ROOT))) cls = cls + "X";
+        return cls;
     }
 }
