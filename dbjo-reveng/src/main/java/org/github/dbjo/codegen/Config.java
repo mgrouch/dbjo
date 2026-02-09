@@ -22,6 +22,7 @@ public record Config(
         EnumOverrides enumOverrides,
         Rocks rocks,
         ProtoMapper protoMapper,
+        Validator validator,
         JdbcMeta jdbcMeta,
         JdbcDao jdbcDao,
         DbSchema dbSchema
@@ -64,6 +65,9 @@ public record Config(
 
     public static final String DEFAULT_PROTO_MAPPER_PKG = "org.github.dbjo.generated.rdb.mapper";
     public static final String DEFAULT_PROTO_MAPPER_SUFFIX = "ProtoMapper";
+
+    public static final String DEFAULT_VALIDATOR_PKG = "org.github.dbjo.generated.model.validator";
+    public static final String DEFAULT_VALIDATOR_SUFFIX = "Validator";
 
     public static final String DEFAULT_SQL_DB_MAPPER_PKG = "org.github.dbjo.generated.model.dbmeta";
 
@@ -132,6 +136,8 @@ public record Config(
 
     public record ProtoMapper(String protoMapperPkg, String protoMapperSuffix) {}
 
+    public record Validator(String validatorPkg, String validatorSuffix) {}
+
     public record JdbcMeta(String dbMetaPkg) {}
 
     public record JdbcDao(String jdbcDaoPkg, String jdbcDaoClassSuffix, String jdbcDaoBaseClass) {}
@@ -140,7 +146,7 @@ public record Config(
 
     // run mode
     public enum RunMode {
-        ALL, PROTO, ENUMS, ENTITY, QUERY, DAO, MAPPER, RDB, DBMETA, JDBCDAO, SCHEMA;
+        ALL, PROTO, ENUMS, ENTITY, QUERY, DAO, MAPPER, VALIDATOR, RDB, DBMETA, JDBCDAO, SCHEMA;
 
         public boolean runProto()   { return this == ALL || this == PROTO; }
         public boolean runEnums()   { return this == ALL || this == ENUMS; }
@@ -148,6 +154,7 @@ public record Config(
         public boolean runQuery()   { return this == ALL || this == QUERY || this == ENTITY || this == RDB; }
         public boolean runDao()     { return this == ALL || this == DAO || this == RDB; }
         public boolean runMapper()  { return this == ALL || this == MAPPER || this == RDB; }
+        public boolean runValidator() { return this == ALL || this == VALIDATOR || this == RDB; }
 
         public boolean runDbMeta()  { return this == ALL || this == DBMETA; }
         public boolean runJdbcDao() { return this == ALL || this == JDBCDAO; }
@@ -163,12 +170,13 @@ public record Config(
                 case "query", "criteria" -> QUERY;
                 case "dao", "daos" -> DAO;
                 case "mapper", "mappers" -> MAPPER;
+                case "validator", "validators", "validate" -> VALIDATOR;
                 case "rdb", "rocks", "rocksdb" -> RDB;
                 case "dbmeta", "jdbc" -> DBMETA;
                 case "jdbcdao", "jdbc-daos", "jdbcdaos" -> JDBCDAO;
                 case "schema", "dbschema" -> SCHEMA;
                 default -> throw new IllegalArgumentException("Unknown --run=" + s +
-                        " (use all|proto|enums|entity|query|dao|mapper|rdb|dbmeta|jdbcdao|schema)");
+                        " (use all|proto|enums|entity|query|dao|mapper|validator|rdb|dbmeta|jdbcdao|schema)");
             };
         }
     }
@@ -231,6 +239,10 @@ public record Config(
     // proto mapper
     public String protoMapperPkg(){ return protoMapper.protoMapperPkg(); }
     public String protoMapperSuffix(){ return protoMapper.protoMapperSuffix(); }
+
+    // pojo validator
+    public String validatorPkg(){ return validator.validatorPkg(); }
+    public String validatorSuffix(){ return validator.validatorSuffix(); }
 
     // jdbc meta
     public String dbMetaPkg(){ return jdbcMeta.dbMetaPkg(); }
@@ -322,6 +334,10 @@ public record Config(
         String protoMapperPkg = am.get("protoMapperPkg", DEFAULT_PROTO_MAPPER_PKG);
         String protoMapperSuffix = am.get("protoMapperSuffix", DEFAULT_PROTO_MAPPER_SUFFIX);
 
+        // Pojo validator
+        String validatorPkg = am.get("validatorPkg", DEFAULT_VALIDATOR_PKG);
+        String validatorSuffix = am.get("validatorSuffix", DEFAULT_VALIDATOR_SUFFIX);
+
         // SQL/JDBC meta
         String dbMetaPkg = am.get("dbMetaPkg", DEFAULT_SQL_DB_MAPPER_PKG);
 
@@ -350,6 +366,7 @@ public record Config(
                 new EnumOverrides(enumOverridesFile, enumStrictUnique),
                 new Rocks(daoPkg, schemaPkg, daoClassSuffix, schemaClassSuffix, cfConstSuffix, daoBaseClass),
                 new ProtoMapper(protoMapperPkg, protoMapperSuffix),
+                new Validator(validatorPkg, validatorSuffix),
                 new JdbcMeta(dbMetaPkg),
                 new JdbcDao(jdbcDaoPkg, jdbcDaoClassSuffix, jdbcDaoBaseClass),
                 new DbSchema(dbSchemaPkg)
