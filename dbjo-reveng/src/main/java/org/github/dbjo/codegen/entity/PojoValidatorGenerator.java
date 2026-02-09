@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.sql.Types;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Generates one POJO validator class per table.
@@ -74,12 +75,17 @@ public final class PojoValidatorGenerator {
                     checks.add("        if (" + getter + " != null && " + getter + ".precision() > " + c.size() + ") errors.add(\"" + dbCol + " precision must be <= " + c.size() + "\");");
                 }
             }
+
+            if (isYyyyMmDdIntDate(c, dbCol, javaType)) {
+                checks.add("        if (" + getter + " != null && !ValidationSupport.isValidYyyyMmDd(" + getter + ")) errors.add(\"" + dbCol + " must be a valid date in yyyyMMdd format\");");
+            }
         }
 
         StringBuilder sb = new StringBuilder(5000);
         sb.append("package ").append(validatorPkg).append(";\n\n");
         sb.append("import java.util.ArrayList;\n");
         sb.append("import java.util.List;\n");
+        sb.append("import org.github.dbjo.meta.validation.ValidationSupport;\n");
         if (!validatorPkg.equals(beanPkg)) {
             sb.append("import ").append(beanPkg).append('.').append(beanClass).append(";\n");
         }
@@ -106,13 +112,24 @@ public final class PojoValidatorGenerator {
         sb.append("    }\n\n");
 
         sb.append("    public static void validateOrThrow(").append(beanClass).append(" pojo) {\n");
-        sb.append("        List<String> errors = validate(pojo);\n");
-        sb.append("        if (!errors.isEmpty()) {\n");
-        sb.append("            throw new IllegalArgumentException(String.join(\"; \", errors));\n");
-        sb.append("        }\n");
+        sb.append("        ValidationSupport.throwIfAny(validate(pojo));\n");
         sb.append("    }\n");
 
         sb.append("}\n");
         return sb.toString();
+    }
+
+    private static boolean isYyyyMmDdIntDate(Col c, String dbCol, String javaType) {
+        if (!("Integer".equals(javaType) || "Long".equals(javaType) || "Short".equals(javaType) || "Byte".equals(javaType))) {
+            return false;
+        }
+        if (!(c.sqlType() == Types.INTEGER || c.sqlType() == Types.BIGINT || c.sqlType() == Types.SMALLINT || c.sqlType() == Types.TINYINT
+                || c.sqlType() == Types.NUMERIC || c.sqlType() == Types.DECIMAL)) {
+            return false;
+        }
+        if (c.scale() > 0) {
+            return false;
+        }
+        return dbCol.toLowerCase(Locale.ROOT).endsWith("_date");
     }
 }

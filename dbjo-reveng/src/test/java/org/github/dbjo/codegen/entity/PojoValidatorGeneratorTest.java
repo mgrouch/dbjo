@@ -22,7 +22,8 @@ class PojoValidatorGeneratorTest {
                         new Col(1, "ID", Types.INTEGER, "INTEGER", 10, 0, Nullability.NO_NULLS, false, null),
                         new Col(2, "NAME", Types.VARCHAR, "VARCHAR", 32, 0, Nullability.NO_NULLS, false, null),
                         new Col(3, "EMAIL", Types.VARCHAR, "VARCHAR", 128, 0, Nullability.NULLABLE, false, null),
-                        new Col(4, "AMOUNT", Types.DECIMAL, "DECIMAL", 10, 2, Nullability.NULLABLE, false, null)
+                        new Col(4, "AMOUNT", Types.DECIMAL, "DECIMAL", 10, 2, Nullability.NULLABLE, false, null),
+                        new Col(5, "BIRTH_DATE", Types.INTEGER, "INTEGER", 10, 0, Nullability.NULLABLE, false, null)
                 ),
                 Set.of("ID"),
                 List.of()
@@ -42,5 +43,7 @@ class PojoValidatorGeneratorTest {
         assertTrue(src.contains("if (pojo.getEmail() != null && pojo.getEmail().length() > 128) errors.add(\"EMAIL length must be <= 128\")"));
         assertTrue(src.contains("if (pojo.getAmount() != null && pojo.getAmount().scale() > 2) errors.add(\"AMOUNT scale must be <= 2\")"));
         assertTrue(src.contains("if (pojo.getAmount() != null && pojo.getAmount().precision() > 10) errors.add(\"AMOUNT precision must be <= 10\")"));
+        assertTrue(src.contains("if (pojo.getBirthDate() != null && !ValidationSupport.isValidYyyyMmDd(pojo.getBirthDate())) errors.add(\"BIRTH_DATE must be a valid date in yyyyMMdd format\")"));
+        assertTrue(src.contains("ValidationSupport.throwIfAny(validate(pojo));"));
     }
 }
