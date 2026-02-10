@@ -27,7 +27,7 @@
   <dependencies>
     <dependency>
       <groupId>org.github.dbjo</groupId>
-      <artifactId>dbjo-kafka-publisher</artifactId>
+      <artifactId>dbjo-kafka-messaging</artifactId>
       <version>${project.parent.version}</version>
     </dependency>
     <dependency>
