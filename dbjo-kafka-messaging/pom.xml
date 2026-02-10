@@ -9,7 +9,7 @@
     <version>1.0.0-SNAPSHOT</version>
   </parent>
 
-  <artifactId>dbjo-kafka-publisher</artifactId>
+  <artifactId>dbjo-kafka-messaging</artifactId>
   <packaging>jar</packaging>
 
   <dependencies>
