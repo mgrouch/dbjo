@@ -2,8 +2,13 @@ package org.github.dbjo.kafka;
 
 import org.github.dbjo.meta.features.Partitioned;
 
-public class MutablePartitionKey implements Partitioned {
+import java.io.Serializable;
+
+public class MutablePartitionKey implements Partitioned, Serializable {
     private String partitionKey;
+
+    public MutablePartitionKey() {
+    }
 
     public MutablePartitionKey(String partitionKey) {
         this.partitionKey = partitionKey;
@@ -16,6 +21,8 @@ public class MutablePartitionKey implements Partitioned {
 
     @Override
     public void setPartitionKey(String partitionKey) {
-        this.partitionKey = partitionKey;
+        if (this.partitionKey == null) {
+            this.partitionKey = partitionKey;
+        }
     }
 }
