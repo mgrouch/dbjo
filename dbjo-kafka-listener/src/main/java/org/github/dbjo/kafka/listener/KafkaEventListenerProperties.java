@@ -3,9 +3,10 @@ package org.github.dbjo.kafka.listener;
 import java.time.Duration;
 
 public class KafkaEventListenerProperties {
-    private String bootstrapServers = "localhost:9092";
-    private String topic = "order-events";
-    private String groupId = "order-event-listener-app";
+    private String bootstrapServers;
+    private String topic;
+    private String groupId;
+    private int partition;
     private int partitionCount = 1;
     private Duration pollTimeout = Duration.ofMillis(500);
     private long maxPollIterations = -1L;
@@ -32,6 +33,14 @@ public class KafkaEventListenerProperties {
 
     public void setGroupId(String groupId) {
         this.groupId = groupId;
+    }
+
+    public int getPartition() {
+        return partition;
+    }
+
+    public void setPartition(int partition) {
+        this.partition = partition;
     }
 
     public int getPartitionCount() {
