@@ -1,7 +1,8 @@
-package org.github.dbjo.kafka.listener;
+package org.github.dbjo.kafka.listener.app;
 
 import java.util.Properties;
 import org.github.dbjo.kafka.avro.OrderEvent;
+import org.github.dbjo.kafka.listener.KafkaEventListener;
 
 public class KafkaOrderEventListener extends KafkaEventListener<OrderEvent> {
 

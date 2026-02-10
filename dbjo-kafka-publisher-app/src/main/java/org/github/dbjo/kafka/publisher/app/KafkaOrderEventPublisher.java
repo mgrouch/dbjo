@@ -1,9 +1,10 @@
-package org.github.dbjo.kafka.publisher;
+package org.github.dbjo.kafka.publisher.app;
 
 import java.util.Objects;
 import java.util.Properties;
 import org.github.dbjo.kafka.avro.OrderEvent;
 import org.github.dbjo.kafka.MutablePartitionKey;
+import org.github.dbjo.kafka.publisher.KafkaEventPublisher;
 
 public class KafkaOrderEventPublisher extends KafkaEventPublisher<OrderEvent> {
     public KafkaOrderEventPublisher(String bootstrapServers, String topic, int partitionCount) {

@@ -1,6 +1,5 @@
 package org.github.dbjo.kafka.listener.app;
 
-import org.github.dbjo.kafka.listener.KafkaOrderEventListener;
 import org.github.dbjo.kafka.listener.PartitionedKafkaListenerWorker;
 import org.github.dbjo.kafka.avro.OrderEvent;
 import org.springframework.boot.CommandLineRunner;
