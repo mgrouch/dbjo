@@ -56,7 +56,8 @@ public class KafkaEventPublisher<T extends SpecificRecord> implements AutoClosea
     }
 
     public void publish(T event, Partitioned partitioned) {
-        publishSync(event, partitioned);
+        ProducerRecord<String, byte[]> record = createRecord(event, partitioned);
+        producer.send(record);
     }
 
     public KafkaPublishReceipt publishSync(T event, Partitioned partitioned) {
