@@ -5,13 +5,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "dbjo.kafka.listener")
 public class OrderEventListenerProperties extends KafkaEventListenerProperties {
-    private int partition;
-
-    public int getPartition() {
-        return partition;
-    }
-
-    public void setPartition(int partition) {
-        this.partition = partition;
+    public OrderEventListenerProperties() {
+        setBootstrapServers("localhost:9092");
+        setTopic("order-events");
+        setGroupId("order-event-listener-app");
     }
 }
