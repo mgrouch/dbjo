@@ -10,6 +10,11 @@
       "doc": "Unique identifier for the event."
     },
     {
+      "name": "productId",
+      "type": "string",
+      "doc": "Product identifier used for deterministic partition assignment."
+    },
+    {
       "name": "eventType",
       "type": "string",
       "doc": "Type name for the event."

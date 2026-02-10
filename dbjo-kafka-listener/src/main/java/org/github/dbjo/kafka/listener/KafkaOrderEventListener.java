@@ -14,28 +14,42 @@ import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.github.dbjo.kafka.avro.OrderEvent;
+import org.github.dbjo.meta.features.PartitionId;
 
 public class KafkaOrderEventListener implements AutoCloseable {
     private final KafkaConsumer<String, byte[]> consumer;
-    private final String topic;
+    private final TopicPartition topicPartition;
+    private final int partitionCount;
 
-    public KafkaOrderEventListener(String bootstrapServers, String topic, String groupId) {
-        this(defaultProperties(bootstrapServers, groupId), topic);
+    public KafkaOrderEventListener(
+            String bootstrapServers, String topic, String groupId, int partition, int partitionCount) {
+        this(defaultProperties(bootstrapServers, groupId), topic, partition, partitionCount);
     }
 
-    public KafkaOrderEventListener(Properties properties, String topic) {
+    public KafkaOrderEventListener(Properties properties, String topic, int partition, int partitionCount) {
         if (properties == null) {
             throw new IllegalArgumentException("properties must not be null");
         }
         if (topic == null || topic.isBlank()) {
             throw new IllegalArgumentException("topic must not be null or blank");
         }
+        if (partition < 0) {
+            throw new IllegalArgumentException("partition must be greater than or equal to 0");
+        }
+        if (partitionCount <= 0) {
+            throw new IllegalArgumentException("partitionCount must be greater than 0");
+        }
+        if (partition >= partitionCount) {
+            throw new IllegalArgumentException("partition must be less than partitionCount");
+        }
         this.consumer = new KafkaConsumer<>(properties);
-        this.topic = topic;
-        this.consumer.subscribe(List.of(topic));
+        this.topicPartition = new TopicPartition(topic, partition);
+        this.partitionCount = partitionCount;
+        this.consumer.assign(List.of(topicPartition));
     }
 
     public List<OrderEvent> listen(Duration timeout) {
@@ -43,23 +57,59 @@ public class KafkaOrderEventListener implements AutoCloseable {
     }
 
     public List<OrderEvent> listen(Duration timeout, Consumer<OrderEvent> handler) {
-        if (timeout == null) {
-            throw new IllegalArgumentException("timeout must not be null");
-        }
         if (handler == null) {
             throw new IllegalArgumentException("handler must not be null");
         }
-        ConsumerRecords<String, byte[]> records = consumer.poll(timeout);
-        List<OrderEvent> events = new ArrayList<>();
-        for (ConsumerRecord<String, byte[]> record : records) {
-            OrderEvent event = deserialize(record.value());
+        List<PartitionedOrderEvent> records = listenPartitioned(timeout, this::onPartitionedMessage);
+        List<OrderEvent> events = new ArrayList<>(records.size());
+        for (PartitionedOrderEvent partitionedRecord : records) {
+            OrderEvent event = partitionedRecord.event();
             handler.accept(event);
             events.add(event);
         }
         return events;
     }
 
+    public List<PartitionedOrderEvent> listenPartitioned(Duration timeout) {
+        return listenPartitioned(timeout, this::onPartitionedMessage);
+    }
+
+    public List<PartitionedOrderEvent> listenPartitioned(
+            Duration timeout, Consumer<PartitionedOrderEvent> handler) {
+        if (timeout == null) {
+            throw new IllegalArgumentException("timeout must not be null");
+        }
+        if (handler == null) {
+            throw new IllegalArgumentException("handler must not be null");
+        }
+
+        ConsumerRecords<String, byte[]> records = consumer.poll(timeout);
+        List<PartitionedOrderEvent> events = new ArrayList<>();
+        long lastOffset = -1L;
+        for (ConsumerRecord<String, byte[]> record : records.records(topicPartition)) {
+            OrderEvent event = deserialize(record.value());
+            assertExpectedPartition(record.partition(), event);
+            PartitionedOrderEvent partitionedEvent = new PartitionedOrderEvent(
+                    record.partition(), record.offset(), record.key(), record.timestamp(), event);
+            handler.accept(partitionedEvent);
+            events.add(partitionedEvent);
+            lastOffset = record.offset();
+        }
+
+        if (lastOffset >= 0) {
+            consumer.commitSync();
+        }
+
+        return events;
+    }
+
     public void onMessage(OrderEvent event) {
+        if (event == null) {
+            throw new IllegalArgumentException("event must not be null");
+        }
+    }
+
+    public void onPartitionedMessage(PartitionedOrderEvent event) {
         if (event == null) {
             throw new IllegalArgumentException("event must not be null");
         }
@@ -83,7 +133,20 @@ public class KafkaOrderEventListener implements AutoCloseable {
         properties.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         properties.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
         properties.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        properties.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
         return properties;
+    }
+
+    private void assertExpectedPartition(int actualPartition, OrderEvent event) {
+        String productId = Objects.toString(event.getProductId(), null);
+        Integer expectedPartition = PartitionId.partition(productId, partitionCount);
+        if (expectedPartition == null) {
+            throw new IllegalArgumentException("event.productId must not be null");
+        }
+        if (expectedPartition != actualPartition) {
+            throw new IllegalStateException(
+                    "Received event in unexpected partition. expected=" + expectedPartition + ", actual=" + actualPartition);
+        }
     }
 
     private static OrderEvent deserialize(byte[] payload) {
