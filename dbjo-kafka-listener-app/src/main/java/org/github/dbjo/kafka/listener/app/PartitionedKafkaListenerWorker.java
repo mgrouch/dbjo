@@ -4,7 +4,8 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import org.github.dbjo.kafka.listener.KafkaOrderEventListener;
-import org.github.dbjo.kafka.listener.PartitionedOrderEvent;
+import org.github.dbjo.kafka.listener.PartitionedKafkaEvent;
+import org.github.dbjo.kafka.avro.OrderEvent;
 
 public abstract class PartitionedKafkaListenerWorker {
     private final KafkaOrderEventListener listener;
@@ -19,13 +20,13 @@ public abstract class PartitionedKafkaListenerWorker {
     }
 
     public final void pollOnce() {
-        List<PartitionedOrderEvent> events = listener.listenPartitioned(pollTimeout);
+        List<PartitionedKafkaEvent<OrderEvent>> events = listener.listenPartitioned(pollTimeout);
         if (events.isEmpty()) {
             onEmptyBatch();
             return;
         }
         processBatch(events);
-        for (PartitionedOrderEvent event : events) {
+        for (PartitionedKafkaEvent<OrderEvent> event : events) {
             processMessage(event);
         }
     }
@@ -49,7 +50,7 @@ public abstract class PartitionedKafkaListenerWorker {
         // Default no-op.
     }
 
-    protected abstract void processBatch(List<PartitionedOrderEvent> events);
+    protected abstract void processBatch(List<PartitionedKafkaEvent<OrderEvent>> events);
 
-    protected abstract void processMessage(PartitionedOrderEvent event);
+    protected abstract void processMessage(PartitionedKafkaEvent<OrderEvent> event);
 }

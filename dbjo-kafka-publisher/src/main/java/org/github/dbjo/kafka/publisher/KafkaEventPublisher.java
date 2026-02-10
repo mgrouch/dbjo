@@ -1,0 +1,93 @@
+package org.github.dbjo.kafka.publisher;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.util.Objects;
+import java.util.Properties;
+import org.apache.avro.Schema;
+import org.apache.avro.io.BinaryEncoder;
+import org.apache.avro.io.EncoderFactory;
+import org.apache.avro.specific.SpecificDatumWriter;
+import org.apache.avro.specific.SpecificRecord;
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.serialization.ByteArraySerializer;
+import org.apache.kafka.common.serialization.StringSerializer;
+import org.github.dbjo.meta.features.PartitionId;
+import org.github.dbjo.meta.features.Partitioned;
+
+public class KafkaEventPublisher<T extends SpecificRecord> implements AutoCloseable {
+    private final KafkaProducer<String, byte[]> producer;
+    private final String topic;
+    private final int partitionCount;
+    private final Schema schema;
+
+    public KafkaEventPublisher(String bootstrapServers, String topic, int partitionCount, Schema schema) {
+        this(defaultProperties(bootstrapServers), topic, partitionCount, schema);
+    }
+
+    public KafkaEventPublisher(Properties properties, String topic, int partitionCount, Schema schema) {
+        if (properties == null) {
+            throw new IllegalArgumentException("properties must not be null");
+        }
+        if (topic == null || topic.isBlank()) {
+            throw new IllegalArgumentException("topic must not be null or blank");
+        }
+        if (partitionCount <= 0) {
+            throw new IllegalArgumentException("partitionCount must be greater than 0");
+        }
+        this.schema = Objects.requireNonNull(schema, "schema must not be null");
+        this.producer = new KafkaProducer<>(properties);
+        this.topic = topic;
+        this.partitionCount = partitionCount;
+    }
+
+    public void publish(T event, Partitioned partitioned) {
+        if (event == null) {
+            throw new IllegalArgumentException("event must not be null");
+        }
+        if (partitioned == null) {
+            throw new IllegalArgumentException("partitioned must not be null");
+        }
+
+        String partitionKey = partitioned.getPartitionKey();
+        Integer partition = PartitionId.partition(partitionKey, partitionCount);
+        if (partition == null) {
+            throw new IllegalArgumentException("partitionKey must not be null and partitionCount must be greater than 0");
+        }
+
+        byte[] payload = serialize(event, schema);
+        ProducerRecord<String, byte[]> record = new ProducerRecord<>(topic, partition, partitionKey, payload);
+        producer.send(record);
+    }
+
+    @Override
+    public void close() {
+        producer.close();
+    }
+
+    private static Properties defaultProperties(String bootstrapServers) {
+        if (bootstrapServers == null || bootstrapServers.isBlank()) {
+            throw new IllegalArgumentException("bootstrapServers must not be null or blank");
+        }
+        Properties properties = new Properties();
+        properties.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        properties.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+        properties.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
+        properties.put(ProducerConfig.ACKS_CONFIG, "all");
+        return properties;
+    }
+
+    private static <T extends SpecificRecord> byte[] serialize(T event, Schema schema) {
+        SpecificDatumWriter<T> writer = new SpecificDatumWriter<>(schema);
+        try (ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
+            BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(outputStream, null);
+            writer.write(event, encoder);
+            encoder.flush();
+            return outputStream.toByteArray();
+        } catch (IOException ex) {
+            throw new IllegalStateException("Failed to serialize event", ex);
+        }
+    }
+}
