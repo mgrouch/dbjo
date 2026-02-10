@@ -25,10 +25,10 @@ public class SampleOrderEventWorker extends PartitionedKafkaListenerWorker<Order
     protected void processMessage(PartitionedKafkaEvent<OrderEvent> event) {
         // Implement per-message business logic here.
         LOG.info(
-                "Processing message partition={} offset={} key={} productId={}",
+                "Processing message partition={} offset={} partitionKey={} productId={}",
                 event.partition(),
                 event.offset(),
-                event.key(),
+                event.getPartitionKey(),
                 event.event().getProductId());
     }
 }
