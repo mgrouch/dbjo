@@ -13,33 +13,45 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.github.dbjo.kafka.avro.OrderEvent;
+import org.github.dbjo.meta.features.PartitionId;
 
 public class KafkaOrderEventPublisher implements AutoCloseable {
     private final KafkaProducer<String, byte[]> producer;
     private final String topic;
+    private final int partitionCount;
 
-    public KafkaOrderEventPublisher(String bootstrapServers, String topic) {
-        this(defaultProperties(bootstrapServers), topic);
+    public KafkaOrderEventPublisher(String bootstrapServers, String topic, int partitionCount) {
+        this(defaultProperties(bootstrapServers), topic, partitionCount);
     }
 
-    public KafkaOrderEventPublisher(Properties properties, String topic) {
+    public KafkaOrderEventPublisher(Properties properties, String topic, int partitionCount) {
         if (properties == null) {
             throw new IllegalArgumentException("properties must not be null");
         }
         if (topic == null || topic.isBlank()) {
             throw new IllegalArgumentException("topic must not be null or blank");
         }
+        if (partitionCount <= 0) {
+            throw new IllegalArgumentException("partitionCount must be greater than 0");
+        }
         this.producer = new KafkaProducer<>(properties);
         this.topic = topic;
+        this.partitionCount = partitionCount;
     }
 
     public void publish(OrderEvent event) {
         if (event == null) {
             throw new IllegalArgumentException("event must not be null");
         }
+        String productId = Objects.toString(event.getProductId(), null);
+        Integer partition = PartitionId.partition(productId, partitionCount);
+        if (partition == null) {
+            throw new IllegalArgumentException("event.productId must not be null and partitionCount must be greater than 0");
+        }
+
         byte[] payload = serialize(event);
-        String key = Objects.toString(event.getEventId(), null);
-        ProducerRecord<String, byte[]> record = new ProducerRecord<>(topic, key, payload);
+        String key = productId;
+        ProducerRecord<String, byte[]> record = new ProducerRecord<>(topic, partition, key, payload);
         producer.send(record);
     }
 
