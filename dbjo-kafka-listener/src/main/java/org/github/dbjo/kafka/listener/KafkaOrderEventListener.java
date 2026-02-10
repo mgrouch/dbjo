@@ -43,6 +43,25 @@ public class KafkaOrderEventListener implements AutoCloseable {
     }
 
     public List<OrderEvent> listen(Duration timeout, Consumer<OrderEvent> handler) {
+        if (handler == null) {
+            throw new IllegalArgumentException("handler must not be null");
+        }
+        List<PartitionedOrderEvent> records = listenPartitioned(timeout, this::onPartitionedMessage);
+        List<OrderEvent> events = new ArrayList<>(records.size());
+        for (PartitionedOrderEvent partitionedRecord : records) {
+            OrderEvent event = partitionedRecord.event();
+            handler.accept(event);
+            events.add(event);
+        }
+        return events;
+    }
+
+    public List<PartitionedOrderEvent> listenPartitioned(Duration timeout) {
+        return listenPartitioned(timeout, this::onPartitionedMessage);
+    }
+
+    public List<PartitionedOrderEvent> listenPartitioned(
+            Duration timeout, Consumer<PartitionedOrderEvent> handler) {
         if (timeout == null) {
             throw new IllegalArgumentException("timeout must not be null");
         }
@@ -50,16 +69,24 @@ public class KafkaOrderEventListener implements AutoCloseable {
             throw new IllegalArgumentException("handler must not be null");
         }
         ConsumerRecords<String, byte[]> records = consumer.poll(timeout);
-        List<OrderEvent> events = new ArrayList<>();
+        List<PartitionedOrderEvent> events = new ArrayList<>();
         for (ConsumerRecord<String, byte[]> record : records) {
             OrderEvent event = deserialize(record.value());
-            handler.accept(event);
-            events.add(event);
+            PartitionedOrderEvent partitionedEvent = new PartitionedOrderEvent(
+                    record.partition(), record.offset(), record.key(), record.timestamp(), event);
+            handler.accept(partitionedEvent);
+            events.add(partitionedEvent);
         }
         return events;
     }
 
     public void onMessage(OrderEvent event) {
+        if (event == null) {
+            throw new IllegalArgumentException("event must not be null");
+        }
+    }
+
+    public void onPartitionedMessage(PartitionedOrderEvent event) {
         if (event == null) {
             throw new IllegalArgumentException("event must not be null");
         }
