@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
 import java.util.function.Consumer;
@@ -14,8 +15,10 @@ import org.apache.avro.specific.SpecificDatumReader;
 import org.apache.avro.specific.SpecificRecord;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.ConsumerGroupMetadata;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
@@ -77,6 +80,25 @@ public class KafkaEventListener<T extends SpecificRecord> implements AutoCloseab
     }
 
     public List<PartitionedKafkaEvent<T>> listenPartitioned(Duration timeout, Consumer<PartitionedKafkaEvent<T>> handler) {
+        if (handler == null) {
+            throw new IllegalArgumentException("handler must not be null");
+        }
+
+        ConsumedKafkaBatch<T> batch = pollBatch(timeout);
+        for (PartitionedKafkaEvent<T> event : batch.events()) {
+            handler.accept(event);
+        }
+        if (!batch.offsetsToCommit().isEmpty()) {
+            consumer.commitSync(batch.offsetsToCommit());
+        }
+        return batch.events();
+    }
+
+    public ConsumedKafkaBatch<T> pollBatch(Duration timeout) {
+        return pollBatch(timeout, this::onPartitionedMessage);
+    }
+
+    public ConsumedKafkaBatch<T> pollBatch(Duration timeout, Consumer<PartitionedKafkaEvent<T>> handler) {
         if (timeout == null) {
             throw new IllegalArgumentException("timeout must not be null");
         }
@@ -97,11 +119,12 @@ public class KafkaEventListener<T extends SpecificRecord> implements AutoCloseab
             lastOffset = record.offset();
         }
 
-        if (lastOffset >= 0) {
-            consumer.commitSync();
-        }
-
-        return events;
+        Map<TopicPartition, OffsetAndMetadata> offsets =
+            lastOffset >= 0
+                ? Map.of(topicPartition, new OffsetAndMetadata(lastOffset + 1))
+                : Map.of();
+        ConsumerGroupMetadata groupMetadata = consumer.groupMetadata();
+        return new ConsumedKafkaBatch<>(List.copyOf(events), offsets, groupMetadata);
     }
 
     public void onMessage(T event) {

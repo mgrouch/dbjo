@@ -15,7 +15,10 @@ import org.apache.avro.specific.SpecificRecord;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.clients.consumer.ConsumerGroupMetadata;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.producer.RecordMetadata;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.github.dbjo.meta.features.PartitionId;
@@ -95,6 +98,44 @@ public class KafkaEventPublisher<T extends SpecificRecord> implements AutoClosea
                     metadata.timestamp()
                 ));
             }
+            producer.commitTransaction();
+            return List.copyOf(receipts);
+        } catch (RuntimeException ex) {
+            producer.abortTransaction();
+            throw ex;
+        }
+    }
+
+
+    public List<KafkaPublishReceipt> publishBatchAndCommitOffsetsInTransaction(
+        List<KafkaPublishCommand<T>> commands,
+        java.util.Map<TopicPartition, OffsetAndMetadata> offsetsToCommit,
+        ConsumerGroupMetadata consumerGroupMetadata
+    ) {
+        if (!transactional) {
+            throw new IllegalStateException(
+                "Producer is not transactional. Configure " + ProducerConfig.TRANSACTIONAL_ID_CONFIG + " first"
+            );
+        }
+        Objects.requireNonNull(commands, "commands must not be null");
+        Objects.requireNonNull(offsetsToCommit, "offsetsToCommit must not be null");
+        Objects.requireNonNull(consumerGroupMetadata, "consumerGroupMetadata must not be null");
+
+        List<KafkaPublishReceipt> receipts = new ArrayList<>(commands.size());
+        producer.beginTransaction();
+        try {
+            for (KafkaPublishCommand<T> command : commands) {
+                ProducerRecord<String, byte[]> record = createRecord(command.event(), command.partitioned());
+                RecordMetadata metadata = await(producer.send(record));
+                receipts.add(new KafkaPublishReceipt(
+                    command.outboxId(),
+                    metadata.topic(),
+                    metadata.partition(),
+                    metadata.offset(),
+                    metadata.timestamp()
+                ));
+            }
+            producer.sendOffsetsToTransaction(offsetsToCommit, consumerGroupMetadata);
             producer.commitTransaction();
             return List.copyOf(receipts);
         } catch (RuntimeException ex) {
