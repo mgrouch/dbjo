@@ -1,6 +1,8 @@
 package org.github.dbjo.kafka.listener.app;
 
 import org.github.dbjo.kafka.listener.KafkaOrderEventListener;
+import org.github.dbjo.kafka.listener.PartitionedKafkaListenerWorker;
+import org.github.dbjo.kafka.avro.OrderEvent;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
 
@@ -20,7 +22,7 @@ public class PartitionedOrderEventListenerRunner implements CommandLineRunner {
                 properties.getGroupId(),
                 properties.getPartition(),
                 properties.getPartitionCount())) {
-            PartitionedKafkaListenerWorker worker = new SampleOrderEventWorker(listener, properties);
+            PartitionedKafkaListenerWorker<OrderEvent> worker = new SampleOrderEventWorker(listener, properties);
             worker.run(properties.getMaxPollIterations());
         }
     }

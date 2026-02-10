@@ -1,17 +1,15 @@
-package org.github.dbjo.kafka.listener.app;
+package org.github.dbjo.kafka.listener;
 
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
-import org.github.dbjo.kafka.listener.KafkaOrderEventListener;
-import org.github.dbjo.kafka.listener.PartitionedKafkaEvent;
-import org.github.dbjo.kafka.avro.OrderEvent;
+import org.apache.avro.specific.SpecificRecord;
 
-public abstract class PartitionedKafkaListenerWorker {
-    private final KafkaOrderEventListener listener;
+public abstract class PartitionedKafkaListenerWorker<T extends SpecificRecord> {
+    private final KafkaEventListener<T> listener;
     private final Duration pollTimeout;
 
-    protected PartitionedKafkaListenerWorker(KafkaOrderEventListener listener, Duration pollTimeout) {
+    protected PartitionedKafkaListenerWorker(KafkaEventListener<T> listener, Duration pollTimeout) {
         this.listener = Objects.requireNonNull(listener, "listener must not be null");
         this.pollTimeout = Objects.requireNonNull(pollTimeout, "pollTimeout must not be null");
         if (pollTimeout.isNegative() || pollTimeout.isZero()) {
@@ -20,13 +18,13 @@ public abstract class PartitionedKafkaListenerWorker {
     }
 
     public final void pollOnce() {
-        List<PartitionedKafkaEvent<OrderEvent>> events = listener.listenPartitioned(pollTimeout);
+        List<PartitionedKafkaEvent<T>> events = listener.listenPartitioned(pollTimeout);
         if (events.isEmpty()) {
             onEmptyBatch();
             return;
         }
         processBatch(events);
-        for (PartitionedKafkaEvent<OrderEvent> event : events) {
+        for (PartitionedKafkaEvent<T> event : events) {
             processMessage(event);
         }
     }
@@ -50,7 +48,7 @@ public abstract class PartitionedKafkaListenerWorker {
         // Default no-op.
     }
 
-    protected abstract void processBatch(List<PartitionedKafkaEvent<OrderEvent>> events);
+    protected abstract void processBatch(List<PartitionedKafkaEvent<T>> events);
 
-    protected abstract void processMessage(PartitionedKafkaEvent<OrderEvent> event);
+    protected abstract void processMessage(PartitionedKafkaEvent<T> event);
 }

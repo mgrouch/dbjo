@@ -3,11 +3,12 @@ package org.github.dbjo.kafka.listener.app;
 import java.util.List;
 import org.github.dbjo.kafka.listener.KafkaOrderEventListener;
 import org.github.dbjo.kafka.listener.PartitionedKafkaEvent;
+import org.github.dbjo.kafka.listener.PartitionedKafkaListenerWorker;
 import org.github.dbjo.kafka.avro.OrderEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class SampleOrderEventWorker extends PartitionedKafkaListenerWorker {
+public class SampleOrderEventWorker extends PartitionedKafkaListenerWorker<OrderEvent> {
     private static final Logger LOG = LoggerFactory.getLogger(SampleOrderEventWorker.class);
 
     public SampleOrderEventWorker(KafkaOrderEventListener listener, OrderEventListenerProperties properties) {
