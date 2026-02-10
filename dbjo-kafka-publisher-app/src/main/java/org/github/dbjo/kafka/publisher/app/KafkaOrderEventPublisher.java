@@ -19,7 +19,7 @@ public class KafkaOrderEventPublisher extends KafkaEventPublisher<OrderEvent> {
         if (event == null) {
             throw new IllegalArgumentException("event must not be null");
         }
-        String productId = Objects.toString(event.getProductId(), null);
+        String productId = Objects.toString(event.getProductId(), "");
         publish(event, new MutablePartitionKey(productId));
     }
 
