@@ -40,11 +40,8 @@ public final class OutboxSqlBuilder {
                        %s,
                        CAST('' AS NVARCHAR(100)) AS outbox_id,
                        CAST(0 AS BIGINT) AS sequence_no,
-                       CAST(NULL AS NVARCHAR(255)) AS partition_key,
+                       CAST(NULL AS NVARCHAR(40)) AS partition_key,
                        CAST(0 AS BIGINT) AS occurred_at_epoch_ms,
-                       CAST(NULL AS NVARCHAR(120)) AS lock_owner,
-                       CAST(NULL AS DATETIME2) AS locked_at_utc,
-                       CAST(NULL AS NVARCHAR(255)) AS published_topic,
                        CAST(NULL AS INT) AS published_partition,
                        CAST(NULL AS BIGINT) AS published_offset,
                        CAST(NULL AS DATETIME2) AS published_timestamp_utc,
@@ -55,7 +52,7 @@ public final class OutboxSqlBuilder {
 
                 CREATE UNIQUE INDEX ux_%s_outbox_id ON %s(outbox_id);
                 CREATE UNIQUE INDEX ux_%s_sequence_no ON %s(sequence_no);
-                CREATE INDEX ix_%s_pending ON %s(published_at_utc, lock_owner, sequence_no);
+                CREATE INDEX ix_%s_pending ON %s(published_at_utc, sequence_no);
                 """.formatted(
                 payloadProjection,
                 outboxTableFqn,
@@ -72,11 +69,8 @@ public final class OutboxSqlBuilder {
                 SELECT %s,
                        CAST('' AS VARCHAR(100)) AS outbox_id,
                        CAST(0 AS BIGINT) AS sequence_no,
-                       CAST(NULL AS VARCHAR(255)) AS partition_key,
+                       CAST(NULL AS VARCHAR(40)) AS partition_key,
                        CAST(0 AS BIGINT) AS occurred_at_epoch_ms,
-                       CAST(NULL AS VARCHAR(120)) AS lock_owner,
-                       CAST(NULL AS TIMESTAMP) AS locked_at_utc,
-                       CAST(NULL AS VARCHAR(255)) AS published_topic,
                        CAST(NULL AS INTEGER) AS published_partition,
                        CAST(NULL AS BIGINT) AS published_offset,
                        CAST(NULL AS TIMESTAMP) AS published_timestamp_utc,
@@ -87,7 +81,7 @@ public final class OutboxSqlBuilder {
 
                 CREATE UNIQUE INDEX ux_%s_outbox_id ON %s(outbox_id);
                 CREATE UNIQUE INDEX ux_%s_sequence_no ON %s(sequence_no);
-                CREATE INDEX ix_%s_pending ON %s(published_at_utc, lock_owner, sequence_no);
+                CREATE INDEX ix_%s_pending ON %s(published_at_utc, sequence_no);
                 """.formatted(
                 outboxTableFqn,
                 payloadProjection,

@@ -39,8 +39,11 @@ class OutboxSqlBuilderTest {
         assertTrue(sql.createTableSql().contains("FROM dbo.orders"));
         assertTrue(sql.createTableSql().contains("AS outbox_id"));
         assertTrue(sql.createTableSql().contains("AS sequence_no"));
-        assertTrue(sql.createTableSql().contains("AS partition_key"));
+        assertTrue(sql.createTableSql().contains("CAST(NULL AS NVARCHAR(40)) AS partition_key"));
         assertTrue(sql.createTableSql().contains("AS occurred_at_epoch_ms"));
+        assertTrue(!sql.createTableSql().contains("AS lock_owner"));
+        assertTrue(!sql.createTableSql().contains("AS locked_at_utc"));
+        assertTrue(!sql.createTableSql().contains("AS published_topic"));
         assertTrue(sql.createTableSql().contains("CREATE UNIQUE INDEX"));
         assertTrue(sql.createTableSql().contains("sequence_no"));
         assertTrue(!sql.createTableSql().contains("ALTER TABLE"));
