@@ -16,7 +16,7 @@ class OutboxSqlBuilderTest {
         @Override public String schema() { return "dbo"; }
         @Override public String table() { return "orders"; }
         @Override public String fqn() { return "dbo.orders"; }
-        @Override public String insertSql() { return ""; }
+        @Override public String insertSql() { return "INSERT INTO dbo.orders(order_id, status, customer_id) VALUES (?, ?, ?)"; }
         @Override public String updateByIdSql() { return ""; }
         @Override public String selectAllSql() { return "SELECT order_id, status, customer_id FROM dbo.orders"; }
         @Override public Object[] insertParams(Object e) { return new Object[0]; }
@@ -39,11 +39,14 @@ class OutboxSqlBuilderTest {
         assertTrue(sql.createTableSql().contains("FROM dbo.orders"));
         assertTrue(sql.createTableSql().contains("AS outbox_id"));
         assertTrue(sql.createTableSql().contains("AS sequence_no"));
+        assertTrue(sql.createTableSql().contains("AS partition_key"));
+        assertTrue(sql.createTableSql().contains("AS occurred_at_epoch_ms"));
         assertTrue(sql.createTableSql().contains("CREATE UNIQUE INDEX"));
         assertTrue(sql.createTableSql().contains("sequence_no"));
         assertTrue(!sql.createTableSql().contains("ALTER TABLE"));
 
         assertTrue(sql.claimForUpdateSql().contains("WITH (ROWLOCK, UPDLOCK, READPAST)"));
+        assertTrue(sql.claimForUpdateSql().contains("inserted.partition_key"));
         assertTrue(sql.claimForUpdateSql().contains("inserted.order_id"));
 
         assertTrue(sql.markPublishedSql().contains("UPDATE dbo.order_outbox"));
@@ -53,6 +56,12 @@ class OutboxSqlBuilderTest {
     @Test
     void parsesColumnsFromSelectSql() {
         List<String> columns = OutboxSqlBuilder.parseSelectColumns("SELECT a, b, c FROM t");
+        assertEquals(List.of("a", "b", "c"), columns);
+    }
+
+    @Test
+    void parsesColumnsFromInsertSql() {
+        List<String> columns = OutboxSqlBuilder.parseInsertColumns("INSERT INTO t (a, b, c) VALUES (?, ?, ?)");
         assertEquals(List.of("a", "b", "c"), columns);
     }
 

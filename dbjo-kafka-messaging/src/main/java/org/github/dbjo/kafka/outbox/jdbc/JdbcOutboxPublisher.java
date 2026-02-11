@@ -14,31 +14,27 @@ import org.springframework.transaction.support.TransactionTemplate;
  * Polls outbox rows in order, publishes to Kafka, then marks rows as published.
  */
 public class JdbcOutboxPublisher<T extends SpecificRecord> {
-    private final JdbcOutboxStore store;
+    private final JdbcOutboxStore<T> store;
     private final KafkaEventPublisher<T> publisher;
-    private final OutboxEventCodec<T> codec;
     private final TransactionTemplate transactionTemplate;
     private final String lockOwner;
 
     public JdbcOutboxPublisher(
-        JdbcOutboxStore store,
+        JdbcOutboxStore<T> store,
         KafkaEventPublisher<T> publisher,
-        OutboxEventCodec<T> codec,
         TransactionTemplate transactionTemplate
     ) {
-        this(store, publisher, codec, transactionTemplate, UUID.randomUUID().toString());
+        this(store, publisher, transactionTemplate, UUID.randomUUID().toString());
     }
 
     public JdbcOutboxPublisher(
-        JdbcOutboxStore store,
+        JdbcOutboxStore<T> store,
         KafkaEventPublisher<T> publisher,
-        OutboxEventCodec<T> codec,
         TransactionTemplate transactionTemplate,
         String lockOwner
     ) {
         this.store = Objects.requireNonNull(store, "store must not be null");
         this.publisher = Objects.requireNonNull(publisher, "publisher must not be null");
-        this.codec = Objects.requireNonNull(codec, "codec must not be null");
         this.transactionTemplate = Objects.requireNonNull(transactionTemplate, "transactionTemplate must not be null");
         if (lockOwner == null || lockOwner.isBlank()) {
             throw new IllegalArgumentException("lockOwner must not be null or blank");
@@ -47,7 +43,7 @@ public class JdbcOutboxPublisher<T extends SpecificRecord> {
     }
 
     public List<KafkaPublishReceipt> pollAndPublish(int batchSize) {
-        List<OutboxMessage> claimed = transactionTemplate.execute(status -> store.claimNextBatch(batchSize, lockOwner));
+        List<OutboxMessage<T>> claimed = transactionTemplate.execute(status -> store.claimNextBatch(batchSize, lockOwner));
         if (claimed == null || claimed.isEmpty()) {
             return List.of();
         }
@@ -55,7 +51,7 @@ public class JdbcOutboxPublisher<T extends SpecificRecord> {
         List<KafkaPublishCommand<T>> commands = claimed.stream()
             .map(message -> new KafkaPublishCommand<>(
                 message.outboxId(),
-                codec.decode(message.payload()),
+                message.event(),
                 new MutablePartitionKey(message.partitionKey())
             ))
             .toList();

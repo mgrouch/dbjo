@@ -6,134 +6,92 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
 import org.github.dbjo.kafka.outbox.OutboxStateStore;
 import org.github.dbjo.kafka.publisher.KafkaPublishReceipt;
 import org.github.dbjo.meta.jdbc.DbDialect;
+import org.github.dbjo.meta.jdbc.DbMeta;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.core.namedparam.SqlParameterSource;
 
 /**
- * JDBC outbox store implementation with claim SQL chosen by {@link DbDialect}.
+ * JDBC outbox store implementation with payload columns mapped from generated {@link DbMeta}.
  */
-public class JdbcOutboxStore implements OutboxStateStore {
-    private static final String CLAIM_NEXT_BATCH_MSSQL_SQL = """
-        WITH next_rows AS (
-            SELECT TOP (:batchSize) outbox_id, sequence_no, payload_type, partition_key, payload, occurred_at_epoch_ms
-            FROM kafka_outbox WITH (ROWLOCK, UPDLOCK, READPAST)
-            WHERE published_at_utc IS NULL AND lock_owner IS NULL
-            ORDER BY sequence_no ASC
-        )
-        UPDATE next_rows
-           SET lock_owner = :lockOwner,
-               locked_at_utc = CURRENT_TIMESTAMP
-        OUTPUT inserted.outbox_id,
-               inserted.sequence_no,
-               inserted.payload_type,
-               inserted.partition_key,
-               inserted.payload,
-               inserted.occurred_at_epoch_ms
-        """;
-
-    private static final String CLAIM_NEXT_BATCH_LOCK_SQL = """
-        UPDATE kafka_outbox
-           SET lock_owner = :lockOwner,
-               locked_at_utc = CURRENT_TIMESTAMP
-         WHERE outbox_id IN (
-               SELECT outbox_id
-                 FROM kafka_outbox
-                WHERE published_at_utc IS NULL AND lock_owner IS NULL
-                ORDER BY sequence_no ASC
-                FETCH FIRST :batchSize ROWS ONLY
-         )
-        """;
-
-    private static final String CLAIM_NEXT_BATCH_SELECT_SQL = """
-        SELECT outbox_id, sequence_no, payload_type, partition_key, payload, occurred_at_epoch_ms
-          FROM kafka_outbox
-         WHERE lock_owner = :lockOwner
-           AND published_at_utc IS NULL
-         ORDER BY sequence_no ASC
-         FETCH FIRST :batchSize ROWS ONLY
-        """;
-
-    private static final String INSERT_SQL = """
-        INSERT INTO kafka_outbox (
-            outbox_id,
-            sequence_no,
-            payload_type,
-            partition_key,
-            payload,
-            occurred_at_epoch_ms,
-            created_at_utc
-        )
-        VALUES (
-            :outboxId,
-            :sequenceNo,
-            :payloadType,
-            :partitionKey,
-            :payload,
-            :occurredAtEpochMs,
-            :createdAtUtc
-        )
-        """;
-
-    private static final String MARK_PUBLISHED_SQL = """
-        UPDATE kafka_outbox
-           SET published_topic = :topic,
-               published_partition = :partition,
-               published_offset = :offset,
-               published_timestamp_utc = :publishedTimestampUtc,
-               published_at_utc = CURRENT_TIMESTAMP,
-               lock_owner = NULL,
-               locked_at_utc = NULL
-         WHERE outbox_id = :outboxId
-        """;
+public class JdbcOutboxStore<T> implements OutboxStateStore {
+    private static final String DEFAULT_OUTBOX_TABLE = "kafka_outbox";
 
     private final NamedParameterJdbcTemplate jdbc;
+    private final DbMeta<T> payloadMeta;
     private final DbDialect dialect;
-    private final RowMapper<OutboxMessage> rowMapper;
+    private final String claimForUpdateSql;
+    private final String markPublishedSql;
+    private final String insertSql;
+    private final List<String> payloadColumns;
+    private final List<String> payloadInsertColumns;
+    private final RowMapper<OutboxMessage<T>> rowMapper;
 
-    public JdbcOutboxStore(NamedParameterJdbcTemplate jdbc) {
-        this(jdbc, DbDialect.MSSQL);
+    public JdbcOutboxStore(NamedParameterJdbcTemplate jdbc, DbMeta<T> payloadMeta) {
+        this(jdbc, payloadMeta, DEFAULT_OUTBOX_TABLE, DbDialect.MSSQL);
     }
 
-    public JdbcOutboxStore(NamedParameterJdbcTemplate jdbc, DbDialect dialect) {
+    public JdbcOutboxStore(NamedParameterJdbcTemplate jdbc, DbMeta<T> payloadMeta, DbDialect dialect) {
+        this(jdbc, payloadMeta, DEFAULT_OUTBOX_TABLE, dialect);
+    }
+
+    public JdbcOutboxStore(
+        NamedParameterJdbcTemplate jdbc,
+        DbMeta<T> payloadMeta,
+        String outboxTableFqn,
+        DbDialect dialect
+    ) {
         this.jdbc = Objects.requireNonNull(jdbc, "jdbc must not be null");
+        this.payloadMeta = Objects.requireNonNull(payloadMeta, "payloadMeta must not be null");
         this.dialect = Objects.requireNonNull(dialect, "dialect must not be null");
+
+        OutboxSqlBuilder.OutboxSql outboxSql = OutboxSqlBuilder.build(payloadMeta, outboxTableFqn, dialect);
+        this.claimForUpdateSql = outboxSql.claimForUpdateSql();
+        this.markPublishedSql = outboxSql.markPublishedSql();
+        this.payloadColumns = outboxSql.payloadColumns();
+        this.payloadInsertColumns = OutboxSqlBuilder.parseInsertColumns(payloadMeta.insertSql());
+        this.insertSql = buildInsertSql(outboxTableFqn, payloadColumns);
+
         this.rowMapper = new RowMapper<>() {
             @Override
-            public OutboxMessage mapRow(ResultSet rs, int rowNum) throws SQLException {
-                return new OutboxMessage(
+            public OutboxMessage<T> mapRow(ResultSet rs, int rowNum) throws SQLException {
+                return new OutboxMessage<>(
                     rs.getString("outbox_id"),
                     rs.getLong("sequence_no"),
-                    rs.getString("payload_type"),
                     rs.getString("partition_key"),
-                    rs.getBytes("payload"),
+                    payloadMeta.fromRow(rs),
                     rs.getLong("occurred_at_epoch_ms")
                 );
             }
         };
     }
 
-    public void append(OutboxMessage message) {
+    public void append(OutboxMessage<T> message) {
         Objects.requireNonNull(message, "message must not be null");
+
         MapSqlParameterSource params = new MapSqlParameterSource()
             .addValue("outboxId", message.outboxId())
             .addValue("sequenceNo", message.sequenceNo())
-            .addValue("payloadType", message.payloadType())
             .addValue("partitionKey", message.partitionKey())
-            .addValue("payload", message.payload())
             .addValue("occurredAtEpochMs", message.occurredAtEpochMs())
             .addValue("createdAtUtc", Timestamp.from(Instant.now()));
-        jdbc.update(INSERT_SQL, params);
+
+        Map<String, Object> payloadValueByColumn = toPayloadColumnValueMap(message.event());
+        payloadColumns.forEach(column -> params.addValue(column, payloadValueByColumn.get(column)));
+
+        jdbc.update(insertSql, params);
     }
 
-    public List<OutboxMessage> claimNextBatch(int batchSize, String lockOwner) {
+    public List<OutboxMessage<T>> claimNextBatch(int batchSize, String lockOwner) {
         if (batchSize <= 0) {
             throw new IllegalArgumentException("batchSize must be > 0");
         }
@@ -145,11 +103,12 @@ public class JdbcOutboxStore implements OutboxStateStore {
             "lockOwner", lockOwner
         );
 
-        List<OutboxMessage> messages = switch (dialect) {
-            case MSSQL -> jdbc.query(CLAIM_NEXT_BATCH_MSSQL_SQL, params, rowMapper);
+        List<OutboxMessage<T>> messages = switch (dialect) {
+            case MSSQL -> jdbc.query(claimForUpdateSql, params, rowMapper);
             case SYBASE, HSQL, ORACLE -> {
-                jdbc.update(CLAIM_NEXT_BATCH_LOCK_SQL, params);
-                yield jdbc.query(CLAIM_NEXT_BATCH_SELECT_SQL, params, rowMapper);
+                String[] statements = claimForUpdateSql.split(";\\s*\\n", 2);
+                jdbc.update(statements[0], params);
+                yield jdbc.query(statements[1], params, rowMapper);
             }
         };
 
@@ -173,6 +132,44 @@ public class JdbcOutboxStore implements OutboxStateStore {
                 .addValue("offset", receipt.offset())
                 .addValue("publishedTimestampUtc", Timestamp.from(Instant.ofEpochMilli(receipt.timestamp()))))
             .toArray(SqlParameterSource[]::new);
-        jdbc.batchUpdate(MARK_PUBLISHED_SQL, batch);
+        jdbc.batchUpdate(markPublishedSql, batch);
+    }
+
+    private Map<String, Object> toPayloadColumnValueMap(T event) {
+        Object[] values = payloadMeta.insertParams(event);
+        if (values.length != payloadInsertColumns.size()) {
+            throw new IllegalStateException("payloadMeta insertParams size must match parsed insert columns");
+        }
+        Map<String, Object> byInsertColumn = new HashMap<>(values.length);
+        for (int i = 0; i < values.length; i++) {
+            byInsertColumn.put(payloadInsertColumns.get(i), values[i]);
+        }
+        return byInsertColumn;
+    }
+
+    private static String buildInsertSql(String outboxTableFqn, List<String> payloadColumns) {
+        String payloadColumnSql = payloadColumns.stream().collect(Collectors.joining(",\n            "));
+        String payloadValueSql = payloadColumns.stream()
+            .map(column -> ":" + column)
+            .collect(Collectors.joining(",\n            "));
+
+        return """
+            INSERT INTO %s (
+                outbox_id,
+                sequence_no,
+                partition_key,
+                occurred_at_epoch_ms,
+                created_at_utc,
+                %s
+            )
+            VALUES (
+                :outboxId,
+                :sequenceNo,
+                :partitionKey,
+                :occurredAtEpochMs,
+                :createdAtUtc,
+                %s
+            )
+            """.formatted(outboxTableFqn, payloadColumnSql, payloadValueSql);
     }
 }
