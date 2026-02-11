@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Properties;
+import java.util.function.Function;
 import org.apache.avro.Schema;
 import org.apache.avro.io.BinaryEncoder;
 import org.apache.avro.io.EncoderFactory;
@@ -105,6 +106,22 @@ public class KafkaEventPublisher<T extends SpecificRecord> implements AutoClosea
             producer.abortTransaction();
             throw ex;
         }
+    }
+
+    public List<KafkaPublishReceipt> publishBatchInTransaction(
+        List<T> events,
+        Function<T, Partitioned> partitionedResolver
+    ) {
+        Objects.requireNonNull(events, "events must not be null");
+        Objects.requireNonNull(partitionedResolver, "partitionedResolver must not be null");
+        if (events.isEmpty()) {
+            return List.of();
+        }
+
+        List<KafkaPublishCommand<T>> commands = events.stream()
+            .map(event -> new KafkaPublishCommand<T>(null, event, partitionedResolver.apply(event)))
+            .toList();
+        return publishBatchInTransaction(commands);
     }
 
 
