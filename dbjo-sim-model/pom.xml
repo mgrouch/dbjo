@@ -145,7 +145,7 @@
                                 <arg>--enumPkg=org.github.dbjo.generated.model.enums</arg>
                                 <arg>--enumIncludeViews=false</arg>
                                 <arg>--enumOrderBySortOrderIfPresent=true</arg>
-                                <arg>--outboxEntity=Order</arg>
+                                <arg>--outboxEntity=Purchase</arg>
                             </args>
                         </configuration>
                     </execution>
