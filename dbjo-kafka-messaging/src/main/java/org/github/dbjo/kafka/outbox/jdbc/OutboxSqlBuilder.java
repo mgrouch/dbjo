@@ -11,8 +11,8 @@ import org.github.dbjo.meta.jdbc.DbMeta;
 /**
  * Builds outbox SQL from an already-generated {@link DbMeta} payload table mapping.
  */
-public final class MsSqlOutboxSqlBuilder {
-    private MsSqlOutboxSqlBuilder() {}
+public final class OutboxSqlBuilder {
+    private OutboxSqlBuilder() {}
 
     public static OutboxSql build(DbMeta<?> payloadMeta, String outboxTableFqn) {
         return build(payloadMeta, outboxTableFqn, DbDialect.MSSQL);

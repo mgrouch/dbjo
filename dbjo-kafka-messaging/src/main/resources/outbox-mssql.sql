@@ -1,5 +1,5 @@
 -- Generate concrete payload columns from the generated DbMeta for the object type
--- you persist in the outbox (see MsSqlOutboxSqlBuilder). This script is a template.
+-- you persist in the outbox (see OutboxSqlBuilder). This script is a template.
 --
 -- sqlcmd variables expected:
 --   OUTBOX_TABLE     e.g. dbo.order_outbox
