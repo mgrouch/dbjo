@@ -40,6 +40,8 @@ public final class OutboxSqlBuilder {
                        %s,
                        CAST('' AS NVARCHAR(100)) AS outbox_id,
                        CAST(0 AS BIGINT) AS sequence_no,
+                       CAST(NULL AS NVARCHAR(255)) AS partition_key,
+                       CAST(0 AS BIGINT) AS occurred_at_epoch_ms,
                        CAST(NULL AS NVARCHAR(120)) AS lock_owner,
                        CAST(NULL AS DATETIME2) AS locked_at_utc,
                        CAST(NULL AS NVARCHAR(255)) AS published_topic,
@@ -70,6 +72,8 @@ public final class OutboxSqlBuilder {
                 SELECT %s,
                        CAST('' AS VARCHAR(100)) AS outbox_id,
                        CAST(0 AS BIGINT) AS sequence_no,
+                       CAST(NULL AS VARCHAR(255)) AS partition_key,
+                       CAST(0 AS BIGINT) AS occurred_at_epoch_ms,
                        CAST(NULL AS VARCHAR(120)) AS lock_owner,
                        CAST(NULL AS TIMESTAMP) AS locked_at_utc,
                        CAST(NULL AS VARCHAR(255)) AS published_topic,
@@ -103,6 +107,8 @@ public final class OutboxSqlBuilder {
                     SELECT TOP (:batchSize)
                            outbox_id,
                            sequence_no,
+                           partition_key,
+                           occurred_at_epoch_ms,
                            %s
                     FROM %s WITH (ROWLOCK, UPDLOCK, READPAST)
                     WHERE published_at_utc IS NULL AND lock_owner IS NULL
@@ -113,6 +119,8 @@ public final class OutboxSqlBuilder {
                        locked_at_utc = CURRENT_TIMESTAMP
                 OUTPUT inserted.outbox_id,
                        inserted.sequence_no,
+                       inserted.partition_key,
+                       inserted.occurred_at_epoch_ms,
                        %s
                 """.formatted(payloadProjection, outboxTableFqn, insertedPayloadProjection);
             case SYBASE, HSQL, ORACLE -> """
@@ -129,6 +137,8 @@ public final class OutboxSqlBuilder {
 
                 SELECT outbox_id,
                        sequence_no,
+                       partition_key,
+                       occurred_at_epoch_ms,
                        %s
                   FROM %s
                  WHERE lock_owner = :lockOwner
@@ -165,6 +175,24 @@ public final class OutboxSqlBuilder {
             throw new IllegalArgumentException("Unsupported selectAllSql format: " + selectAllSql);
         }
         String cols = base.substring("SELECT ".length(), fromIx).trim();
+        return Arrays.stream(cols.split(","))
+            .map(String::trim)
+            .filter(s -> !s.isEmpty())
+            .collect(Collectors.toList());
+    }
+
+    static List<String> parseInsertColumns(String insertSql) {
+        String base = DbMeta.stripTrailingSemicolon(insertSql);
+        int valuesIx = indexOfIgnoreCase(base, " VALUES");
+        int firstParenIx = base.indexOf('(');
+        if (firstParenIx <= 0 || valuesIx <= firstParenIx) {
+            throw new IllegalArgumentException("Unsupported insertSql format: " + insertSql);
+        }
+        int closeParenIx = base.lastIndexOf(')', valuesIx);
+        if (closeParenIx <= firstParenIx) {
+            throw new IllegalArgumentException("Unsupported insertSql format: " + insertSql);
+        }
+        String cols = base.substring(firstParenIx + 1, closeParenIx).trim();
         return Arrays.stream(cols.split(","))
             .map(String::trim)
             .filter(s -> !s.isEmpty())
