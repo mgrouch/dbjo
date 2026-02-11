@@ -6,6 +6,7 @@ import org.github.dbjo.codegen.db.DbSchemaGenerator;
 import org.github.dbjo.codegen.entity.EntityGenerator;
 import org.github.dbjo.codegen.entity.PojoValidatorGenerator;
 import org.github.dbjo.meta.db.TableModel;
+import org.github.dbjo.codegen.outbox.OutboxCreateTableSqlGenerator;
 import org.github.dbjo.codegen.proto.ProtoGenerator;
 import org.github.dbjo.codegen.proto.ProtocInvoker;
 import org.github.dbjo.codegen.query.QueryTermsGenerator;
@@ -141,6 +142,12 @@ public final class DbjoCodegen {
             if (cfg.runMode().runMapper()) {
                 int n = new ProtoMapperGenerator(cfg).generateAll(tables);
                 System.out.println("Generated Proto mapper(s): " + n);
+                System.out.println();
+            }
+
+            if (cfg.runMode().runOutboxSql()) {
+                var outFile = new OutboxCreateTableSqlGenerator(cfg).generate(tables);
+                System.out.println("Generated outbox CREATE TABLE SQL: " + outFile.toAbsolutePath());
                 System.out.println();
             }
         }

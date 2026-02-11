@@ -25,7 +25,8 @@ public record Config(
         Validator validator,
         JdbcMeta jdbcMeta,
         JdbcDao jdbcDao,
-        DbSchema dbSchema
+        DbSchema dbSchema,
+        Outbox outbox
 ) {
     // defaults
     public static final String DEFAULT_URL    = "jdbc:hsqldb:hsql://localhost:9001/dbjo";
@@ -80,6 +81,8 @@ public record Config(
 
     // DB schema meta generator package (NOT Rocks schema)
     public static final String DEFAULT_DB_SCHEMA_PKG = "org.github.dbjo.generated.model.dbschema";
+
+    public static final String DEFAULT_OUTBOX_SQL_DIR = "outbox-sql";
 
     // sections
 
@@ -144,9 +147,11 @@ public record Config(
 
     public record DbSchema(String dbSchemaPkg) {}
 
+    public record Outbox(Path outboxSqlDir, String outboxTableFqn, String outboxEntity) {}
+
     // run mode
     public enum RunMode {
-        ALL, PROTO, ENUMS, ENTITY, QUERY, DAO, MAPPER, VALIDATOR, RDB, DBMETA, JDBCDAO, SCHEMA;
+        ALL, PROTO, ENUMS, ENTITY, QUERY, DAO, MAPPER, VALIDATOR, RDB, DBMETA, JDBCDAO, SCHEMA, OUTBOXSQL;
 
         public boolean runProto()   { return this == ALL || this == PROTO; }
         public boolean runEnums()   { return this == ALL || this == ENUMS; }
@@ -159,6 +164,7 @@ public record Config(
         public boolean runDbMeta()  { return this == ALL || this == DBMETA; }
         public boolean runJdbcDao() { return this == ALL || this == JDBCDAO; }
         public boolean runSchema()  { return this == ALL || this == SCHEMA; }
+        public boolean runOutboxSql() { return this == ALL || this == OUTBOXSQL; }
 
         public static RunMode parse(String s) {
             if (s == null) return ALL;
@@ -175,8 +181,9 @@ public record Config(
                 case "dbmeta", "jdbc" -> DBMETA;
                 case "jdbcdao", "jdbc-daos", "jdbcdaos" -> JDBCDAO;
                 case "schema", "dbschema" -> SCHEMA;
+                case "outboxsql", "outbox-sql", "outbox" -> OUTBOXSQL;
                 default -> throw new IllegalArgumentException("Unknown --run=" + s +
-                        " (use all|proto|enums|entity|query|dao|mapper|validator|rdb|dbmeta|jdbcdao|schema)");
+                        " (use all|proto|enums|entity|query|dao|mapper|validator|rdb|dbmeta|jdbcdao|schema|outboxsql)");
             };
         }
     }
@@ -254,6 +261,11 @@ public record Config(
 
     // db schema meta pkg
     public String dbSchemaPkg(){ return dbSchema.dbSchemaPkg(); }
+
+    // outbox
+    public Path outboxSqlDir() { return outbox.outboxSqlDir(); }
+    public String outboxTableFqn() { return outbox.outboxTableFqn(); }
+    public String outboxEntity() { return outbox.outboxEntity(); }
 
     // factory
     public static Config from(ArgMap am) {
@@ -352,6 +364,11 @@ public record Config(
         // DB schema meta package
         String dbSchemaPkg = am.get("dbSchemaPkg", System.getProperty("dbjo.dbSchemaPkg", DEFAULT_DB_SCHEMA_PKG));
 
+        // Outbox SQL
+        Path outboxSqlDir = Paths.get(am.get("outboxSqlDir", outBase.resolve(DEFAULT_OUTBOX_SQL_DIR).toString()));
+        String outboxTableFqn = am.get("outboxTableFqn", "").trim();
+        String outboxEntity = am.get("outboxEntity", "").trim();
+
         return new Config(
                 new Db(driver, url, user, pass),
                 new Output(outBase, overwrite, codegenOutJava),
@@ -369,7 +386,8 @@ public record Config(
                 new Validator(validatorPkg, validatorSuffix),
                 new JdbcMeta(dbMetaPkg),
                 new JdbcDao(jdbcDaoPkg, jdbcDaoClassSuffix, jdbcDaoBaseClass),
-                new DbSchema(dbSchemaPkg)
+                new DbSchema(dbSchemaPkg),
+                new Outbox(outboxSqlDir, outboxTableFqn, outboxEntity)
         );
     }
 

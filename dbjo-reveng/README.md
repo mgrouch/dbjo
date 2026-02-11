@@ -72,6 +72,20 @@ expects typical JDBC + output + filtering parameters.
   * `auto` (default): quote when needed (keywords, special chars, case)
   * `always`: quote schema/table/column identifiers aggressively
 
+## Outbox SQL generator
+
+You can generate a single `.sql` script for outbox table creation from one selected entity table.
+
+Run mode:
+
+* `--run=outboxsql`
+
+Outbox-specific flags:
+
+* `--outboxEntity=<table>`: source payload table name (required when filters match multiple tables)
+* `--outboxTableFqn=<schema.table>`: explicit outbox table name (default: `<schema>.<table>_outbox`)
+* `--outboxSqlDir=<path>`: output directory for generated `.sql` (default: `<outBase>/outbox-sql`)
+
 ## Enum overrides
 
 If you have enum tables or want to treat certain columns as enums, `EnumOverrideIndex`
