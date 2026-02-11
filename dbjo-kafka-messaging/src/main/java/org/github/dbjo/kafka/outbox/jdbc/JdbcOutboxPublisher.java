@@ -3,33 +3,33 @@ package org.github.dbjo.kafka.outbox.jdbc;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
-import org.apache.avro.specific.SpecificRecord;
 import org.github.dbjo.kafka.MutablePartitionKey;
+import org.github.dbjo.kafka.avro.OrderEvent;
 import org.github.dbjo.kafka.publisher.KafkaEventPublisher;
 import org.github.dbjo.kafka.publisher.KafkaPublishCommand;
 import org.github.dbjo.kafka.publisher.KafkaPublishReceipt;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * Polls MS SQL outbox rows in order, publishes to Kafka, then marks rows as published.
+ * Polls MS SQL order outbox rows in order, publishes to Kafka, then marks rows as published.
  */
-public class JdbcOutboxPublisher<T extends SpecificRecord> {
-    private final MsSqlJdbcOutboxStore<T> store;
-    private final KafkaEventPublisher<T> publisher;
+public class JdbcOutboxPublisher {
+    private final MsSqlJdbcOutboxStore store;
+    private final KafkaEventPublisher<OrderEvent> publisher;
     private final TransactionTemplate transactionTemplate;
     private final String lockOwner;
 
     public JdbcOutboxPublisher(
-        MsSqlJdbcOutboxStore<T> store,
-        KafkaEventPublisher<T> publisher,
+        MsSqlJdbcOutboxStore store,
+        KafkaEventPublisher<OrderEvent> publisher,
         TransactionTemplate transactionTemplate
     ) {
         this(store, publisher, transactionTemplate, UUID.randomUUID().toString());
     }
 
     public JdbcOutboxPublisher(
-        MsSqlJdbcOutboxStore<T> store,
-        KafkaEventPublisher<T> publisher,
+        MsSqlJdbcOutboxStore store,
+        KafkaEventPublisher<OrderEvent> publisher,
         TransactionTemplate transactionTemplate,
         String lockOwner
     ) {
@@ -43,16 +43,16 @@ public class JdbcOutboxPublisher<T extends SpecificRecord> {
     }
 
     public List<KafkaPublishReceipt> pollAndPublish(int batchSize) {
-        List<OutboxMessage<T>> claimed = transactionTemplate.execute(status -> store.claimNextBatch(batchSize, lockOwner));
+        List<OutboxMessage> claimed = transactionTemplate.execute(status -> store.claimNextBatch(batchSize, lockOwner));
         if (claimed == null || claimed.isEmpty()) {
             return List.of();
         }
 
-        List<KafkaPublishCommand<T>> commands = claimed.stream()
+        List<KafkaPublishCommand<OrderEvent>> commands = claimed.stream()
             .map(message -> new KafkaPublishCommand<>(
                 message.outboxId(),
-                message.event(),
-                new MutablePartitionKey(message.partitionKey())
+                message.toOrderEvent(),
+                new MutablePartitionKey(message.productId())
             ))
             .toList();
 

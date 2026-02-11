@@ -1,13 +1,15 @@
 package org.github.dbjo.kafka.outbox.jdbc;
 
 import java.util.Objects;
-import org.apache.avro.specific.SpecificRecord;
+import org.github.dbjo.kafka.avro.OrderEvent;
 
-public record OutboxMessage<T extends SpecificRecord>(
+public record OutboxMessage(
     String outboxId,
     long sequenceNo,
-    String partitionKey,
-    T event
+    String eventId,
+    String productId,
+    String eventType,
+    long occurredAtEpochMs
 ) {
     public OutboxMessage {
         if (outboxId == null || outboxId.isBlank()) {
@@ -16,9 +18,32 @@ public record OutboxMessage<T extends SpecificRecord>(
         if (sequenceNo <= 0) {
             throw new IllegalArgumentException("sequenceNo must be > 0");
         }
-        if (partitionKey == null || partitionKey.isBlank()) {
-            throw new IllegalArgumentException("partitionKey must not be null or blank");
+        if (eventId == null || eventId.isBlank()) {
+            throw new IllegalArgumentException("eventId must not be null or blank");
         }
-        Objects.requireNonNull(event, "event must not be null");
+        if (productId == null || productId.isBlank()) {
+            throw new IllegalArgumentException("productId must not be null or blank");
+        }
+        if (eventType == null || eventType.isBlank()) {
+            throw new IllegalArgumentException("eventType must not be null or blank");
+        }
+        if (occurredAtEpochMs <= 0) {
+            throw new IllegalArgumentException("occurredAtEpochMs must be > 0");
+        }
+    }
+
+    public OutboxMessage(String outboxId, long sequenceNo, OrderEvent event) {
+        this(
+            outboxId,
+            sequenceNo,
+            Objects.requireNonNull(event, "event must not be null").getEventId().toString(),
+            event.getProductId().toString(),
+            event.getEventType().toString(),
+            event.getOccurredAtEpochMs()
+        );
+    }
+
+    public OrderEvent toOrderEvent() {
+        return new OrderEvent(eventId, productId, eventType, occurredAtEpochMs);
     }
 }
