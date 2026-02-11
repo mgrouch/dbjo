@@ -37,8 +37,11 @@ class OutboxSqlBuilderTest {
         assertTrue(sql.createTableSql().contains("SELECT TOP (0)"));
         assertTrue(sql.createTableSql().contains("INTO dbo.order_outbox"));
         assertTrue(sql.createTableSql().contains("FROM dbo.orders"));
+        assertTrue(sql.createTableSql().contains("AS outbox_id"));
+        assertTrue(sql.createTableSql().contains("AS sequence_no"));
         assertTrue(sql.createTableSql().contains("CREATE UNIQUE INDEX"));
         assertTrue(sql.createTableSql().contains("sequence_no"));
+        assertTrue(!sql.createTableSql().contains("ALTER TABLE"));
 
         assertTrue(sql.claimForUpdateSql().contains("WITH (ROWLOCK, UPDLOCK, READPAST)"));
         assertTrue(sql.claimForUpdateSql().contains("inserted.order_id"));
@@ -57,6 +60,7 @@ class OutboxSqlBuilderTest {
     void buildsSqlForOtherSupportedDialects() {
         OutboxSqlBuilder.OutboxSql hsqlSql = OutboxSqlBuilder.build(META, "dbo.order_outbox", DbDialect.HSQL);
         assertTrue(hsqlSql.createTableSql().contains("CREATE TABLE dbo.order_outbox AS"));
+        assertTrue(hsqlSql.createTableSql().contains("AS outbox_id"));
         assertTrue(hsqlSql.claimForUpdateSql().contains("FETCH FIRST :batchSize ROWS ONLY"));
 
         OutboxSqlBuilder.OutboxSql sybaseSql = OutboxSqlBuilder.build(META, "dbo.order_outbox", DbDialect.SYBASE);
