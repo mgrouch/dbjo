@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class MsSqlOutboxSqlBuilderTest {
+class OutboxSqlBuilderTest {
     private static final DbMeta<Object> META = new DbMeta<>() {
         @Override public String schema() { return "dbo"; }
         @Override public String table() { return "orders"; }
@@ -31,7 +31,7 @@ class MsSqlOutboxSqlBuilderTest {
 
     @Test
     void buildsCreateClaimAndUpdateSqlFromDbMeta() {
-        MsSqlOutboxSqlBuilder.OutboxSql sql = MsSqlOutboxSqlBuilder.build(META, "dbo.order_outbox");
+        OutboxSqlBuilder.OutboxSql sql = OutboxSqlBuilder.build(META, "dbo.order_outbox");
 
         assertEquals(List.of("order_id", "status", "customer_id"), sql.payloadColumns());
         assertTrue(sql.createTableSql().contains("SELECT TOP (0)"));
@@ -49,21 +49,21 @@ class MsSqlOutboxSqlBuilderTest {
 
     @Test
     void parsesColumnsFromSelectSql() {
-        List<String> columns = MsSqlOutboxSqlBuilder.parseSelectColumns("SELECT a, b, c FROM t");
+        List<String> columns = OutboxSqlBuilder.parseSelectColumns("SELECT a, b, c FROM t");
         assertEquals(List.of("a", "b", "c"), columns);
     }
 
     @Test
     void buildsSqlForOtherSupportedDialects() {
-        MsSqlOutboxSqlBuilder.OutboxSql hsqlSql = MsSqlOutboxSqlBuilder.build(META, "dbo.order_outbox", DbDialect.HSQL);
+        OutboxSqlBuilder.OutboxSql hsqlSql = OutboxSqlBuilder.build(META, "dbo.order_outbox", DbDialect.HSQL);
         assertTrue(hsqlSql.createTableSql().contains("CREATE TABLE dbo.order_outbox AS"));
         assertTrue(hsqlSql.claimForUpdateSql().contains("FETCH FIRST :batchSize ROWS ONLY"));
 
-        MsSqlOutboxSqlBuilder.OutboxSql sybaseSql = MsSqlOutboxSqlBuilder.build(META, "dbo.order_outbox", DbDialect.SYBASE);
+        OutboxSqlBuilder.OutboxSql sybaseSql = OutboxSqlBuilder.build(META, "dbo.order_outbox", DbDialect.SYBASE);
         assertTrue(sybaseSql.createTableSql().contains("SELECT TOP (0)"));
         assertTrue(sybaseSql.claimForUpdateSql().contains("FETCH FIRST :batchSize ROWS ONLY"));
 
-        MsSqlOutboxSqlBuilder.OutboxSql oracleSql = MsSqlOutboxSqlBuilder.build(META, "dbo.order_outbox", DbDialect.ORACLE);
+        OutboxSqlBuilder.OutboxSql oracleSql = OutboxSqlBuilder.build(META, "dbo.order_outbox", DbDialect.ORACLE);
         assertTrue(oracleSql.createTableSql().contains("CREATE TABLE dbo.order_outbox AS"));
         assertTrue(oracleSql.claimForUpdateSql().contains("FETCH FIRST :batchSize ROWS ONLY"));
     }
