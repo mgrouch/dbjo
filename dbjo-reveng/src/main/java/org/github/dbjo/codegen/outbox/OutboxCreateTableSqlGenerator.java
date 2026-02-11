@@ -1,6 +1,7 @@
 package org.github.dbjo.codegen.outbox;
 
 import org.github.dbjo.codegen.Config;
+import org.github.dbjo.meta.db.Col;
 import org.github.dbjo.meta.db.TableModel;
 import org.github.dbjo.meta.db.TableRef;
 
@@ -11,12 +12,23 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
  * Generates a single SQL script with outbox CREATE TABLE statement based on one selected entity table.
  */
 public final class OutboxCreateTableSqlGenerator {
+    private static final Set<String> LENGTH_TYPES = Set.of(
+        "CHAR", "VARCHAR", "NCHAR", "NVARCHAR", "BINARY", "VARBINARY"
+    );
+    private static final Set<String> PRECISION_SCALE_TYPES = Set.of(
+        "DECIMAL", "NUMERIC"
+    );
+    private static final Set<String> PRECISION_TYPES = Set.of(
+        "FLOAT"
+    );
+
     private final Config cfg;
 
     public OutboxCreateTableSqlGenerator(Config cfg) {
@@ -27,35 +39,30 @@ public final class OutboxCreateTableSqlGenerator {
         TableModel selected = selectTable(tables);
         String outboxTableFqn = resolveOutboxTableFqn(selected.table());
 
-        String payloadProjection = selected.cols().stream()
-            .map(c -> c.colName())
-            .collect(Collectors.joining(",\n       "));
+        String payloadColumns = selected.cols().stream()
+            .map(this::columnDefinition)
+            .collect(Collectors.joining(",\n    "));
 
-        String sourceTableFqn = fqn(selected.table());
         String constraintPrefix = sanitizeForConstraint(outboxTableFqn);
 
         String sql = """
-            SELECT TOP (0)
-                   %s,
-                   CAST('' AS NVARCHAR(100)) AS outbox_id,
-                   CAST(0 AS BIGINT) AS sequence_no,
-                   CAST(NULL AS NVARCHAR(255)) AS partition_key,
-                   CAST(0 AS BIGINT) AS occurred_at_epoch_ms,
-                   CAST(NULL AS NVARCHAR(120)) AS lock_owner,
-                   CAST(NULL AS DATETIME2) AS locked_at_utc,
-                   CAST(NULL AS NVARCHAR(255)) AS published_topic,
-                   CAST(NULL AS INT) AS published_partition,
-                   CAST(NULL AS BIGINT) AS published_offset,
-                   CAST(NULL AS DATETIME2) AS published_timestamp_utc,
-                   CAST(NULL AS DATETIME2) AS published_at_utc,
-                   CAST(CURRENT_TIMESTAMP AS DATETIME2) AS created_at_utc
-              INTO %s
-              FROM %s;
+            CREATE TABLE %s (
+                %s,
+                outbox_id NVARCHAR(100) NOT NULL,
+                sequence_no BIGINT NOT NULL,
+                partition_key NVARCHAR(40) NULL,
+                occurred_at_epoch_ms BIGINT NOT NULL,
+                published_partition INT NULL,
+                published_offset BIGINT NULL,
+                published_timestamp_utc DATETIME2 NULL,
+                published_at_utc DATETIME2 NULL,
+                created_at_utc DATETIME2 NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
 
             CREATE UNIQUE INDEX ux_%s_outbox_id ON %s(outbox_id);
             CREATE UNIQUE INDEX ux_%s_sequence_no ON %s(sequence_no);
-            CREATE INDEX ix_%s_pending ON %s(published_at_utc, lock_owner, sequence_no);
-            """.formatted(payloadProjection, outboxTableFqn, sourceTableFqn,
+            CREATE INDEX ix_%s_pending ON %s(published_at_utc, sequence_no);
+            """.formatted(outboxTableFqn, payloadColumns,
             constraintPrefix, outboxTableFqn,
             constraintPrefix, outboxTableFqn,
             constraintPrefix, outboxTableFqn);
@@ -67,6 +74,34 @@ public final class OutboxCreateTableSqlGenerator {
         Path outFile = outputDir.resolve(fileName);
         Files.writeString(outFile, sql, StandardCharsets.UTF_8);
         return outFile;
+    }
+
+    private String columnDefinition(Col col) {
+        String nullability = col.nullable() ? "NULL" : "NOT NULL";
+        return col.colName() + " " + sqlType(col) + " " + nullability;
+    }
+
+    private static String sqlType(Col col) {
+        String typeName = col.typeName() == null ? "" : col.typeName().trim();
+        if (typeName.isEmpty()) {
+            return "NVARCHAR(255)";
+        }
+
+        String normalized = typeName.toUpperCase(Locale.ROOT);
+        if (LENGTH_TYPES.contains(normalized) && col.size() > 0) {
+            return normalized + "(" + col.size() + ")";
+        }
+        if (PRECISION_SCALE_TYPES.contains(normalized) && col.size() > 0) {
+            if (col.scale() > 0) {
+                return normalized + "(" + col.size() + "," + col.scale() + ")";
+            }
+            return normalized + "(" + col.size() + ")";
+        }
+        if (PRECISION_TYPES.contains(normalized) && col.size() > 0) {
+            return normalized + "(" + col.size() + ")";
+        }
+
+        return normalized;
     }
 
     private TableModel selectTable(List<TableModel> tables) {
@@ -109,13 +144,6 @@ public final class OutboxCreateTableSqlGenerator {
             return tableName;
         }
         return src.schema() + "." + tableName;
-    }
-
-    private static String fqn(TableRef tableRef) {
-        if (tableRef.schema() == null || tableRef.schema().isBlank()) {
-            return tableRef.table();
-        }
-        return tableRef.schema() + "." + tableRef.table();
     }
 
     private static String sanitizeForConstraint(String fqn) {

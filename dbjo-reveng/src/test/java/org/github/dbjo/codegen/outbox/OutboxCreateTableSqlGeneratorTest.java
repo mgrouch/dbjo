@@ -37,10 +37,14 @@ class OutboxCreateTableSqlGeneratorTest {
         Path file = new OutboxCreateTableSqlGenerator(cfg).generate(List.of(orders, users));
         String sql = Files.readString(file);
 
-        assertTrue(sql.contains("INTO dbo.orders_outbox"));
-        assertTrue(sql.contains("FROM dbo.orders"));
-        assertTrue(sql.contains("id,"));
-        assertTrue(sql.contains("status,"));
+        assertTrue(sql.contains("CREATE TABLE dbo.orders_outbox"));
+        assertTrue(sql.contains("id VARCHAR(20) NULL"));
+        assertTrue(sql.contains("status VARCHAR(20) NULL"));
+        assertTrue(sql.contains("partition_key NVARCHAR(40) NULL"));
+        assertTrue(sql.contains("published_at_utc DATETIME2 NULL"));
+        assertTrue(!sql.contains("lock_owner"));
+        assertTrue(!sql.contains("locked_at_utc"));
+        assertTrue(!sql.contains("published_topic"));
         assertTrue(file.getFileName().toString().equals("orders-outbox-create.sql"));
     }
 
