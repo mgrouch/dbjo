@@ -1,9 +1,9 @@
 CREATE TABLE kafka_outbox (
     outbox_id NVARCHAR(100) NOT NULL PRIMARY KEY,
     sequence_no BIGINT NOT NULL,
-    event_id NVARCHAR(100) NOT NULL,
-    product_id NVARCHAR(100) NOT NULL,
-    event_type NVARCHAR(100) NOT NULL,
+    payload_type NVARCHAR(255) NOT NULL,
+    partition_key NVARCHAR(255) NOT NULL,
+    payload VARBINARY(MAX) NOT NULL,
     occurred_at_epoch_ms BIGINT NOT NULL,
     created_at_utc DATETIME2 NOT NULL,
     locked_at_utc DATETIME2 NULL,
