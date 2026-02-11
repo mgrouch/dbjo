@@ -37,32 +37,29 @@ public final class OutboxSqlBuilder {
         String createSql = switch (dialect) {
             case MSSQL, SYBASE -> """
                 SELECT TOP (0)
-                       %s
+                       %s,
+                       CAST('' AS NVARCHAR(100)) AS outbox_id,
+                       CAST(0 AS BIGINT) AS sequence_no,
+                       CAST(NULL AS NVARCHAR(120)) AS lock_owner,
+                       CAST(NULL AS DATETIME2) AS locked_at_utc,
+                       CAST(NULL AS NVARCHAR(255)) AS published_topic,
+                       CAST(NULL AS INT) AS published_partition,
+                       CAST(NULL AS BIGINT) AS published_offset,
+                       CAST(NULL AS DATETIME2) AS published_timestamp_utc,
+                       CAST(NULL AS DATETIME2) AS published_at_utc,
+                       CAST(CURRENT_TIMESTAMP AS DATETIME2) AS created_at_utc
                   INTO %s
                   FROM %s;
 
-                ALTER TABLE %s ADD
-                    outbox_id NVARCHAR(100) NOT NULL,
-                    sequence_no BIGINT NOT NULL,
-                    lock_owner NVARCHAR(120) NULL,
-                    locked_at_utc DATETIME2 NULL,
-                    published_topic NVARCHAR(255) NULL,
-                    published_partition INT NULL,
-                    published_offset BIGINT NULL,
-                    published_timestamp_utc DATETIME2 NULL,
-                    published_at_utc DATETIME2 NULL,
-                    created_at_utc DATETIME2 NOT NULL DEFAULT CURRENT_TIMESTAMP;
-
-                ALTER TABLE %s ADD CONSTRAINT pk_%s_outbox_id PRIMARY KEY (outbox_id);
+                CREATE UNIQUE INDEX ux_%s_outbox_id ON %s(outbox_id);
                 CREATE UNIQUE INDEX ux_%s_sequence_no ON %s(sequence_no);
                 CREATE INDEX ix_%s_pending ON %s(published_at_utc, lock_owner, sequence_no);
                 """.formatted(
                 payloadProjection,
                 outboxTableFqn,
                 payloadMeta.fqn(),
-                outboxTableFqn,
-                outboxTableFqn,
                 sanitizeForConstraint(outboxTableFqn),
+                outboxTableFqn,
                 sanitizeForConstraint(outboxTableFqn),
                 outboxTableFqn,
                 sanitizeForConstraint(outboxTableFqn),
@@ -70,33 +67,29 @@ public final class OutboxSqlBuilder {
             );
             case HSQL, ORACLE -> """
                 CREATE TABLE %s AS
-                SELECT %s
+                SELECT %s,
+                       CAST('' AS VARCHAR(100)) AS outbox_id,
+                       CAST(0 AS BIGINT) AS sequence_no,
+                       CAST(NULL AS VARCHAR(120)) AS lock_owner,
+                       CAST(NULL AS TIMESTAMP) AS locked_at_utc,
+                       CAST(NULL AS VARCHAR(255)) AS published_topic,
+                       CAST(NULL AS INTEGER) AS published_partition,
+                       CAST(NULL AS BIGINT) AS published_offset,
+                       CAST(NULL AS TIMESTAMP) AS published_timestamp_utc,
+                       CAST(NULL AS TIMESTAMP) AS published_at_utc,
+                       CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS created_at_utc
                   FROM %s
                  WHERE 1 = 0;
 
-                ALTER TABLE %s ADD (
-                    outbox_id VARCHAR(100) NOT NULL,
-                    sequence_no BIGINT NOT NULL,
-                    lock_owner VARCHAR(120),
-                    locked_at_utc TIMESTAMP,
-                    published_topic VARCHAR(255),
-                    published_partition INTEGER,
-                    published_offset BIGINT,
-                    published_timestamp_utc TIMESTAMP,
-                    published_at_utc TIMESTAMP,
-                    created_at_utc TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
-                );
-
-                ALTER TABLE %s ADD CONSTRAINT pk_%s_outbox_id PRIMARY KEY (outbox_id);
+                CREATE UNIQUE INDEX ux_%s_outbox_id ON %s(outbox_id);
                 CREATE UNIQUE INDEX ux_%s_sequence_no ON %s(sequence_no);
                 CREATE INDEX ix_%s_pending ON %s(published_at_utc, lock_owner, sequence_no);
                 """.formatted(
                 outboxTableFqn,
                 payloadProjection,
                 payloadMeta.fqn(),
-                outboxTableFqn,
-                outboxTableFqn,
                 sanitizeForConstraint(outboxTableFqn),
+                outboxTableFqn,
                 sanitizeForConstraint(outboxTableFqn),
                 outboxTableFqn,
                 sanitizeForConstraint(outboxTableFqn),
