@@ -60,6 +60,81 @@ public class DbjoAppApplication {
     }
 
     @Bean
+    public PlatformTransactionManager rocksTransactionManager(RocksDbHandle rocksDbHandle) {
+        return new RocksDbTransactionManager(rocksDbHandle.db());
+    }
+
+    @Bean
+    public TransactionTemplate rocksTransactionTemplate(PlatformTransactionManager rocksTransactionManager) {
+        return new TransactionTemplate(rocksTransactionManager);
+    }
+
+    @Bean
+    public RocksSessions rocksSessions(RocksDbHandle rocksDbHandle) {
+        return new SpringRocksSessions(rocksDbHandle.db());
+    }
+
+    @Bean
+    public DaoRegistry daoRegistry(RocksDbHandle rocksDbHandle) {
+        return new DaoRegistry(rocksDbHandle.db(), rocksDbHandle.cfByName(), true);
+    }
+
+    @Bean
+    public ClientJdbcDao clientJdbcDao(DataSource dataSource) {
+        return new ClientJdbcDao(dataSource, DbDialect.HSQL);
+    }
+
+    @Bean
+    public ProductJdbcDao productJdbcDao(DataSource dataSource) {
+        return new ProductJdbcDao(dataSource, DbDialect.HSQL);
+    }
+
+    @Bean
+    public PurchaseJdbcDao purchaseJdbcDao(DataSource dataSource) {
+        return new PurchaseJdbcDao(dataSource, DbDialect.HSQL);
+    }
+
+    @Bean
+    public ClientDao clientDao(RocksSessions rocksSessions, DaoRegistry daoRegistry) {
+        return new ClientDao(rocksSessions, daoRegistry);
+    }
+
+    @Bean
+    public ProductDao productDao(RocksSessions rocksSessions, DaoRegistry daoRegistry) {
+        return new ProductDao(rocksSessions, daoRegistry);
+    }
+
+    @Bean
+    public PurchaseDao purchaseDao(RocksSessions rocksSessions, DaoRegistry daoRegistry) {
+        return new PurchaseDao(rocksSessions, daoRegistry);
+    }
+
+    @Bean
+    public HsqlToRocksLoader hsqlToRocksLoader(ClientJdbcDao clientJdbcDao, ProductJdbcDao productJdbcDao,
+                                               PurchaseJdbcDao purchaseJdbcDao, ClientDao clientDao,
+                                               ProductDao productDao, PurchaseDao purchaseDao,
+                                               TransactionTemplate rocksTransactionTemplate,
+                                               ApplicationArguments applicationArguments) {
+        PartitionArgs partitionArgs = PartitionArgs.from(applicationArguments);
+        return new HsqlToRocksLoader(
+                clientJdbcDao,
+                productJdbcDao,
+                purchaseJdbcDao,
+                clientDao,
+                productDao,
+                purchaseDao,
+                rocksTransactionTemplate,
+                partitionArgs.partitionNum(),
+                partitionArgs.totalPartitions()
+        );
+    }
+
+    @Bean
+    public RocksJdbcReporter rocksJdbcReporter(RocksJdbcEngine rocksJdbcEngine) {
+        return new RocksJdbcReporter(rocksJdbcEngine);
+    }
+
+    @Bean
     @Order(Ordered.HIGHEST_PRECEDENCE)
     CommandLineRunner hsqlScriptInitializer(DataSource dataSource) {
         return args -> HsqlScriptRunner.runScripts(
@@ -72,35 +147,8 @@ public class DbjoAppApplication {
     @DependsOnDatabaseInitialization
     @DependsOn("hsqlScriptInitializer")
     @Order(Ordered.LOWEST_PRECEDENCE)
-    CommandLineRunner loadRocksDb(DataSource dataSource, RocksDbHandle rocksDbHandle, RocksJdbcEngine rocksJdbcEngine,
-                                  ApplicationArguments applicationArguments) {
+    CommandLineRunner loadRocksDb(HsqlToRocksLoader loader, RocksJdbcReporter reporter) {
         return args -> {
-            PlatformTransactionManager transactionManager = new RocksDbTransactionManager(rocksDbHandle.db());
-            TransactionTemplate rocksTransactionTemplate = new TransactionTemplate(transactionManager);
-            RocksSessions sessions = new SpringRocksSessions(rocksDbHandle.db());
-            DaoRegistry registry = new DaoRegistry(rocksDbHandle.db(), rocksDbHandle.cfByName(), true);
-            PartitionArgs partitionArgs = PartitionArgs.from(applicationArguments);
-
-            ClientJdbcDao clientJdbcDao = new ClientJdbcDao(dataSource, DbDialect.HSQL);
-            ProductJdbcDao productJdbcDao = new ProductJdbcDao(dataSource, DbDialect.HSQL);
-            PurchaseJdbcDao purchaseJdbcDao = new PurchaseJdbcDao(dataSource, DbDialect.HSQL);
-
-            ClientDao clientDao = new ClientDao(sessions, registry);
-            ProductDao productDao = new ProductDao(sessions, registry);
-            PurchaseDao purchaseDao = new PurchaseDao(sessions, registry);
-
-            HsqlToRocksLoader loader = new HsqlToRocksLoader(
-                    clientJdbcDao,
-                    productJdbcDao,
-                    purchaseJdbcDao,
-                    clientDao,
-                    productDao,
-                    purchaseDao,
-                    rocksTransactionTemplate,
-                    partitionArgs.partitionNum(),
-                    partitionArgs.totalPartitions()
-            );
-            RocksJdbcReporter reporter = new RocksJdbcReporter(rocksJdbcEngine);
             loader.load();
             reporter.reportTables();
         };
