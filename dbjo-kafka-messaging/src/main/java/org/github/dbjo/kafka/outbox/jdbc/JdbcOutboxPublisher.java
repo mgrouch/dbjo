@@ -14,14 +14,14 @@ import org.springframework.transaction.support.TransactionTemplate;
  * Polls outbox rows in order, publishes to Kafka, then marks rows as published.
  */
 public class JdbcOutboxPublisher<T extends SpecificRecord> {
-    private final MsSqlJdbcOutboxStore store;
+    private final JdbcOutboxStore store;
     private final KafkaEventPublisher<T> publisher;
     private final OutboxEventCodec<T> codec;
     private final TransactionTemplate transactionTemplate;
     private final String lockOwner;
 
     public JdbcOutboxPublisher(
-        MsSqlJdbcOutboxStore store,
+        JdbcOutboxStore store,
         KafkaEventPublisher<T> publisher,
         OutboxEventCodec<T> codec,
         TransactionTemplate transactionTemplate
@@ -30,7 +30,7 @@ public class JdbcOutboxPublisher<T extends SpecificRecord> {
     }
 
     public JdbcOutboxPublisher(
-        MsSqlJdbcOutboxStore store,
+        JdbcOutboxStore store,
         KafkaEventPublisher<T> publisher,
         OutboxEventCodec<T> codec,
         TransactionTemplate transactionTemplate,
