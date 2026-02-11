@@ -17,12 +17,12 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.core.namedparam.SqlParameterSource;
 
 /**
- * MS SQL order outbox store implementation using row locks and READPAST (skip locked).
+ * MS SQL outbox store implementation using row locks and READPAST (skip locked).
  */
 public class MsSqlJdbcOutboxStore implements OutboxStateStore {
     private static final String CLAIM_NEXT_BATCH_SQL = """
         WITH next_rows AS (
-            SELECT TOP (:batchSize) outbox_id, sequence_no, event_id, product_id, event_type, occurred_at_epoch_ms
+            SELECT TOP (:batchSize) outbox_id, sequence_no, payload_type, partition_key, payload, occurred_at_epoch_ms
             FROM kafka_outbox WITH (ROWLOCK, UPDLOCK, READPAST)
             WHERE published_at_utc IS NULL AND lock_owner IS NULL
             ORDER BY sequence_no ASC
@@ -32,9 +32,9 @@ public class MsSqlJdbcOutboxStore implements OutboxStateStore {
                locked_at_utc = SYSUTCDATETIME()
         OUTPUT inserted.outbox_id,
                inserted.sequence_no,
-               inserted.event_id,
-               inserted.product_id,
-               inserted.event_type,
+               inserted.payload_type,
+               inserted.partition_key,
+               inserted.payload,
                inserted.occurred_at_epoch_ms
         """;
 
@@ -42,18 +42,18 @@ public class MsSqlJdbcOutboxStore implements OutboxStateStore {
         INSERT INTO kafka_outbox (
             outbox_id,
             sequence_no,
-            event_id,
-            product_id,
-            event_type,
+            payload_type,
+            partition_key,
+            payload,
             occurred_at_epoch_ms,
             created_at_utc
         )
         VALUES (
             :outboxId,
             :sequenceNo,
-            :eventId,
-            :productId,
-            :eventType,
+            :payloadType,
+            :partitionKey,
+            :payload,
             :occurredAtEpochMs,
             :createdAtUtc
         )
@@ -82,9 +82,9 @@ public class MsSqlJdbcOutboxStore implements OutboxStateStore {
                 return new OutboxMessage(
                     rs.getString("outbox_id"),
                     rs.getLong("sequence_no"),
-                    rs.getString("event_id"),
-                    rs.getString("product_id"),
-                    rs.getString("event_type"),
+                    rs.getString("payload_type"),
+                    rs.getString("partition_key"),
+                    rs.getBytes("payload"),
                     rs.getLong("occurred_at_epoch_ms")
                 );
             }
@@ -96,9 +96,9 @@ public class MsSqlJdbcOutboxStore implements OutboxStateStore {
         MapSqlParameterSource params = new MapSqlParameterSource()
             .addValue("outboxId", message.outboxId())
             .addValue("sequenceNo", message.sequenceNo())
-            .addValue("eventId", message.eventId())
-            .addValue("productId", message.productId())
-            .addValue("eventType", message.eventType())
+            .addValue("payloadType", message.payloadType())
+            .addValue("partitionKey", message.partitionKey())
+            .addValue("payload", message.payload())
             .addValue("occurredAtEpochMs", message.occurredAtEpochMs())
             .addValue("createdAtUtc", Timestamp.from(Instant.now()));
         jdbc.update(INSERT_SQL, params);
