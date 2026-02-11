@@ -11,16 +11,17 @@ import java.util.Map;
 import java.util.Objects;
 import org.github.dbjo.kafka.outbox.OutboxStateStore;
 import org.github.dbjo.kafka.publisher.KafkaPublishReceipt;
+import org.github.dbjo.meta.jdbc.DbDialect;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.core.namedparam.SqlParameterSource;
 
 /**
- * MS SQL outbox store implementation using row locks and READPAST (skip locked).
+ * JDBC outbox store implementation with claim SQL chosen by {@link DbDialect}.
  */
-public class MsSqlJdbcOutboxStore implements OutboxStateStore {
-    private static final String CLAIM_NEXT_BATCH_SQL = """
+public class JdbcOutboxStore implements OutboxStateStore {
+    private static final String CLAIM_NEXT_BATCH_MSSQL_SQL = """
         WITH next_rows AS (
             SELECT TOP (:batchSize) outbox_id, sequence_no, payload_type, partition_key, payload, occurred_at_epoch_ms
             FROM kafka_outbox WITH (ROWLOCK, UPDLOCK, READPAST)
@@ -29,13 +30,35 @@ public class MsSqlJdbcOutboxStore implements OutboxStateStore {
         )
         UPDATE next_rows
            SET lock_owner = :lockOwner,
-               locked_at_utc = SYSUTCDATETIME()
+               locked_at_utc = CURRENT_TIMESTAMP
         OUTPUT inserted.outbox_id,
                inserted.sequence_no,
                inserted.payload_type,
                inserted.partition_key,
                inserted.payload,
                inserted.occurred_at_epoch_ms
+        """;
+
+    private static final String CLAIM_NEXT_BATCH_LOCK_SQL = """
+        UPDATE kafka_outbox
+           SET lock_owner = :lockOwner,
+               locked_at_utc = CURRENT_TIMESTAMP
+         WHERE outbox_id IN (
+               SELECT outbox_id
+                 FROM kafka_outbox
+                WHERE published_at_utc IS NULL AND lock_owner IS NULL
+                ORDER BY sequence_no ASC
+                FETCH FIRST :batchSize ROWS ONLY
+         )
+        """;
+
+    private static final String CLAIM_NEXT_BATCH_SELECT_SQL = """
+        SELECT outbox_id, sequence_no, payload_type, partition_key, payload, occurred_at_epoch_ms
+          FROM kafka_outbox
+         WHERE lock_owner = :lockOwner
+           AND published_at_utc IS NULL
+         ORDER BY sequence_no ASC
+         FETCH FIRST :batchSize ROWS ONLY
         """;
 
     private static final String INSERT_SQL = """
@@ -65,17 +88,23 @@ public class MsSqlJdbcOutboxStore implements OutboxStateStore {
                published_partition = :partition,
                published_offset = :offset,
                published_timestamp_utc = :publishedTimestampUtc,
-               published_at_utc = SYSUTCDATETIME(),
+               published_at_utc = CURRENT_TIMESTAMP,
                lock_owner = NULL,
                locked_at_utc = NULL
          WHERE outbox_id = :outboxId
         """;
 
     private final NamedParameterJdbcTemplate jdbc;
+    private final DbDialect dialect;
     private final RowMapper<OutboxMessage> rowMapper;
 
-    public MsSqlJdbcOutboxStore(NamedParameterJdbcTemplate jdbc) {
+    public JdbcOutboxStore(NamedParameterJdbcTemplate jdbc) {
+        this(jdbc, DbDialect.MSSQL);
+    }
+
+    public JdbcOutboxStore(NamedParameterJdbcTemplate jdbc, DbDialect dialect) {
         this.jdbc = Objects.requireNonNull(jdbc, "jdbc must not be null");
+        this.dialect = Objects.requireNonNull(dialect, "dialect must not be null");
         this.rowMapper = new RowMapper<>() {
             @Override
             public OutboxMessage mapRow(ResultSet rs, int rowNum) throws SQLException {
@@ -115,7 +144,15 @@ public class MsSqlJdbcOutboxStore implements OutboxStateStore {
             "batchSize", batchSize,
             "lockOwner", lockOwner
         );
-        List<OutboxMessage> messages = jdbc.query(CLAIM_NEXT_BATCH_SQL, params, rowMapper);
+
+        List<OutboxMessage> messages = switch (dialect) {
+            case MSSQL -> jdbc.query(CLAIM_NEXT_BATCH_MSSQL_SQL, params, rowMapper);
+            case SYBASE, HSQL, ORACLE -> {
+                jdbc.update(CLAIM_NEXT_BATCH_LOCK_SQL, params);
+                yield jdbc.query(CLAIM_NEXT_BATCH_SELECT_SQL, params, rowMapper);
+            }
+        };
+
         return messages.stream()
             .sorted(Comparator.comparingLong(OutboxMessage::sequenceNo))
             .toList();
