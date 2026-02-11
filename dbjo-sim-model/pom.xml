@@ -146,6 +146,7 @@
                                 <arg>--enumIncludeViews=false</arg>
                                 <arg>--enumOrderBySortOrderIfPresent=true</arg>
                                 <arg>--outboxEntity=Purchase</arg>
+                                <arg>--outboxSqlDir=${project.build.directory}/generated-sources/dbjo/outbox-sql</arg>
                             </args>
                         </configuration>
                     </execution>
