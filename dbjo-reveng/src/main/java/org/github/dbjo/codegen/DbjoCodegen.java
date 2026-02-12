@@ -3,6 +3,8 @@ package org.github.dbjo.codegen;
 import org.github.dbjo.codegen.db.DbIntrospector;
 import org.github.dbjo.codegen.db.DbMetaGenerator;
 import org.github.dbjo.codegen.db.DbSchemaGenerator;
+import org.github.dbjo.codegen.db.IdentifierQuoter;
+import org.github.dbjo.codegen.db.SqlQuoteMode;
 import org.github.dbjo.codegen.entity.EntityGenerator;
 import org.github.dbjo.codegen.entity.PojoValidatorGenerator;
 import org.github.dbjo.meta.db.TableModel;
@@ -44,6 +46,7 @@ public final class DbjoCodegen {
 
         try (Connection conn = DriverManager.getConnection(cfg.url(), cfg.user(), cfg.pass())) {
             DatabaseMetaData md = conn.getMetaData();
+            IdentifierQuoter quotedSqlIdentifiers = IdentifierQuoter.ansiFromMeta(md, SqlQuoteMode.ALWAYS);
             System.out.println("Connected:");
             System.out.println("  db = " + md.getDatabaseProductName() + " " + md.getDatabaseProductVersion());
             System.out.println();
@@ -109,13 +112,16 @@ public final class DbjoCodegen {
                 System.out.println();
             }
 
-            // 5) ROCKS DAOs + DbMeta
+            // 5) ROCKS DAOs
             if (cfg.runMode().runDao()) {
                 int n = new RocksDaoGenerator(cfg).generateAll(tables);
                 System.out.println("Generated RocksDB DAO(s): " + n);
                 System.out.println();
+            }
 
-                int d = new DbMetaGenerator(cfg).generateAll(tables);
+            // 6) JDBC DbMeta (always quote table/column identifiers in SQL)
+            if (cfg.runMode().runDbMeta()) {
+                int d = new DbMetaGenerator(cfg, null, quotedSqlIdentifiers).generateAll(tables);
                 System.out.println("Generated DbMeta: " + d);
                 System.out.println();
             }
@@ -138,7 +144,7 @@ public final class DbjoCodegen {
                 System.out.println();
             }
 
-            // 6) PROTO MAPPERS
+            // 7) PROTO MAPPERS
             if (cfg.runMode().runMapper()) {
                 int n = new ProtoMapperGenerator(cfg).generateAll(tables);
                 System.out.println("Generated Proto mapper(s): " + n);
