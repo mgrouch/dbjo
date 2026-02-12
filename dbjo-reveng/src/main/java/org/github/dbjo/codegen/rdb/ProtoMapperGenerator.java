@@ -197,6 +197,9 @@ public final class ProtoMapperGenerator {
             String rhs = fromProtoExpr(f.jt.javaType(), protoGet);
             if (f.nullable && f.hasPresence) {
                 sb.append("        ").append(setter).append("(p.has").append(f.cap).append("() ? ").append(rhs).append(" : null);\n");
+            } else if (f.nullable && "string".equals(f.pt.protoType()) && nullSentinelByEmptyString(f.jt.javaType())) {
+                // proto3 scalar strings have no presence unless optional; treat empty string as null for nullable SQL values
+                sb.append("        ").append(setter).append("(").append(protoGet).append(".isEmpty() ? null : ").append(rhs).append(");\n");
             } else {
                 sb.append("        ").append(setter).append("(").append(rhs).append(");\n");
             }
@@ -272,6 +275,13 @@ public final class ProtoMapperGenerator {
             case "int32", "int64", "uint32", "uint64", "sint32", "sint64",
                     "fixed32", "fixed64", "sfixed32", "sfixed64" -> protoGetExpr + " != 0";
             default -> null; // bool/float/double can't represent null reliably without optional
+        };
+    }
+
+    private static boolean nullSentinelByEmptyString(String javaType) {
+        return switch (javaType) {
+            case "BigDecimal", "Date", "Time" -> true;
+            default -> false;
         };
     }
 
