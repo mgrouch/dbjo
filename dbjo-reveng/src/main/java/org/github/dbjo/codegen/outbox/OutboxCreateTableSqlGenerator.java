@@ -28,6 +28,17 @@ public final class OutboxCreateTableSqlGenerator {
     private static final Set<String> PRECISION_TYPES = Set.of(
         "FLOAT"
     );
+    private static final Set<String> OUTBOX_COLUMN_NAMES = Set.of(
+        "outbox_id",
+        "sequence_no",
+        "partition_key",
+        "occurred_at_epoch_ms",
+        "published_partition",
+        "published_offset",
+        "published_timestamp_utc",
+        "published_at_utc",
+        "created_at_utc"
+    );
 
     private final Config cfg;
 
@@ -40,6 +51,7 @@ public final class OutboxCreateTableSqlGenerator {
         String outboxTableFqn = resolveOutboxTableFqn(selected.table());
 
         String payloadColumns = selected.cols().stream()
+            .filter(col -> !isOutboxColumn(col.colName()))
             .map(this::columnDefinition)
             .collect(Collectors.joining(",\n    "));
 
@@ -148,5 +160,9 @@ public final class OutboxCreateTableSqlGenerator {
 
     private static String sanitizeForConstraint(String fqn) {
         return fqn.replace('.', '_').replace('[', '_').replace(']', '_').replace('"', '_');
+    }
+
+    private static boolean isOutboxColumn(String columnName) {
+        return columnName != null && OUTBOX_COLUMN_NAMES.contains(columnName.toLowerCase(Locale.ROOT));
     }
 }

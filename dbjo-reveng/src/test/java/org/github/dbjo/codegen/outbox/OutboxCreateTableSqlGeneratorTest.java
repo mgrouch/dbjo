@@ -62,6 +62,27 @@ class OutboxCreateTableSqlGeneratorTest {
             () -> new OutboxCreateTableSqlGenerator(cfg).generate(List.of(orders, users)));
     }
 
+    @Test
+    void skipsPayloadColumnsThatConflictWithOutboxColumns() throws Exception {
+        Config cfg = Config.from(ArgMap.parse(new String[] {
+            "--run=outboxsql",
+            "--outboxSqlDir=" + tmp,
+            "--outboxEntity=orders"
+        }));
+
+        TableModel orders = table("dbo", "orders", "id", "partition_key", "published_at_utc", "status");
+
+        Path file = new OutboxCreateTableSqlGenerator(cfg).generate(List.of(orders));
+        String sql = Files.readString(file);
+
+        assertTrue(sql.contains("id VARCHAR(20) NULL"));
+        assertTrue(sql.contains("status VARCHAR(20) NULL"));
+        assertTrue(!sql.contains("partition_key VARCHAR(20) NULL"));
+        assertTrue(!sql.contains("published_at_utc VARCHAR(20) NULL"));
+        assertTrue(sql.contains("partition_key NVARCHAR(40) NULL"));
+        assertTrue(sql.contains("published_at_utc DATETIME2 NULL"));
+    }
+
     private static TableModel table(String schema, String table, String... cols) {
         List<Col> modelCols = java.util.stream.IntStream.range(0, cols.length)
             .mapToObj(i -> new Col(i + 1, cols[i], Types.VARCHAR, "VARCHAR", 20, 0, Nullability.NULLABLE, false, null))
