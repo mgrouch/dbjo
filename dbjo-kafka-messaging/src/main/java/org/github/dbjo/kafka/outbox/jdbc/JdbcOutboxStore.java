@@ -103,14 +103,7 @@ public class JdbcOutboxStore<T> implements OutboxStateStore {
             "lockOwner", lockOwner
         );
 
-        List<OutboxMessage<T>> messages = switch (dialect) {
-            case MSSQL -> jdbc.query(claimForUpdateSql, params, rowMapper);
-            case SYBASE, HSQL, ORACLE -> {
-                String[] statements = claimForUpdateSql.split(";\\s*\\n", 2);
-                jdbc.update(statements[0], params);
-                yield jdbc.query(statements[1], params, rowMapper);
-            }
-        };
+        List<OutboxMessage<T>> messages = jdbc.query(claimForUpdateSql, params, rowMapper);
 
         return messages.stream()
             .sorted(Comparator.comparingLong(OutboxMessage::sequenceNo))

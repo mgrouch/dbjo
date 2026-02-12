@@ -30,135 +30,180 @@ public final class OutboxSqlBuilder {
             throw new IllegalArgumentException("payloadMeta selectAllSql must include at least one payload column");
         }
 
-        String payloadProjection = String.join(",\n           ", payloadColumns);
-        String insertedPayloadProjection = payloadColumns.stream()
+        String quotedOutboxTable = quoteFqn(dialect, outboxTableFqn);
+        String quotedPayloadTable = quoteFqn(dialect, payloadMeta.fqn());
+        List<String> quotedPayloadColumns = payloadColumns.stream().map(c -> quoteIdentifier(dialect, c)).toList();
+
+        String payloadProjection = String.join(",\n           ", quotedPayloadColumns);
+        String insertedPayloadProjection = quotedPayloadColumns.stream()
             .map(c -> "inserted." + c)
             .collect(Collectors.joining(",\n                   "));
+
+        String outboxId = quoteIdentifier(dialect, "outbox_id");
+        String sequenceNo = quoteIdentifier(dialect, "sequence_no");
+        String partitionKey = quoteIdentifier(dialect, "partition_key");
+        String occurredAtEpochMs = quoteIdentifier(dialect, "occurred_at_epoch_ms");
+        String publishedPartition = quoteIdentifier(dialect, "published_partition");
+        String publishedOffset = quoteIdentifier(dialect, "published_offset");
+        String publishedTimestampUtc = quoteIdentifier(dialect, "published_timestamp_utc");
+        String publishedAtUtc = quoteIdentifier(dialect, "published_at_utc");
+        String publishedTopic = quoteIdentifier(dialect, "published_topic");
+        String createdAtUtc = quoteIdentifier(dialect, "created_at_utc");
+
         String createSql = switch (dialect) {
             case MSSQL, SYBASE -> """
                 SELECT TOP (0)
                        %s,
-                       CAST('' AS NVARCHAR(100)) AS outbox_id,
-                       CAST(0 AS BIGINT) AS sequence_no,
-                       CAST(NULL AS NVARCHAR(40)) AS partition_key,
-                       CAST(0 AS BIGINT) AS occurred_at_epoch_ms,
-                       CAST(NULL AS INT) AS published_partition,
-                       CAST(NULL AS BIGINT) AS published_offset,
-                       CAST(NULL AS DATETIME2) AS published_timestamp_utc,
-                       CAST(NULL AS DATETIME2) AS published_at_utc,
-                       CAST(CURRENT_TIMESTAMP AS DATETIME2) AS created_at_utc
+                       CAST('' AS NVARCHAR(100)) AS %s,
+                       CAST(0 AS BIGINT) AS %s,
+                       CAST(NULL AS NVARCHAR(40)) AS %s,
+                       CAST(0 AS BIGINT) AS %s,
+                       CAST(NULL AS INT) AS %s,
+                       CAST(NULL AS BIGINT) AS %s,
+                       CAST(NULL AS DATETIME2) AS %s,
+                       CAST(NULL AS DATETIME2) AS %s,
+                       CAST(CURRENT_TIMESTAMP AS DATETIME2) AS %s
                   INTO %s
                   FROM %s;
 
-                CREATE UNIQUE INDEX ux_%s_outbox_id ON %s(outbox_id);
-                CREATE UNIQUE INDEX ux_%s_sequence_no ON %s(sequence_no);
-                CREATE INDEX ix_%s_pending ON %s(published_at_utc, sequence_no);
+                CREATE UNIQUE INDEX ux_%s_outbox_id ON %s(%s);
+                CREATE UNIQUE INDEX ux_%s_sequence_no ON %s(%s);
+                CREATE INDEX ix_%s_pending ON %s(%s, %s);
                 """.formatted(
                 payloadProjection,
-                outboxTableFqn,
-                payloadMeta.fqn(),
+                outboxId,
+                sequenceNo,
+                partitionKey,
+                occurredAtEpochMs,
+                publishedPartition,
+                publishedOffset,
+                publishedTimestampUtc,
+                publishedAtUtc,
+                createdAtUtc,
+                quotedOutboxTable,
+                quotedPayloadTable,
                 sanitizeForConstraint(outboxTableFqn),
-                outboxTableFqn,
+                quotedOutboxTable,
+                outboxId,
                 sanitizeForConstraint(outboxTableFqn),
-                outboxTableFqn,
+                quotedOutboxTable,
+                sequenceNo,
                 sanitizeForConstraint(outboxTableFqn),
-                outboxTableFqn
+                quotedOutboxTable,
+                publishedAtUtc,
+                sequenceNo
             );
             case HSQL, ORACLE -> """
                 CREATE TABLE %s AS
                 SELECT %s,
-                       CAST('' AS VARCHAR(100)) AS outbox_id,
-                       CAST(0 AS BIGINT) AS sequence_no,
-                       CAST(NULL AS VARCHAR(40)) AS partition_key,
-                       CAST(0 AS BIGINT) AS occurred_at_epoch_ms,
-                       CAST(NULL AS INTEGER) AS published_partition,
-                       CAST(NULL AS BIGINT) AS published_offset,
-                       CAST(NULL AS TIMESTAMP) AS published_timestamp_utc,
-                       CAST(NULL AS TIMESTAMP) AS published_at_utc,
-                       CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS created_at_utc
+                       CAST('' AS VARCHAR(100)) AS %s,
+                       CAST(0 AS BIGINT) AS %s,
+                       CAST(NULL AS VARCHAR(40)) AS %s,
+                       CAST(0 AS BIGINT) AS %s,
+                       CAST(NULL AS INTEGER) AS %s,
+                       CAST(NULL AS BIGINT) AS %s,
+                       CAST(NULL AS TIMESTAMP) AS %s,
+                       CAST(NULL AS TIMESTAMP) AS %s,
+                       CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS %s
                   FROM %s
                  WHERE 1 = 0;
 
-                CREATE UNIQUE INDEX ux_%s_outbox_id ON %s(outbox_id);
-                CREATE UNIQUE INDEX ux_%s_sequence_no ON %s(sequence_no);
-                CREATE INDEX ix_%s_pending ON %s(published_at_utc, sequence_no);
+                CREATE UNIQUE INDEX ux_%s_outbox_id ON %s(%s);
+                CREATE UNIQUE INDEX ux_%s_sequence_no ON %s(%s);
+                CREATE INDEX ix_%s_pending ON %s(%s, %s);
                 """.formatted(
-                outboxTableFqn,
+                quotedOutboxTable,
                 payloadProjection,
-                payloadMeta.fqn(),
+                outboxId,
+                sequenceNo,
+                partitionKey,
+                occurredAtEpochMs,
+                publishedPartition,
+                publishedOffset,
+                publishedTimestampUtc,
+                publishedAtUtc,
+                createdAtUtc,
+                quotedPayloadTable,
                 sanitizeForConstraint(outboxTableFqn),
-                outboxTableFqn,
+                quotedOutboxTable,
+                outboxId,
                 sanitizeForConstraint(outboxTableFqn),
-                outboxTableFqn,
+                quotedOutboxTable,
+                sequenceNo,
                 sanitizeForConstraint(outboxTableFqn),
-                outboxTableFqn
+                quotedOutboxTable,
+                publishedAtUtc,
+                sequenceNo
             );
         };
 
         String claimSql = switch (dialect) {
             case MSSQL -> """
-                WITH next_rows AS (
-                    SELECT TOP (:batchSize)
-                           outbox_id,
-                           sequence_no,
-                           partition_key,
-                           occurred_at_epoch_ms,
-                           %s
-                    FROM %s WITH (ROWLOCK, UPDLOCK, READPAST)
-                    WHERE published_at_utc IS NULL AND lock_owner IS NULL
-                    ORDER BY sequence_no ASC
-                )
-                UPDATE next_rows
-                   SET lock_owner = :lockOwner,
-                       locked_at_utc = CURRENT_TIMESTAMP
-                OUTPUT inserted.outbox_id,
-                       inserted.sequence_no,
-                       inserted.partition_key,
-                       inserted.occurred_at_epoch_ms,
+                SELECT TOP (:batchSize)
+                       %s,
+                       %s,
+                       %s,
+                       %s,
                        %s
-                """.formatted(payloadProjection, outboxTableFqn, insertedPayloadProjection);
-            case SYBASE, HSQL, ORACLE -> """
-                UPDATE %s
-                   SET lock_owner = :lockOwner,
-                       locked_at_utc = CURRENT_TIMESTAMP
-                 WHERE outbox_id IN (
-                       SELECT outbox_id
-                         FROM %s
-                        WHERE published_at_utc IS NULL AND lock_owner IS NULL
-                        ORDER BY sequence_no ASC
-                        FETCH FIRST :batchSize ROWS ONLY
-                 );
-
-                SELECT outbox_id,
-                       sequence_no,
-                       partition_key,
-                       occurred_at_epoch_ms,
+                  FROM %s WITH (READPAST)
+                 WHERE %s IS NULL
+                 ORDER BY %s ASC
+                """.formatted(outboxId, sequenceNo, partitionKey, occurredAtEpochMs, payloadProjection, quotedOutboxTable, publishedAtUtc, sequenceNo);
+            case SYBASE -> """
+                SELECT TOP (:batchSize)
+                       %s,
+                       %s,
+                       %s,
+                       %s,
                        %s
                   FROM %s
-                 WHERE lock_owner = :lockOwner
-                   AND published_at_utc IS NULL
-                 ORDER BY sequence_no ASC
+                 WHERE %s IS NULL
+                 ORDER BY %s ASC
+                """.formatted(outboxId, sequenceNo, partitionKey, occurredAtEpochMs, payloadProjection, quotedOutboxTable, publishedAtUtc, sequenceNo);
+            case HSQL, ORACLE -> """
+                SELECT %s,
+                       %s,
+                       %s,
+                       %s,
+                       %s
+                  FROM %s
+                 WHERE %s IS NULL
+                 ORDER BY %s ASC
                  FETCH FIRST :batchSize ROWS ONLY
-                """.formatted(outboxTableFqn, outboxTableFqn, payloadProjection, outboxTableFqn);
+                """.formatted(outboxId, sequenceNo, partitionKey, occurredAtEpochMs, payloadProjection, quotedOutboxTable, publishedAtUtc, sequenceNo);
         };
 
         String markPublishedSql = """
             UPDATE %s
-               SET published_topic = :topic,
-                   published_partition = :partition,
-                   published_offset = :offset,
-                   published_timestamp_utc = :publishedTimestampUtc,
-                   published_at_utc = CURRENT_TIMESTAMP,
-                   lock_owner = NULL,
-                   locked_at_utc = NULL
-             WHERE outbox_id = :outboxId
-            """.formatted(outboxTableFqn);
+               SET %s = :topic,
+                   %s = :partition,
+                   %s = :offset,
+                   %s = :publishedTimestampUtc,
+                   %s = CURRENT_TIMESTAMP
+             WHERE %s = :outboxId
+            """.formatted(quotedOutboxTable, publishedTopic, publishedPartition, publishedOffset, publishedTimestampUtc, publishedAtUtc, outboxId);
 
         return new OutboxSql(createSql, claimSql, markPublishedSql, payloadColumns);
     }
 
     private static String sanitizeForConstraint(String fqn) {
         return fqn.replace('.', '_').replace('[', '_').replace(']', '_').replace('"', '_');
+    }
+
+    private static String quoteFqn(DbDialect dialect, String fqn) {
+        return Arrays.stream(fqn.split("\\."))
+            .map(String::trim)
+            .filter(part -> !part.isEmpty())
+            .map(part -> quoteIdentifier(dialect, part))
+            .collect(Collectors.joining("."));
+    }
+
+    private static String quoteIdentifier(DbDialect dialect, String identifier) {
+        String ident = identifier.trim();
+        if (dialect == DbDialect.MSSQL || dialect == DbDialect.SYBASE) {
+            return "[" + ident + "]";
+        }
+        return "\"" + ident + "\"";
     }
 
     static List<String> parseSelectColumns(String selectAllSql) {
