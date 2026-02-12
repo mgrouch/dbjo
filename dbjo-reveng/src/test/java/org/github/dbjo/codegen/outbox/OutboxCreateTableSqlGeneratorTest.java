@@ -28,7 +28,8 @@ class OutboxCreateTableSqlGeneratorTest {
         Config cfg = Config.from(ArgMap.parse(new String[] {
             "--run=outboxsql",
             "--outboxSqlDir=" + tmp,
-            "--outboxEntity=orders"
+            "--outboxEntity=orders",
+            "--url=jdbc:sqlserver://localhost:1433;databaseName=test"
         }));
 
         TableModel orders = table("dbo", "orders", "id", "status");
@@ -37,11 +38,12 @@ class OutboxCreateTableSqlGeneratorTest {
         Path file = new OutboxCreateTableSqlGenerator(cfg).generate(List.of(orders, users));
         String sql = Files.readString(file);
 
-        assertTrue(sql.contains("CREATE TABLE dbo.orders_outbox"));
-        assertTrue(sql.contains("id VARCHAR(20) NULL"));
-        assertTrue(sql.contains("status VARCHAR(20) NULL"));
-        assertTrue(sql.contains("partition_key NVARCHAR(40) NULL"));
-        assertTrue(sql.contains("published_at_utc DATETIME2 NULL"));
+        assertTrue(sql.contains("CREATE TABLE [dbo].[orders_outbox]"));
+        assertTrue(sql.contains("[id] VARCHAR(20) NULL"));
+        assertTrue(sql.contains("[status] VARCHAR(20) NULL"));
+        assertTrue(sql.contains("[partition_key] NVARCHAR(40) NULL"));
+        assertTrue(sql.contains("[published_at_utc] DATETIME2 NULL"));
+        assertTrue(sql.contains("ON [dbo].[orders_outbox]([outbox_id])"));
         assertTrue(!sql.contains("lock_owner"));
         assertTrue(!sql.contains("locked_at_utc"));
         assertTrue(!sql.contains("published_topic"));
@@ -75,12 +77,32 @@ class OutboxCreateTableSqlGeneratorTest {
         Path file = new OutboxCreateTableSqlGenerator(cfg).generate(List.of(orders));
         String sql = Files.readString(file);
 
-        assertTrue(sql.contains("id VARCHAR(20) NULL"));
-        assertTrue(sql.contains("status VARCHAR(20) NULL"));
-        assertTrue(!sql.contains("partition_key VARCHAR(20) NULL"));
-        assertTrue(!sql.contains("published_at_utc VARCHAR(20) NULL"));
-        assertTrue(sql.contains("partition_key NVARCHAR(40) NULL"));
-        assertTrue(sql.contains("published_at_utc DATETIME2 NULL"));
+        assertTrue(sql.contains("\"id\" VARCHAR(20) NULL"));
+        assertTrue(sql.contains("\"status\" VARCHAR(20) NULL"));
+        assertTrue(!sql.contains("\"partition_key\" VARCHAR(20) NULL"));
+        assertTrue(!sql.contains("\"published_at_utc\" VARCHAR(20) NULL"));
+        assertTrue(sql.contains("\"partition_key\" NVARCHAR(40) NULL"));
+        assertTrue(sql.contains("\"published_at_utc\" TIMESTAMP NULL"));
+    }
+
+    @Test
+    void usesDialectSpecificOracleTypes() throws Exception {
+        Config cfg = Config.from(ArgMap.parse(new String[] {
+            "--run=outboxsql",
+            "--outboxSqlDir=" + tmp,
+            "--outboxEntity=orders",
+            "--url=jdbc:oracle:thin:@localhost:1521:orcl"
+        }));
+
+        TableModel orders = table("dbo", "orders", "id");
+
+        Path file = new OutboxCreateTableSqlGenerator(cfg).generate(List.of(orders));
+        String sql = Files.readString(file);
+
+        assertTrue(sql.contains("\"outbox_id\" VARCHAR2(100 CHAR) NOT NULL"));
+        assertTrue(sql.contains("\"sequence_no\" NUMBER(19) NOT NULL"));
+        assertTrue(sql.contains("\"published_partition\" NUMBER(10) NULL"));
+        assertTrue(sql.contains("\"published_at_utc\" TIMESTAMP NULL"));
     }
 
     private static TableModel table(String schema, String table, String... cols) {

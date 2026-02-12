@@ -4,6 +4,7 @@ import org.github.dbjo.codegen.Config;
 import org.github.dbjo.meta.db.Col;
 import org.github.dbjo.meta.db.TableModel;
 import org.github.dbjo.meta.db.TableRef;
+import org.github.dbjo.meta.jdbc.DbDialect;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -41,14 +42,17 @@ public final class OutboxCreateTableSqlGenerator {
     );
 
     private final Config cfg;
+    private final DbDialect dialect;
 
     public OutboxCreateTableSqlGenerator(Config cfg) {
         this.cfg = Objects.requireNonNull(cfg, "cfg must not be null");
+        this.dialect = detectDialect(cfg);
     }
 
     public Path generate(List<TableModel> tables) throws IOException {
         TableModel selected = selectTable(tables);
         String outboxTableFqn = resolveOutboxTableFqn(selected.table());
+        String quotedOutboxTableFqn = quoteFqn(outboxTableFqn);
 
         String payloadColumns = selected.cols().stream()
             .filter(col -> !isOutboxColumn(col.colName()))
@@ -60,24 +64,33 @@ public final class OutboxCreateTableSqlGenerator {
         String sql = """
             CREATE TABLE %s (
                 %s,
-                outbox_id NVARCHAR(100) NOT NULL,
-                sequence_no BIGINT NOT NULL,
-                partition_key NVARCHAR(40) NULL,
-                occurred_at_epoch_ms BIGINT NOT NULL,
-                published_partition INT NULL,
-                published_offset BIGINT NULL,
-                published_timestamp_utc DATETIME2 NULL,
-                published_at_utc DATETIME2 NULL,
-                created_at_utc DATETIME2 NOT NULL DEFAULT CURRENT_TIMESTAMP
+                %s %s NOT NULL,
+                %s %s NOT NULL,
+                %s %s NULL,
+                %s %s NOT NULL,
+                %s %s NULL,
+                %s %s NULL,
+                %s %s NULL,
+                %s %s NULL,
+                %s %s NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
 
-            CREATE UNIQUE INDEX ux_%s_outbox_id ON %s(outbox_id);
-            CREATE UNIQUE INDEX ux_%s_sequence_no ON %s(sequence_no);
-            CREATE INDEX ix_%s_pending ON %s(published_at_utc, sequence_no);
-            """.formatted(outboxTableFqn, payloadColumns,
-            constraintPrefix, outboxTableFqn,
-            constraintPrefix, outboxTableFqn,
-            constraintPrefix, outboxTableFqn);
+            CREATE UNIQUE INDEX ux_%s_outbox_id ON %s(%s);
+            CREATE UNIQUE INDEX ux_%s_sequence_no ON %s(%s);
+            CREATE INDEX ix_%s_pending ON %s(%s, %s);
+            """.formatted(quotedOutboxTableFqn, payloadColumns,
+            quoteId("outbox_id"), stringType(100),
+            quoteId("sequence_no"), bigintType(),
+            quoteId("partition_key"), stringType(40),
+            quoteId("occurred_at_epoch_ms"), bigintType(),
+            quoteId("published_partition"), intType(),
+            quoteId("published_offset"), bigintType(),
+            quoteId("published_timestamp_utc"), timestampType(),
+            quoteId("published_at_utc"), timestampType(),
+            quoteId("created_at_utc"), timestampType(),
+            constraintPrefix, quotedOutboxTableFqn, quoteId("outbox_id"),
+            constraintPrefix, quotedOutboxTableFqn, quoteId("sequence_no"),
+            constraintPrefix, quotedOutboxTableFqn, quoteId("published_at_utc"), quoteId("sequence_no"));
 
         Path outputDir = cfg.outboxSqlDir();
         Files.createDirectories(outputDir);
@@ -90,7 +103,66 @@ public final class OutboxCreateTableSqlGenerator {
 
     private String columnDefinition(Col col) {
         String nullability = col.nullable() ? "NULL" : "NOT NULL";
-        return col.colName() + " " + sqlType(col) + " " + nullability;
+        return quoteId(col.colName()) + " " + sqlType(col) + " " + nullability;
+    }
+
+    private String quoteFqn(String fqn) {
+        String[] parts = fqn.split("\\.");
+        return java.util.Arrays.stream(parts)
+            .map(String::trim)
+            .filter(s -> !s.isEmpty())
+            .map(this::quoteId)
+            .collect(Collectors.joining("."));
+    }
+
+    private String quoteId(String id) {
+        if (id == null || id.isBlank()) {
+            throw new IllegalArgumentException("identifier must not be blank");
+        }
+        if ((id.startsWith("[") && id.endsWith("]")) || (id.startsWith("\"") && id.endsWith("\""))) {
+            return id;
+        }
+        return switch (dialect) {
+            case MSSQL, SYBASE -> "[" + id + "]";
+            case ORACLE, HSQL -> "\"" + id.replace("\"", "\"\"") + "\"";
+        };
+    }
+
+    private String stringType(int size) {
+        return switch (dialect) {
+            case ORACLE -> "VARCHAR2(" + size + " CHAR)";
+            case MSSQL, SYBASE, HSQL -> "NVARCHAR(" + size + ")";
+        };
+    }
+
+    private String bigintType() {
+        return dialect == DbDialect.ORACLE ? "NUMBER(19)" : "BIGINT";
+    }
+
+    private String intType() {
+        return dialect == DbDialect.ORACLE ? "NUMBER(10)" : "INT";
+    }
+
+    private String timestampType() {
+        return switch (dialect) {
+            case MSSQL, SYBASE -> "DATETIME2";
+            case ORACLE, HSQL -> "TIMESTAMP";
+        };
+    }
+
+    private static DbDialect detectDialect(Config cfg) {
+        String probe = ((cfg.url() == null ? "" : cfg.url()) + " " + (cfg.driver() == null ? "" : cfg.driver()))
+            .toLowerCase(Locale.ROOT);
+        if (probe.contains("sqlserver") || probe.contains("mssql") || probe.contains("jtds")) {
+            return DbDialect.MSSQL;
+        }
+        if (probe.contains("sybase")) {
+            return DbDialect.SYBASE;
+        }
+        if (probe.contains("oracle")) {
+            return DbDialect.ORACLE;
+        }
+        return DbDialect.HSQL;
     }
 
     private static String sqlType(Col col) {
