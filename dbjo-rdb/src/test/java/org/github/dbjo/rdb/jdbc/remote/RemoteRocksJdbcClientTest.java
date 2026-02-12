@@ -20,9 +20,13 @@ import java.io.OutputStream;
 import java.io.StringWriter;
 import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
+import java.sql.Date;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.sql.Types;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -73,7 +77,40 @@ class RemoteRocksJdbcClientTest {
         try (ResultSet rowSet = client.query("select * from client", 0)) {
             rowSet.next();
             assertThat(rowSet.getInt("id")).isEqualTo(42);
+            assertThat(rowSet.getDate("created_on")).isEqualTo(Date.valueOf(LocalDate.of(2025, 1, 2)));
+            assertThat(rowSet.getTimestamp("created_at"))
+                    .isEqualTo(Timestamp.valueOf(LocalDateTime.of(2025, 1, 2, 3, 4, 5)));
+            assertThat(rowSet.getString("created_on")).isEqualTo("2025-01-02");
+            assertThat(rowSet.getObject("created_on")).isInstanceOf(Date.class);
+            assertThat(rowSet.getObject("created_at")).isInstanceOf(Timestamp.class);
+            assertThat(rowSet.getString("created_at")).isEqualTo("2025-01-02 03:04:05.0");
             assertThat(rowSet.next()).isFalse();
+        }
+    }
+
+
+    @Test
+    void normalizesIsoTemporalStringsFromRemoteRowset() throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        String rowsetXml = buildIsoTemporalStringRowSetXml();
+
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/api/rocks-jdbc/catalog", exchange -> writeJson(exchange, mapper, new RemoteRocksJdbcCatalogDto(List.of())));
+        server.createContext("/api/rocks-jdbc/query", exchange ->
+                writeJson(exchange, mapper, new RemoteRocksJdbcQueryResponse(rowsetXml)));
+        server.start();
+
+        String baseUrl = "http://localhost:" + server.getAddress().getPort() + "/api/rocks-jdbc";
+        RemoteRocksJdbcClient client = new RemoteRocksJdbcClient(HttpClient.newHttpClient(), mapper, baseUrl);
+
+        try (ResultSet rowSet = client.query("select now()", 0)) {
+            assertThat(rowSet.next()).isTrue();
+            assertThat(rowSet.getDate("created_on")).isEqualTo(Date.valueOf(LocalDate.of(2025, 1, 2)));
+            assertThat(rowSet.getTimestamp("created_at"))
+                    .isEqualTo(Timestamp.valueOf(LocalDateTime.of(2025, 1, 2, 3, 4, 5)));
+            assertThat(rowSet.getString("created_on")).isEqualTo("2025-01-02");
+            assertThat(rowSet.getObject("created_on")).isInstanceOf(Date.class);
+            assertThat(rowSet.getObject("created_at")).isInstanceOf(Timestamp.class);
         }
     }
 
@@ -81,12 +118,18 @@ class RemoteRocksJdbcClientTest {
         try (WebRowSet rowSet = RowSetProvider.newFactory().createWebRowSet()) {
             rowSet.setType(ResultSet.TYPE_SCROLL_INSENSITIVE);
             RowSetMetaDataImpl meta = new RowSetMetaDataImpl();
-            meta.setColumnCount(1);
+            meta.setColumnCount(3);
             meta.setColumnName(1, "id");
             meta.setColumnType(1, Types.INTEGER);
+            meta.setColumnName(2, "created_on");
+            meta.setColumnType(2, Types.DATE);
+            meta.setColumnName(3, "created_at");
+            meta.setColumnType(3, Types.TIMESTAMP);
             rowSet.setMetaData(meta);
             rowSet.moveToInsertRow();
             rowSet.updateInt(1, 42);
+            rowSet.updateDate(2, Date.valueOf(LocalDate.of(2025, 1, 2)));
+            rowSet.updateTimestamp(3, Timestamp.valueOf(LocalDateTime.of(2025, 1, 2, 3, 4, 5)));
             rowSet.insertRow();
             rowSet.moveToCurrentRow();
             rowSet.beforeFirst();
@@ -94,6 +137,14 @@ class RemoteRocksJdbcClientTest {
             rowSet.writeXml(writer);
             return writer.toString();
         }
+    }
+
+
+    private static String buildIsoTemporalStringRowSetXml() throws SQLException {
+        String xml = buildRowSetXml();
+        xml = xml.replace("<date>2025-01-02</date>", "<date>2025-01-02T00:00:00Z</date>");
+        xml = xml.replace("<timestamp>2025-01-02 03:04:05.0</timestamp>", "<timestamp>2025-01-02T03:04:05Z</timestamp>");
+        return xml;
     }
 
     private static void writeJson(HttpExchange exchange, ObjectMapper mapper, Object body) throws IOException {

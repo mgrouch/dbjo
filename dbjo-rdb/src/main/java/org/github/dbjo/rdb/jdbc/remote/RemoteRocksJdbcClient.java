@@ -27,6 +27,8 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.time.OffsetTime;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.util.Objects;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -140,14 +142,29 @@ final class RemoteRocksJdbcClient {
         if (value instanceof LocalDate date) return Date.valueOf(date);
         if (value instanceof LocalDateTime dateTime) return Date.valueOf(dateTime.toLocalDate());
         if (value instanceof OffsetDateTime dateTime) return Date.valueOf(dateTime.toLocalDate());
+        if (value instanceof Instant instant) return Date.valueOf(instant.atOffset(ZoneOffset.UTC).toLocalDate());
+        if (value instanceof java.util.Date date) return Date.valueOf(date.toInstant().atOffset(ZoneOffset.UTC).toLocalDate());
         if (value instanceof String s) {
+            String trimmed = s.trim();
             try {
-                return Date.valueOf(s.trim());
+                return Date.valueOf(trimmed);
             } catch (IllegalArgumentException ignored) {
                 try {
-                    return Date.valueOf(LocalDate.parse(s.trim()));
+                    return Date.valueOf(LocalDate.parse(trimmed));
                 } catch (RuntimeException ignoredAgain) {
-                    return value;
+                    try {
+                        return Date.valueOf(LocalDateTime.parse(trimmed).toLocalDate());
+                    } catch (RuntimeException ignoredOnceMore) {
+                        try {
+                            return Date.valueOf(OffsetDateTime.parse(trimmed).toLocalDate());
+                        } catch (RuntimeException ignoredYetAgain) {
+                            try {
+                                return Date.valueOf(ZonedDateTime.parse(trimmed).toLocalDate());
+                            } catch (RuntimeException ignoredFinal) {
+                                return value;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -182,6 +199,7 @@ final class RemoteRocksJdbcClient {
         if (value instanceof LocalDateTime dateTime) return Timestamp.valueOf(dateTime);
         if (value instanceof OffsetDateTime dateTime) return Timestamp.from(dateTime.toInstant());
         if (value instanceof Instant instant) return Timestamp.from(instant);
+        if (value instanceof java.util.Date date) return Timestamp.from(date.toInstant());
         if (value instanceof String s) {
             String trimmed = s.trim();
             try {
