@@ -1,6 +1,5 @@
 package org.github.dbjo.kafka.listener;
 
-import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -9,26 +8,27 @@ import java.util.Objects;
 import java.util.Properties;
 import java.util.function.Consumer;
 import org.apache.avro.Schema;
-import org.apache.avro.io.BinaryDecoder;
-import org.apache.avro.io.DecoderFactory;
-import org.apache.avro.specific.SpecificDatumReader;
 import org.apache.avro.specific.SpecificRecord;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerGroupMetadata;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.github.dbjo.meta.features.PartitionId;
 
 public class KafkaEventListener<T extends SpecificRecord> implements AutoCloseable {
-    private final KafkaConsumer<String, byte[]> consumer;
+    static final String SCHEMA_REGISTRY_URL_CONFIG = "schema.registry.url";
+    private static final String KAFKA_AVRO_DESERIALIZER = "KafkaAvroDeserializer";
+    private static final String KAFKA_SCHEMA_REGISTRY_URL_ENV = "KAFKA_SCHEMA_REGISTRY_URL";
+    private static final String KAFKA_AVRO_DESERIALIZER_CLASS = "io.confluent.kafka.serializers.KafkaAvroDeserializer";
+    private static final String KAFKA_AVRO_SPECIFIC_READER_CONFIG = "specific.avro.reader";
+
+    private final KafkaConsumer<String, T> consumer;
     private final TopicPartition topicPartition;
     private final int partitionCount;
-    private final Schema schema;
 
     public KafkaEventListener(String bootstrapServers, String topic, String groupId, int partition, int partitionCount, Schema schema) {
         this(defaultProperties(bootstrapServers, groupId), topic, partition, partitionCount, schema);
@@ -50,7 +50,8 @@ public class KafkaEventListener<T extends SpecificRecord> implements AutoCloseab
         if (partition >= partitionCount) {
             throw new IllegalArgumentException("partition must be less than partitionCount");
         }
-        this.schema = Objects.requireNonNull(schema, "schema must not be null");
+        Objects.requireNonNull(schema, "schema must not be null");
+        applySchemaRegistryUrlIfRequired(properties, System.getenv());
         this.consumer = new KafkaConsumer<>(properties);
         this.topicPartition = new TopicPartition(topic, partition);
         this.partitionCount = partitionCount;
@@ -106,14 +107,13 @@ public class KafkaEventListener<T extends SpecificRecord> implements AutoCloseab
             throw new IllegalArgumentException("handler must not be null");
         }
 
-        ConsumerRecords<String, byte[]> records = consumer.poll(timeout);
+        ConsumerRecords<String, T> records = consumer.poll(timeout);
         List<PartitionedKafkaEvent<T>> events = new ArrayList<>();
         long lastOffset = -1L;
-        for (ConsumerRecord<String, byte[]> record : records.records(topicPartition)) {
-            T event = deserialize(record.value(), schema);
+        for (ConsumerRecord<String, T> record : records.records(topicPartition)) {
             assertExpectedPartition(record.partition(), record.key());
             PartitionedKafkaEvent<T> partitionedEvent =
-                    new PartitionedKafkaEvent<>(record.partition(), record.offset(), record.key(), record.timestamp(), event);
+                    new PartitionedKafkaEvent<>(record.partition(), record.offset(), record.key(), record.timestamp(), record.value());
             handler.accept(partitionedEvent);
             events.add(partitionedEvent);
             lastOffset = record.offset();
@@ -155,10 +155,32 @@ public class KafkaEventListener<T extends SpecificRecord> implements AutoCloseab
         properties.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         properties.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         properties.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
-        properties.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
+        properties.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, KAFKA_AVRO_DESERIALIZER_CLASS);
+        properties.put(KAFKA_AVRO_SPECIFIC_READER_CONFIG, "true");
         properties.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         properties.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
         return properties;
+    }
+
+    static void applySchemaRegistryUrlIfRequired(Properties properties, Map<String, String> env) {
+        Objects.requireNonNull(properties, "properties must not be null");
+        String deserializer = Objects.toString(properties.get(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG), "");
+        if (!deserializer.contains(KAFKA_AVRO_DESERIALIZER)) {
+            return;
+        }
+
+        Object configuredSchemaRegistryUrl = properties.get(SCHEMA_REGISTRY_URL_CONFIG);
+        if (configuredSchemaRegistryUrl instanceof String schemaRegistryUrl && !schemaRegistryUrl.isBlank()) {
+            return;
+        }
+
+        String schemaRegistryUrlFromEnv = env.get(KAFKA_SCHEMA_REGISTRY_URL_ENV);
+        if (schemaRegistryUrlFromEnv != null && !schemaRegistryUrlFromEnv.isBlank()) {
+            properties.put(SCHEMA_REGISTRY_URL_CONFIG, schemaRegistryUrlFromEnv);
+            return;
+        }
+
+        throw new IllegalArgumentException("kafka schema registry URL is not set");
     }
 
     private void assertExpectedPartition(int actualPartition, String partitionKey) {
@@ -169,17 +191,6 @@ public class KafkaEventListener<T extends SpecificRecord> implements AutoCloseab
         if (expectedPartition != actualPartition) {
             throw new IllegalStateException(
                     "Received event in unexpected partition. expected=" + expectedPartition + ", actual=" + actualPartition);
-        }
-    }
-
-    private static <T extends SpecificRecord> T deserialize(byte[] payload, Schema schema) {
-        Objects.requireNonNull(payload, "payload must not be null");
-        SpecificDatumReader<T> reader = new SpecificDatumReader<>(schema);
-        BinaryDecoder decoder = DecoderFactory.get().binaryDecoder(payload, null);
-        try {
-            return reader.read(null, decoder);
-        } catch (IOException ex) {
-            throw new IllegalStateException("Failed to deserialize event", ex);
         }
     }
 }
