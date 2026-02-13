@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
 import java.util.function.Function;
@@ -26,6 +27,10 @@ import org.github.dbjo.meta.features.PartitionId;
 import org.github.dbjo.meta.features.Partitioned;
 
 public class KafkaEventPublisher<T extends SpecificRecord> implements AutoCloseable {
+    static final String SCHEMA_REGISTRY_URL_CONFIG = "schema.registry.url";
+    private static final String KAFKA_AVRO_SERIALIZER = "KafkaAvroSerializer";
+    private static final String KAFKA_SCHEMA_REGISTRY_URL_ENV = "KAFKA_SCHEMA_REGISTRY_URL";
+
     private final KafkaProducer<String, byte[]> producer;
     private final String topic;
     private final int partitionCount;
@@ -46,6 +51,7 @@ public class KafkaEventPublisher<T extends SpecificRecord> implements AutoClosea
         if (partitionCount <= 0) {
             throw new IllegalArgumentException("partitionCount must be greater than 0");
         }
+        applySchemaRegistryUrlIfRequired(properties, System.getenv());
         this.schema = Objects.requireNonNull(schema, "schema must not be null");
         this.producer = new KafkaProducer<>(properties);
         this.topic = topic;
@@ -54,6 +60,27 @@ public class KafkaEventPublisher<T extends SpecificRecord> implements AutoClosea
         if (transactional) {
             producer.initTransactions();
         }
+    }
+
+    static void applySchemaRegistryUrlIfRequired(Properties properties, Map<String, String> env) {
+        Objects.requireNonNull(properties, "properties must not be null");
+        String serializer = Objects.toString(properties.get(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG), "");
+        if (!serializer.contains(KAFKA_AVRO_SERIALIZER)) {
+            return;
+        }
+
+        Object configuredSchemaRegistryUrl = properties.get(SCHEMA_REGISTRY_URL_CONFIG);
+        if (configuredSchemaRegistryUrl instanceof String schemaRegistryUrl && !schemaRegistryUrl.isBlank()) {
+            return;
+        }
+
+        String schemaRegistryUrlFromEnv = env.get(KAFKA_SCHEMA_REGISTRY_URL_ENV);
+        if (schemaRegistryUrlFromEnv != null && !schemaRegistryUrlFromEnv.isBlank()) {
+            properties.put(SCHEMA_REGISTRY_URL_CONFIG, schemaRegistryUrlFromEnv);
+            return;
+        }
+
+        throw new IllegalArgumentException("kafka schema registry URL is not set");
     }
 
     public void publish(T event, Partitioned partitioned) {
