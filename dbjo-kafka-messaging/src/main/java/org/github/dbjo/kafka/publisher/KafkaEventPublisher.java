@@ -1,7 +1,5 @@
 package org.github.dbjo.kafka.publisher;
 
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -10,18 +8,14 @@ import java.util.Objects;
 import java.util.Properties;
 import java.util.function.Function;
 import org.apache.avro.Schema;
-import org.apache.avro.io.BinaryEncoder;
-import org.apache.avro.io.EncoderFactory;
-import org.apache.avro.specific.SpecificDatumWriter;
 import org.apache.avro.specific.SpecificRecord;
+import org.apache.kafka.clients.consumer.ConsumerGroupMetadata;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
-import org.apache.kafka.clients.consumer.ConsumerGroupMetadata;
-import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.github.dbjo.meta.features.PartitionId;
 import org.github.dbjo.meta.features.Partitioned;
@@ -30,11 +24,11 @@ public class KafkaEventPublisher<T extends SpecificRecord> implements AutoClosea
     static final String SCHEMA_REGISTRY_URL_CONFIG = "schema.registry.url";
     private static final String KAFKA_AVRO_SERIALIZER = "KafkaAvroSerializer";
     private static final String KAFKA_SCHEMA_REGISTRY_URL_ENV = "KAFKA_SCHEMA_REGISTRY_URL";
+    private static final String KAFKA_AVRO_SERIALIZER_CLASS = "io.confluent.kafka.serializers.KafkaAvroSerializer";
 
-    private final KafkaProducer<String, byte[]> producer;
+    private final KafkaProducer<String, T> producer;
     private final String topic;
     private final int partitionCount;
-    private final Schema schema;
     private final boolean transactional;
 
     public KafkaEventPublisher(String bootstrapServers, String topic, int partitionCount, Schema schema) {
@@ -51,8 +45,8 @@ public class KafkaEventPublisher<T extends SpecificRecord> implements AutoClosea
         if (partitionCount <= 0) {
             throw new IllegalArgumentException("partitionCount must be greater than 0");
         }
+        Objects.requireNonNull(schema, "schema must not be null");
         applySchemaRegistryUrlIfRequired(properties, System.getenv());
-        this.schema = Objects.requireNonNull(schema, "schema must not be null");
         this.producer = new KafkaProducer<>(properties);
         this.topic = topic;
         this.partitionCount = partitionCount;
@@ -84,24 +78,16 @@ public class KafkaEventPublisher<T extends SpecificRecord> implements AutoClosea
     }
 
     public void publish(T event, Partitioned partitioned) {
-        ProducerRecord<String, byte[]> record = createRecord(event, partitioned);
+        ProducerRecord<String, T> record = createRecord(event, partitioned);
         producer.send(record);
     }
 
     public KafkaPublishReceipt publishSync(T event, Partitioned partitioned) {
-        ProducerRecord<String, byte[]> record = createRecord(event, partitioned);
+        ProducerRecord<String, T> record = createRecord(event, partitioned);
         RecordMetadata metadata = await(producer.send(record));
         return new KafkaPublishReceipt(null, metadata.topic(), metadata.partition(), metadata.offset(), metadata.timestamp());
     }
 
-    /**
-     * Publishes a batch atomically in Kafka transaction and returns metadata for each message.
-     *
-     * <p>This API is intentionally separated from any DB transaction. For the outbox pattern,
-     * store outbox rows in DB transaction first, then call this method, then persist returned
-     * offsets in a new DB transaction. Kafka and DB cannot share one physical ACID transaction
-     * without 2PC/XA.
-     */
     public List<KafkaPublishReceipt> publishBatchInTransaction(List<KafkaPublishCommand<T>> commands) {
         if (!transactional) {
             throw new IllegalStateException(
@@ -117,7 +103,7 @@ public class KafkaEventPublisher<T extends SpecificRecord> implements AutoClosea
         producer.beginTransaction();
         try {
             for (KafkaPublishCommand<T> command : commands) {
-                ProducerRecord<String, byte[]> record = createRecord(command.event(), command.partitioned());
+                ProducerRecord<String, T> record = createRecord(command.event(), command.partitioned());
                 RecordMetadata metadata = await(producer.send(record));
                 receipts.add(new KafkaPublishReceipt(
                     command.outboxId(),
@@ -170,7 +156,7 @@ public class KafkaEventPublisher<T extends SpecificRecord> implements AutoClosea
         producer.beginTransaction();
         try {
             for (KafkaPublishCommand<T> command : commands) {
-                ProducerRecord<String, byte[]> record = createRecord(command.event(), command.partitioned());
+                ProducerRecord<String, T> record = createRecord(command.event(), command.partitioned());
                 RecordMetadata metadata = await(producer.send(record));
                 receipts.add(new KafkaPublishReceipt(
                     command.outboxId(),
@@ -189,7 +175,7 @@ public class KafkaEventPublisher<T extends SpecificRecord> implements AutoClosea
         }
     }
 
-    private ProducerRecord<String, byte[]> createRecord(T event, Partitioned partitioned) {
+    private ProducerRecord<String, T> createRecord(T event, Partitioned partitioned) {
         if (event == null) {
             throw new IllegalArgumentException("event must not be null");
         }
@@ -203,8 +189,7 @@ public class KafkaEventPublisher<T extends SpecificRecord> implements AutoClosea
             throw new IllegalArgumentException("partitionKey must not be null and partitionCount must be greater than 0");
         }
 
-        byte[] payload = serialize(event, schema);
-        return new ProducerRecord<>(topic, partition, partitionKey, payload);
+        return new ProducerRecord<>(topic, partition, partitionKey, event);
     }
 
     @Override
@@ -219,21 +204,9 @@ public class KafkaEventPublisher<T extends SpecificRecord> implements AutoClosea
         Properties properties = new Properties();
         properties.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         properties.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
-        properties.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
+        properties.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, KAFKA_AVRO_SERIALIZER_CLASS);
         properties.put(ProducerConfig.ACKS_CONFIG, "all");
         return properties;
-    }
-
-    private static <T extends SpecificRecord> byte[] serialize(T event, Schema schema) {
-        SpecificDatumWriter<T> writer = new SpecificDatumWriter<>(schema);
-        try (ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
-            BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(outputStream, null);
-            writer.write(event, encoder);
-            encoder.flush();
-            return outputStream.toByteArray();
-        } catch (IOException ex) {
-            throw new IllegalStateException("Failed to serialize event", ex);
-        }
     }
 
     private static RecordMetadata await(java.util.concurrent.Future<RecordMetadata> future) {
