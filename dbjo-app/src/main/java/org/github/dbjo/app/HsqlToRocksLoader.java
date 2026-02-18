@@ -17,7 +17,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 public record HsqlToRocksLoader(ClientJdbcDao clientJdbcDao, ProductJdbcDao productJdbcDao,
                                 PurchaseJdbcDao purchaseJdbcDao, ClientDao clientDao, ProductDao productDao,
                                 PurchaseDao purchaseDao, TransactionTemplate rocksTransactionTemplate,
-                                int partitionNum, int totalPartitions) {
+                                int partitionNum, int totalPartitions, String additionalCriteria) {
+
+    public static final String DEFAULT_ADDITIONAL_CRITERIA = "active = 'Y'";
 
     public void load() {
         rocksTransactionTemplate.executeWithoutResult(status -> {
@@ -29,7 +31,10 @@ public record HsqlToRocksLoader(ClientJdbcDao clientJdbcDao, ProductJdbcDao prod
 
     private <T> LoaderUtil.SqlSupplier<? extends Iterable<T>> loaderFor(BaseJdbcDAO<T, ?> dao, Class<T> entityClass) {
         if (Partitioned.class.isAssignableFrom(entityClass)) {
-            return () -> dao.selectAllByPartition(partitionNum, totalPartitions);
+            String criteria = additionalCriteria == null || additionalCriteria.isBlank()
+                    ? DEFAULT_ADDITIONAL_CRITERIA
+                    : additionalCriteria.trim();
+            return () -> dao.selectAllByPartition(partitionNum, totalPartitions, criteria);
         }
         return dao::selectAll;
     }

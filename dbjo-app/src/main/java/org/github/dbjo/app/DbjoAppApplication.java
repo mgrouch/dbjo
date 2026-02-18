@@ -125,8 +125,22 @@ public class DbjoAppApplication {
                 purchaseDao,
                 rocksTransactionTemplate,
                 partitionArgs.partitionNum(),
-                partitionArgs.totalPartitions()
+                partitionArgs.totalPartitions(),
+                defaultIfBlank(applicationArguments.getOptionValues("additional-criteria"),
+                        HsqlToRocksLoader.DEFAULT_ADDITIONAL_CRITERIA)
         );
+    }
+
+
+    private static String defaultIfBlank(List<String> values, String defaultValue) {
+        if (values == null || values.isEmpty()) {
+            return defaultValue;
+        }
+        String value = values.get(0);
+        if (value == null || value.isBlank()) {
+            return defaultValue;
+        }
+        return value.trim();
     }
 
     @Bean

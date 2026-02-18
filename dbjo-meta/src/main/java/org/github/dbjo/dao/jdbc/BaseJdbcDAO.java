@@ -76,8 +76,20 @@ public abstract class BaseJdbcDAO<T, K> {
         }
     }
 
+    public List<T> selectAllByPartition(int partitionNum, int totalPartitions, String additionalCriteria) throws SQLException {
+        try (Connection c = ds.getConnection()) {
+            return selectAllByPartition(c, partitionNum, totalPartitions, additionalCriteria);
+        }
+    }
+
     public List<T> selectAllByPartition(Connection c, int partitionNum, int totalPartitions) throws SQLException {
+        return selectAllByPartition(c, partitionNum, totalPartitions, null);
+    }
+
+    public List<T> selectAllByPartition(Connection c, int partitionNum, int totalPartitions, String additionalCriteria)
+            throws SQLException {
         String sql = withPartitionPredicate(meta.selectAllBaseSql());
+        sql = appendAdditionalCriteria(sql, additionalCriteria);
         try (PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setInt(1, totalPartitions);
             ps.setInt(2, partitionNum);
@@ -96,6 +108,13 @@ public abstract class BaseJdbcDAO<T, K> {
             return trimmed + " AND " + predicate;
         }
         return trimmed + " WHERE " + predicate;
+    }
+
+    private static String appendAdditionalCriteria(String sql, String additionalCriteria) {
+        if (additionalCriteria == null || additionalCriteria.isBlank()) {
+            return sql;
+        }
+        return sql + " AND " + additionalCriteria.trim();
     }
 
     // Criteria -> SQL bridge (property-name based)
