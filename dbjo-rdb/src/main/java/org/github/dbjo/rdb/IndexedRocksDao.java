@@ -97,6 +97,31 @@ public abstract class IndexedRocksDao<T, K> extends AbstractRocksDao<T, K> {
         return out;
     }
 
+    @Override
+    public int deleteByCriteria(org.github.dbjo.criteria.Query<? extends Serializable> criteria) {
+        Objects.requireNonNull(criteria, "criteria");
+
+        Plan<K> plan = plan(criteria);
+
+        ArrayList<K> idsToDelete = new ArrayList<>();
+        HashSet<K> seen = (plan.queries.size() > 1) ? new HashSet<>() : null;
+
+        for (Query<K> rq : plan.queries) {
+            try (Stream<Map.Entry<K, T>> s = stream(rq)) {
+                Iterator<Map.Entry<K, T>> it = s.iterator();
+                while (it.hasNext()) {
+                    Map.Entry<K, T> e = it.next();
+                    if (seen != null && !seen.add(e.getKey())) continue;
+                    if (CriteriaSupport.test(criteria, e.getValue())) {
+                        idsToDelete.add(e.getKey());
+                    }
+                }
+            }
+        }
+
+        return deleteByIds(idsToDelete);
+    }
+
     // index maintenance
 
     @Override

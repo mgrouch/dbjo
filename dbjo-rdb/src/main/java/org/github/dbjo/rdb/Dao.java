@@ -10,6 +10,15 @@ public interface Dao<T, K> extends AutoCloseable {
 
     boolean delete(K key);
 
+    default int deleteByIds(Collection<K> ids) {
+        Objects.requireNonNull(ids, "ids");
+        int deleted = 0;
+        for (K id : ids) {
+            if (delete(id)) deleted++;
+        }
+        return deleted;
+    }
+
     boolean containsKey(K key);
 
     // Bulk defaults
