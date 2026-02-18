@@ -15,6 +15,7 @@ import org.github.dbjo.rdb.criteria.CriteriaSupport;
 
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 
@@ -169,6 +170,32 @@ public abstract class AbstractRocksDao<T, K> implements Dao<T, K> {
         }
 
         return out;
+    }
+
+    public int deleteByIds(Collection<K> ids) {
+        return Dao.super.deleteByIds(ids);
+    }
+
+    /**
+     * Delete records matching criteria.
+     *
+     * <p>Base implementation scans and evaluates criteria in-memory.
+     */
+    public int deleteByCriteria(org.github.dbjo.criteria.Query<? extends Serializable> criteria) {
+        Objects.requireNonNull(criteria, "criteria");
+
+        ArrayList<K> idsToDelete = new ArrayList<>();
+        try (Stream<Map.Entry<K, T>> st = stream(Query.<K>builder().limit(Integer.MAX_VALUE).build())) {
+            Iterator<Map.Entry<K, T>> it = st.iterator();
+            while (it.hasNext()) {
+                Map.Entry<K, T> e = it.next();
+                if (CriteriaSupport.test(criteria, e.getValue())) {
+                    idsToDelete.add(e.getKey());
+                }
+            }
+        }
+
+        return deleteByIds(idsToDelete);
     }
 
     @Override

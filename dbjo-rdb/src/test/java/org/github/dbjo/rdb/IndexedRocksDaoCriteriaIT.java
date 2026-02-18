@@ -284,4 +284,54 @@ public class IndexedRocksDaoCriteriaIT {
             assertThat(decodes.get()).isLessThan(200);
         }
     }
+
+    @Test
+    void delete_by_ids_deletes_existing_records_and_returns_deleted_count() throws Exception {
+        try (RocksDbHandle h = openDb()) {
+            TransactionDB db = h.db();
+            PersonDao dao = new PersonDao(
+                    new SimpleSessions(db),
+                    h.cf("person"),
+                    new PersonCodec(),
+                    Map.of("idx_region", h.cf("idx_region"), "idx_age", h.cf("idx_age"))
+            );
+
+            populate(dao, 50);
+
+            int deleted = dao.deleteByIds(List.of(1, 3, 5, 9999));
+
+            assertThat(deleted).isEqualTo(3);
+            assertThat(dao.findByKey(1)).isEmpty();
+            assertThat(dao.findByKey(3)).isEmpty();
+            assertThat(dao.findByKey(5)).isEmpty();
+            assertThat(dao.findByKey(2)).isPresent();
+        }
+    }
+
+    @Test
+    void delete_by_criteria_deletes_matching_records() throws Exception {
+        try (RocksDbHandle h = openDb()) {
+            TransactionDB db = h.db();
+            PersonDao dao = new PersonDao(
+                    new SimpleSessions(db),
+                    h.cf("person"),
+                    new PersonCodec(),
+                    Map.of("idx_region", h.cf("idx_region"), "idx_age", h.cf("idx_age"))
+            );
+
+            populate(dao, 2000);
+
+            Query<Person> q = Query.from(PERSON_META)
+                    .where(Conditions.eq(P_REGION, "Z"))
+                    .build();
+
+            int deleted = dao.deleteByCriteria(q);
+
+            assertThat(deleted).isEqualTo(2);
+            List<Person> remaining = dao.select(q);
+            assertThat(remaining).isEmpty();
+            assertThat(dao.findByKey(997)).isEmpty();
+            assertThat(dao.findByKey(1994)).isEmpty();
+        }
+    }
 }
