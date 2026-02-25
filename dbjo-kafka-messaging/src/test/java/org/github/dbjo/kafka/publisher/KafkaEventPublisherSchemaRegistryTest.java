@@ -44,4 +44,32 @@ class KafkaEventPublisherSchemaRegistryTest {
 
         assertEquals("kafka schema registry URL is not set", ex.getMessage());
     }
+
+    @Test
+    void shouldSetSslPropertiesFromEnvironment() {
+        Properties properties = new Properties();
+
+        KafkaEventPublisher.applySslConfigIfPresent(
+            properties,
+            Map.of(
+                "KAFKA_SECURITY_PROTOCOL", "SSL",
+                "KAFKA_SSL_TRUSTSTORE_LOCATION", "/etc/kafka/truststore.jks",
+                "KAFKA_SSL_TRUSTSTORE_PASSWORD", "truststore-secret"
+            )
+        );
+
+        assertEquals("SSL", properties.get(KafkaEventPublisher.SECURITY_PROTOCOL_CONFIG));
+        assertEquals("/etc/kafka/truststore.jks", properties.get(KafkaEventPublisher.SSL_TRUSTSTORE_LOCATION_CONFIG));
+        assertEquals("truststore-secret", properties.get(KafkaEventPublisher.SSL_TRUSTSTORE_PASSWORD_CONFIG));
+    }
+
+    @Test
+    void shouldPreserveExplicitSslPropertyValues() {
+        Properties properties = new Properties();
+        properties.put(KafkaEventPublisher.SECURITY_PROTOCOL_CONFIG, "SASL_SSL");
+
+        KafkaEventPublisher.applySslConfigIfPresent(properties, Map.of("KAFKA_SECURITY_PROTOCOL", "SSL"));
+
+        assertEquals("SASL_SSL", properties.get(KafkaEventPublisher.SECURITY_PROTOCOL_CONFIG));
+    }
 }
