@@ -22,9 +22,27 @@ import org.github.dbjo.meta.features.Partitioned;
 
 public class KafkaEventPublisher<T extends SpecificRecord> implements AutoCloseable {
     static final String SCHEMA_REGISTRY_URL_CONFIG = "schema.registry.url";
+    static final String SECURITY_PROTOCOL_CONFIG = "security.protocol";
+    static final String SSL_TRUSTSTORE_LOCATION_CONFIG = "ssl.truststore.location";
+    static final String SSL_TRUSTSTORE_PASSWORD_CONFIG = "ssl.truststore.password";
+    static final String SSL_TRUSTSTORE_TYPE_CONFIG = "ssl.truststore.type";
+    static final String SSL_KEYSTORE_LOCATION_CONFIG = "ssl.keystore.location";
+    static final String SSL_KEYSTORE_PASSWORD_CONFIG = "ssl.keystore.password";
+    static final String SSL_KEYSTORE_TYPE_CONFIG = "ssl.keystore.type";
+    static final String SSL_KEY_PASSWORD_CONFIG = "ssl.key.password";
+    static final String SSL_ENDPOINT_IDENTIFICATION_ALGORITHM_CONFIG = "ssl.endpoint.identification.algorithm";
     private static final String KAFKA_AVRO_SERIALIZER = "KafkaAvroSerializer";
     private static final String KAFKA_SCHEMA_REGISTRY_URL_ENV = "KAFKA_SCHEMA_REGISTRY_URL";
     private static final String KAFKA_AVRO_SERIALIZER_CLASS = "io.confluent.kafka.serializers.KafkaAvroSerializer";
+    private static final String KAFKA_SECURITY_PROTOCOL_ENV = "KAFKA_SECURITY_PROTOCOL";
+    private static final String KAFKA_SSL_TRUSTSTORE_LOCATION_ENV = "KAFKA_SSL_TRUSTSTORE_LOCATION";
+    private static final String KAFKA_SSL_TRUSTSTORE_PASSWORD_ENV = "KAFKA_SSL_TRUSTSTORE_PASSWORD";
+    private static final String KAFKA_SSL_TRUSTSTORE_TYPE_ENV = "KAFKA_SSL_TRUSTSTORE_TYPE";
+    private static final String KAFKA_SSL_KEYSTORE_LOCATION_ENV = "KAFKA_SSL_KEYSTORE_LOCATION";
+    private static final String KAFKA_SSL_KEYSTORE_PASSWORD_ENV = "KAFKA_SSL_KEYSTORE_PASSWORD";
+    private static final String KAFKA_SSL_KEYSTORE_TYPE_ENV = "KAFKA_SSL_KEYSTORE_TYPE";
+    private static final String KAFKA_SSL_KEY_PASSWORD_ENV = "KAFKA_SSL_KEY_PASSWORD";
+    private static final String KAFKA_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM_ENV = "KAFKA_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM";
 
     private final KafkaProducer<String, T> producer;
     private final String topic;
@@ -47,6 +65,7 @@ public class KafkaEventPublisher<T extends SpecificRecord> implements AutoClosea
         }
         Objects.requireNonNull(schema, "schema must not be null");
         applySchemaRegistryUrlIfRequired(properties, System.getenv());
+        applySslConfigIfPresent(properties, System.getenv());
         this.producer = new KafkaProducer<>(properties);
         this.topic = topic;
         this.partitionCount = partitionCount;
@@ -75,6 +94,36 @@ public class KafkaEventPublisher<T extends SpecificRecord> implements AutoClosea
         }
 
         throw new IllegalArgumentException("kafka schema registry URL is not set");
+    }
+
+    static void applySslConfigIfPresent(Properties properties, Map<String, String> env) {
+        Objects.requireNonNull(properties, "properties must not be null");
+        putIfMissing(properties, env, SECURITY_PROTOCOL_CONFIG, KAFKA_SECURITY_PROTOCOL_ENV);
+        putIfMissing(properties, env, SSL_TRUSTSTORE_LOCATION_CONFIG, KAFKA_SSL_TRUSTSTORE_LOCATION_ENV);
+        putIfMissing(properties, env, SSL_TRUSTSTORE_PASSWORD_CONFIG, KAFKA_SSL_TRUSTSTORE_PASSWORD_ENV);
+        putIfMissing(properties, env, SSL_TRUSTSTORE_TYPE_CONFIG, KAFKA_SSL_TRUSTSTORE_TYPE_ENV);
+        putIfMissing(properties, env, SSL_KEYSTORE_LOCATION_CONFIG, KAFKA_SSL_KEYSTORE_LOCATION_ENV);
+        putIfMissing(properties, env, SSL_KEYSTORE_PASSWORD_CONFIG, KAFKA_SSL_KEYSTORE_PASSWORD_ENV);
+        putIfMissing(properties, env, SSL_KEYSTORE_TYPE_CONFIG, KAFKA_SSL_KEYSTORE_TYPE_ENV);
+        putIfMissing(properties, env, SSL_KEY_PASSWORD_CONFIG, KAFKA_SSL_KEY_PASSWORD_ENV);
+        putIfMissing(
+            properties,
+            env,
+            SSL_ENDPOINT_IDENTIFICATION_ALGORITHM_CONFIG,
+            KAFKA_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM_ENV
+        );
+    }
+
+    private static void putIfMissing(Properties properties, Map<String, String> env, String propertyKey, String envKey) {
+        Object configured = properties.get(propertyKey);
+        if (configured instanceof String configuredValue && !configuredValue.isBlank()) {
+            return;
+        }
+
+        String envValue = env.get(envKey);
+        if (envValue != null && !envValue.isBlank()) {
+            properties.put(propertyKey, envValue);
+        }
     }
 
     public void publish(T event, Partitioned partitioned) {
