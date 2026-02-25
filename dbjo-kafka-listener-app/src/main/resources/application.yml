@@ -10,6 +10,15 @@ dbjo:
       max-poll-iterations: ${DBJO_KAFKA_LISTENER_MAX_POLL_ITERATIONS:-1}
       output-topic: ${DBJO_KAFKA_LISTENER_OUTPUT_TOPIC:processed-order-events}
       schema-registry-url: ${KAFKA_SCHEMA_REGISTRY_URL:http://localhost:8081}
+      security-protocol: ${KAFKA_SECURITY_PROTOCOL:}
+      ssl-truststore-location: ${KAFKA_SSL_TRUSTSTORE_LOCATION:}
+      ssl-truststore-password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
+      ssl-truststore-type: ${KAFKA_SSL_TRUSTSTORE_TYPE:}
+      ssl-keystore-location: ${KAFKA_SSL_KEYSTORE_LOCATION:}
+      ssl-keystore-password: ${KAFKA_SSL_KEYSTORE_PASSWORD:}
+      ssl-keystore-type: ${KAFKA_SSL_KEYSTORE_TYPE:}
+      ssl-key-password: ${KAFKA_SSL_KEY_PASSWORD:}
+      ssl-endpoint-identification-algorithm: ${KAFKA_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM:}
       consumer-key-deserializer-class: ${DBJO_KAFKA_LISTENER_CONSUMER_KEY_DESERIALIZER_CLASS:org.apache.kafka.common.serialization.StringDeserializer}
       consumer-value-deserializer-class: ${DBJO_KAFKA_LISTENER_CONSUMER_VALUE_DESERIALIZER_CLASS:io.confluent.kafka.serializers.KafkaAvroDeserializer}
       consumer-specific-avro-reader: ${DBJO_KAFKA_LISTENER_CONSUMER_SPECIFIC_AVRO_READER:true}
