@@ -6,10 +6,10 @@ import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicLong;
-import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
+import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.serialization.StringSerializer;
 import org.github.dbjo.kafka.MutablePartitionKey;
 import org.github.dbjo.kafka.avro.OrderEvent;
 import org.github.dbjo.kafka.listener.ConsumeOutboxStore;
@@ -23,6 +23,9 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class PartitionedOrderEventListenerRunner implements CommandLineRunner {
+    private static final String SCHEMA_REGISTRY_URL_CONFIG = "schema.registry.url";
+    private static final String SPECIFIC_AVRO_READER_CONFIG = "specific.avro.reader";
+
     private final OrderEventListenerProperties properties;
 
     public PartitionedOrderEventListenerRunner(OrderEventListenerProperties properties) {
@@ -31,19 +34,30 @@ public class PartitionedOrderEventListenerRunner implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
+        Properties listenerProps = new Properties();
+        listenerProps.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, properties.getBootstrapServers());
+        listenerProps.put(ConsumerConfig.GROUP_ID_CONFIG, properties.getGroupId());
+        listenerProps.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, properties.getConsumerKeyDeserializerClass());
+        listenerProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, properties.getConsumerValueDeserializerClass());
+        listenerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        listenerProps.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
+        listenerProps.put(SPECIFIC_AVRO_READER_CONFIG, String.valueOf(properties.isConsumerSpecificAvroReader()));
+        listenerProps.put(SCHEMA_REGISTRY_URL_CONFIG, properties.getSchemaRegistryUrl());
+
         Properties publisherProps = new Properties();
         publisherProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, properties.getBootstrapServers());
         publisherProps.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG,
             properties.getProducerTransactionalIdPrefix() + "-p" + properties.getPartition());
-        publisherProps.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, "true");
-        publisherProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
-        publisherProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, "io.confluent.kafka.serializers.KafkaAvroSerializer");
+        publisherProps.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG,
+            String.valueOf(properties.isProducerEnableIdempotence()));
+        publisherProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, properties.getProducerKeySerializerClass());
+        publisherProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, properties.getProducerValueSerializerClass());
+        publisherProps.put(SCHEMA_REGISTRY_URL_CONFIG, properties.getSchemaRegistryUrl());
 
         try (
             KafkaOrderEventListener listener = new KafkaOrderEventListener(
-                properties.getBootstrapServers(),
+                listenerProps,
                 properties.getTopic(),
-                properties.getGroupId(),
                 properties.getPartition(),
                 properties.getPartitionCount());
             KafkaEventPublisher<OrderEvent> publisher = new KafkaEventPublisher<>(

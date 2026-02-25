@@ -1,0 +1,19 @@
+dbjo:
+  kafka:
+    listener:
+      bootstrap-servers: ${DBJO_KAFKA_LISTENER_BOOTSTRAP_SERVERS:localhost:9092}
+      topic: ${DBJO_KAFKA_LISTENER_TOPIC:order-events}
+      group-id: ${DBJO_KAFKA_LISTENER_GROUP_ID:order-event-listener-app}
+      partition: ${DBJO_KAFKA_LISTENER_PARTITION:0}
+      partition-count: ${DBJO_KAFKA_LISTENER_PARTITION_COUNT:1}
+      poll-timeout: ${DBJO_KAFKA_LISTENER_POLL_TIMEOUT:500ms}
+      max-poll-iterations: ${DBJO_KAFKA_LISTENER_MAX_POLL_ITERATIONS:-1}
+      output-topic: ${DBJO_KAFKA_LISTENER_OUTPUT_TOPIC:processed-order-events}
+      schema-registry-url: ${KAFKA_SCHEMA_REGISTRY_URL:http://localhost:8081}
+      consumer-key-deserializer-class: ${DBJO_KAFKA_LISTENER_CONSUMER_KEY_DESERIALIZER_CLASS:org.apache.kafka.common.serialization.StringDeserializer}
+      consumer-value-deserializer-class: ${DBJO_KAFKA_LISTENER_CONSUMER_VALUE_DESERIALIZER_CLASS:io.confluent.kafka.serializers.KafkaAvroDeserializer}
+      consumer-specific-avro-reader: ${DBJO_KAFKA_LISTENER_CONSUMER_SPECIFIC_AVRO_READER:true}
+      producer-transactional-id-prefix: ${DBJO_KAFKA_LISTENER_PRODUCER_TRANSACTIONAL_ID_PREFIX:order-event-listener-tx}
+      producer-enable-idempotence: ${DBJO_KAFKA_LISTENER_PRODUCER_ENABLE_IDEMPOTENCE:true}
+      producer-key-serializer-class: ${DBJO_KAFKA_LISTENER_PRODUCER_KEY_SERIALIZER_CLASS:org.apache.kafka.common.serialization.StringSerializer}
+      producer-value-serializer-class: ${DBJO_KAFKA_LISTENER_PRODUCER_VALUE_SERIALIZER_CLASS:io.confluent.kafka.serializers.KafkaAvroSerializer}
