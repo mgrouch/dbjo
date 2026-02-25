@@ -7,6 +7,15 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class OrderEventListenerProperties extends KafkaEventListenerProperties {
     private String outputTopic;
     private String schemaRegistryUrl;
+    private String securityProtocol;
+    private String sslTruststoreLocation;
+    private String sslTruststorePassword;
+    private String sslTruststoreType;
+    private String sslKeystoreLocation;
+    private String sslKeystorePassword;
+    private String sslKeystoreType;
+    private String sslKeyPassword;
+    private String sslEndpointIdentificationAlgorithm;
     private String consumerKeyDeserializerClass;
     private String consumerValueDeserializerClass;
     private boolean consumerSpecificAvroReader;
@@ -29,6 +38,78 @@ public class OrderEventListenerProperties extends KafkaEventListenerProperties {
 
     public void setSchemaRegistryUrl(String schemaRegistryUrl) {
         this.schemaRegistryUrl = schemaRegistryUrl;
+    }
+
+    public String getSecurityProtocol() {
+        return securityProtocol;
+    }
+
+    public void setSecurityProtocol(String securityProtocol) {
+        this.securityProtocol = securityProtocol;
+    }
+
+    public String getSslTruststoreLocation() {
+        return sslTruststoreLocation;
+    }
+
+    public void setSslTruststoreLocation(String sslTruststoreLocation) {
+        this.sslTruststoreLocation = sslTruststoreLocation;
+    }
+
+    public String getSslTruststorePassword() {
+        return sslTruststorePassword;
+    }
+
+    public void setSslTruststorePassword(String sslTruststorePassword) {
+        this.sslTruststorePassword = sslTruststorePassword;
+    }
+
+    public String getSslTruststoreType() {
+        return sslTruststoreType;
+    }
+
+    public void setSslTruststoreType(String sslTruststoreType) {
+        this.sslTruststoreType = sslTruststoreType;
+    }
+
+    public String getSslKeystoreLocation() {
+        return sslKeystoreLocation;
+    }
+
+    public void setSslKeystoreLocation(String sslKeystoreLocation) {
+        this.sslKeystoreLocation = sslKeystoreLocation;
+    }
+
+    public String getSslKeystorePassword() {
+        return sslKeystorePassword;
+    }
+
+    public void setSslKeystorePassword(String sslKeystorePassword) {
+        this.sslKeystorePassword = sslKeystorePassword;
+    }
+
+    public String getSslKeystoreType() {
+        return sslKeystoreType;
+    }
+
+    public void setSslKeystoreType(String sslKeystoreType) {
+        this.sslKeystoreType = sslKeystoreType;
+    }
+
+    public String getSslKeyPassword() {
+        return sslKeyPassword;
+    }
+
+    public void setSslKeyPassword(String sslKeyPassword) {
+        this.sslKeyPassword = sslKeyPassword;
+    }
+
+    public String getSslEndpointIdentificationAlgorithm() {
+        return sslEndpointIdentificationAlgorithm;
+    }
+
+    public void setSslEndpointIdentificationAlgorithm(String sslEndpointIdentificationAlgorithm) {
+        this.sslEndpointIdentificationAlgorithm = sslEndpointIdentificationAlgorithm;
     }
 
     public String getConsumerKeyDeserializerClass() {

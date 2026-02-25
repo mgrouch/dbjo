@@ -6,9 +6,11 @@ import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicLong;
+import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.common.config.SslConfigs;
 import org.apache.kafka.common.TopicPartition;
 import org.github.dbjo.kafka.MutablePartitionKey;
 import org.github.dbjo.kafka.avro.OrderEvent;
@@ -43,6 +45,7 @@ public class PartitionedOrderEventListenerRunner implements CommandLineRunner {
         listenerProps.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
         listenerProps.put(SPECIFIC_AVRO_READER_CONFIG, String.valueOf(properties.isConsumerSpecificAvroReader()));
         listenerProps.put(SCHEMA_REGISTRY_URL_CONFIG, properties.getSchemaRegistryUrl());
+        addSslConfig(listenerProps);
 
         Properties publisherProps = new Properties();
         publisherProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, properties.getBootstrapServers());
@@ -53,6 +56,7 @@ public class PartitionedOrderEventListenerRunner implements CommandLineRunner {
         publisherProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, properties.getProducerKeySerializerClass());
         publisherProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, properties.getProducerValueSerializerClass());
         publisherProps.put(SCHEMA_REGISTRY_URL_CONFIG, properties.getSchemaRegistryUrl());
+        addSslConfig(publisherProps);
 
         try (
             KafkaOrderEventListener listener = new KafkaOrderEventListener(
@@ -90,6 +94,28 @@ public class PartitionedOrderEventListenerRunner implements CommandLineRunner {
                     return;
                 }
             }
+        }
+    }
+
+    private void addSslConfig(Properties target) {
+        putIfPresent(target, CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, properties.getSecurityProtocol());
+        putIfPresent(target, SslConfigs.SSL_TRUSTSTORE_LOCATION_CONFIG, properties.getSslTruststoreLocation());
+        putIfPresent(target, SslConfigs.SSL_TRUSTSTORE_PASSWORD_CONFIG, properties.getSslTruststorePassword());
+        putIfPresent(target, SslConfigs.SSL_TRUSTSTORE_TYPE_CONFIG, properties.getSslTruststoreType());
+        putIfPresent(target, SslConfigs.SSL_KEYSTORE_LOCATION_CONFIG, properties.getSslKeystoreLocation());
+        putIfPresent(target, SslConfigs.SSL_KEYSTORE_PASSWORD_CONFIG, properties.getSslKeystorePassword());
+        putIfPresent(target, SslConfigs.SSL_KEYSTORE_TYPE_CONFIG, properties.getSslKeystoreType());
+        putIfPresent(target, SslConfigs.SSL_KEY_PASSWORD_CONFIG, properties.getSslKeyPassword());
+        putIfPresent(
+            target,
+            SslConfigs.SSL_ENDPOINT_IDENTIFICATION_ALGORITHM_CONFIG,
+            properties.getSslEndpointIdentificationAlgorithm()
+        );
+    }
+
+    private static void putIfPresent(Properties target, String key, String value) {
+        if (value != null && !value.isBlank()) {
+            target.put(key, value);
         }
     }
 
