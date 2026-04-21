@@ -1,4 +1,6 @@
 
+DROP TABLE IF EXISTS listener_outbox;
+DROP TABLE IF EXISTS listener_consumed_offsets;
 DROP TABLE IF EXISTS purchase;
 DROP TABLE IF EXISTS product;
 DROP TABLE IF EXISTS client;
@@ -26,4 +28,25 @@ CREATE TABLE purchase (
   ordered_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
   CONSTRAINT fk_purchase_client FOREIGN KEY (client_id) REFERENCES client(id),
   CONSTRAINT fk_purchase_product FOREIGN KEY (product_id) REFERENCES product(id)
+);
+
+
+CREATE TABLE listener_outbox (
+  outbox_id VARCHAR(255) PRIMARY KEY,
+  partition_key VARCHAR(255) NOT NULL,
+  event_payload BLOB NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  published_at TIMESTAMP NULL,
+  published_topic VARCHAR(255),
+  published_partition INT,
+  published_offset BIGINT,
+  published_timestamp BIGINT
+);
+
+CREATE TABLE listener_consumed_offsets (
+  topic VARCHAR(255) NOT NULL,
+  partition_no INT NOT NULL,
+  offset_value BIGINT NOT NULL,
+  offset_metadata VARCHAR(1024),
+  PRIMARY KEY (topic, partition_no)
 );

@@ -2,6 +2,10 @@ package org.github.dbjo.kafka.listener.app;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import org.apache.avro.io.BinaryDecoder;
@@ -12,44 +16,28 @@ import org.apache.avro.specific.SpecificDatumReader;
 import org.apache.avro.specific.SpecificDatumWriter;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
+import org.github.dbjo.generated.model.dao.jdbc.ListenerConsumedOffsetsJdbcDao;
+import org.github.dbjo.generated.model.dao.jdbc.ListenerOutboxJdbcDao;
+import org.github.dbjo.generated.model.entity.ListenerConsumedOffsets;
+import org.github.dbjo.generated.model.entity.ListenerOutbox;
 import org.github.dbjo.kafka.MutablePartitionKey;
 import org.github.dbjo.kafka.avro.OrderEvent;
 import org.github.dbjo.kafka.listener.ConsumeOutboxStore;
 import org.github.dbjo.kafka.publisher.KafkaPublishCommand;
 import org.github.dbjo.kafka.publisher.KafkaPublishReceipt;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.RowMapper;
 
 public class JdbcConsumeOutboxStore implements ConsumeOutboxStore<OrderEvent> {
     private static final SpecificDatumWriter<OrderEvent> EVENT_WRITER = new SpecificDatumWriter<>(OrderEvent.class);
     private static final SpecificDatumReader<OrderEvent> EVENT_READER = new SpecificDatumReader<>(OrderEvent.class);
 
-    private final JdbcTemplate jdbcTemplate;
+    private final JdbcDatasource jdbcDatasource;
+    private final ListenerOutboxJdbcDao outboxDao;
+    private final ListenerConsumedOffsetsJdbcDao consumedOffsetsDao;
 
-    public JdbcConsumeOutboxStore(JdbcTemplate jdbcTemplate) {
-        this.jdbcTemplate = jdbcTemplate;
-        this.jdbcTemplate.execute("""
-            CREATE TABLE IF NOT EXISTS listener_outbox (
-                outbox_id VARCHAR(255) PRIMARY KEY,
-                partition_key VARCHAR(255) NOT NULL,
-                event_payload BLOB NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
-                published_at TIMESTAMP NULL,
-                published_topic VARCHAR(255),
-                published_partition INT,
-                published_offset BIGINT,
-                published_timestamp BIGINT
-            )
-            """);
-        this.jdbcTemplate.execute("""
-            CREATE TABLE IF NOT EXISTS listener_consumed_offsets (
-                topic VARCHAR(255) NOT NULL,
-                partition_no INT NOT NULL,
-                offset_value BIGINT NOT NULL,
-                offset_metadata VARCHAR(1024),
-                PRIMARY KEY (topic, partition_no)
-            )
-            """);
+    public JdbcConsumeOutboxStore(JdbcDatasource jdbcDatasource) {
+        this.jdbcDatasource = jdbcDatasource;
+        this.outboxDao = jdbcDatasource.listenerOutboxDao();
+        this.consumedOffsetsDao = jdbcDatasource.listenerConsumedOffsetsDao();
     }
 
     @Override
@@ -57,78 +45,94 @@ public class JdbcConsumeOutboxStore implements ConsumeOutboxStore<OrderEvent> {
         Map<TopicPartition, OffsetAndMetadata> consumedOffsets,
         List<KafkaPublishCommand<OrderEvent>> commands
     ) {
-        for (Map.Entry<TopicPartition, OffsetAndMetadata> entry : consumedOffsets.entrySet()) {
-            TopicPartition topicPartition = entry.getKey();
-            OffsetAndMetadata offsetAndMetadata = entry.getValue();
-            jdbcTemplate.update(
-                """
-                MERGE INTO listener_consumed_offsets (topic, partition_no, offset_value, offset_metadata)
-                KEY (topic, partition_no)
-                VALUES (?, ?, ?, ?)
-                """,
-                topicPartition.topic(),
-                topicPartition.partition(),
-                offsetAndMetadata.offset(),
-                offsetAndMetadata.metadata()
-            );
-        }
+        try (Connection connection = jdbcDatasource.dataSource().getConnection()) {
+            boolean originalAutoCommit = connection.getAutoCommit();
+            connection.setAutoCommit(false);
+            try {
+                for (Map.Entry<TopicPartition, OffsetAndMetadata> entry : consumedOffsets.entrySet()) {
+                    TopicPartition topicPartition = entry.getKey();
+                    OffsetAndMetadata offsetAndMetadata = entry.getValue();
 
-        for (KafkaPublishCommand<OrderEvent> command : commands) {
-            jdbcTemplate.update(
-                """
-                INSERT INTO listener_outbox (outbox_id, partition_key, event_payload)
-                VALUES (?, ?, ?)
-                """,
-                command.outboxId(),
-                command.partitioned().getPartitionKey(),
-                serialize(command.event())
-            );
+                    ListenerConsumedOffsets row = new ListenerConsumedOffsets();
+                    row.setTopic(topicPartition.topic());
+                    row.setPartitionNo(topicPartition.partition());
+                    row.setOffsetValue(offsetAndMetadata.offset());
+                    row.setOffsetMetadata(offsetAndMetadata.metadata());
+
+                    if (consumedOffsetsDao.updateById(connection, row) == 0) {
+                        consumedOffsetsDao.insert(connection, row);
+                    }
+                }
+
+                for (KafkaPublishCommand<OrderEvent> command : commands) {
+                    ListenerOutbox outbox = new ListenerOutbox();
+                    outbox.setOutboxId(command.outboxId());
+                    outbox.setPartitionKey(command.partitioned().getPartitionKey());
+                    outbox.setEventPayload(serialize(command.event()));
+                    outboxDao.insert(connection, outbox);
+                }
+
+                connection.commit();
+            } catch (SQLException e) {
+                connection.rollback();
+                throw e;
+            } finally {
+                connection.setAutoCommit(originalAutoCommit);
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to persist consumed offsets and outbox commands", e);
         }
     }
 
     @Override
     public List<KafkaPublishCommand<OrderEvent>> loadPendingPublishCommands(int batchSize) {
-        return jdbcTemplate.query(
-            """
-            SELECT outbox_id, partition_key, event_payload
-            FROM listener_outbox
-            WHERE published_at IS NULL
-            ORDER BY created_at, outbox_id
-            LIMIT ?
-            """,
-            outboxMapper(),
-            batchSize
-        );
+        try {
+            return outboxDao.selectAll().stream()
+                .filter(row -> row.getPublishedAt() == null)
+                .sorted(
+                    Comparator
+                        .comparing(ListenerOutbox::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder()))
+                        .thenComparing(ListenerOutbox::getOutboxId)
+                )
+                .limit(batchSize)
+                .map(row -> new KafkaPublishCommand<>(
+                    row.getOutboxId(),
+                    deserialize(row.getEventPayload()),
+                    new MutablePartitionKey(row.getPartitionKey())
+                ))
+                .toList();
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to load pending outbox commands", e);
+        }
     }
 
     @Override
     public void markPublished(List<KafkaPublishReceipt> receipts) {
-        for (KafkaPublishReceipt receipt : receipts) {
-            jdbcTemplate.update(
-                """
-                UPDATE listener_outbox
-                SET published_at = CURRENT_TIMESTAMP,
-                    published_topic = ?,
-                    published_partition = ?,
-                    published_offset = ?,
-                    published_timestamp = ?
-                WHERE outbox_id = ?
-                """,
-                receipt.topic(),
-                receipt.partition(),
-                receipt.offset(),
-                receipt.timestamp(),
-                receipt.outboxId()
-            );
+        Timestamp publishedAt = new Timestamp(System.currentTimeMillis());
+        try (Connection connection = jdbcDatasource.dataSource().getConnection()) {
+            boolean originalAutoCommit = connection.getAutoCommit();
+            connection.setAutoCommit(false);
+            try {
+                for (KafkaPublishReceipt receipt : receipts) {
+                    ListenerOutbox row = new ListenerOutbox();
+                    row.setOutboxId(receipt.outboxId());
+                    row.setPublishedAt(publishedAt);
+                    row.setPublishedTopic(receipt.topic());
+                    row.setPublishedPartition(receipt.partition());
+                    row.setPublishedOffset(receipt.offset());
+                    row.setPublishedTimestamp(receipt.timestamp());
+                    outboxDao.updateById(connection, row);
+                }
+                connection.commit();
+            } catch (SQLException e) {
+                connection.rollback();
+                throw e;
+            } finally {
+                connection.setAutoCommit(originalAutoCommit);
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to mark outbox records as published", e);
         }
-    }
-
-    private static RowMapper<KafkaPublishCommand<OrderEvent>> outboxMapper() {
-        return (rs, rowNum) -> new KafkaPublishCommand<>(
-            rs.getString("outbox_id"),
-            deserialize(rs.getBytes("event_payload")),
-            new MutablePartitionKey(rs.getString("partition_key"))
-        );
     }
 
     private static byte[] serialize(OrderEvent event) {
