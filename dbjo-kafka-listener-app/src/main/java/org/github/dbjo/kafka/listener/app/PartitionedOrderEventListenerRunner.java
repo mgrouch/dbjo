@@ -15,9 +15,10 @@ import org.github.dbjo.kafka.outbox.OutboxTransactionExecutor;
 import org.github.dbjo.kafka.publisher.KafkaEventPublisher;
 import org.github.dbjo.kafka.publisher.KafkaPublishCommand;
 import org.springframework.boot.CommandLineRunner;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.stereotype.Component;
+
+import javax.sql.DataSource;
 
 @Component
 public class PartitionedOrderEventListenerRunner implements CommandLineRunner {
@@ -25,16 +26,16 @@ public class PartitionedOrderEventListenerRunner implements CommandLineRunner {
     private static final String SPECIFIC_AVRO_READER_CONFIG = "specific.avro.reader";
 
     private final OrderEventListenerProperties properties;
-    private final JdbcTemplate jdbcTemplate;
+    private final DataSource dataSource;
     private final TransactionTemplate transactionTemplate;
 
     public PartitionedOrderEventListenerRunner(
         OrderEventListenerProperties properties,
-        JdbcTemplate jdbcTemplate,
+        DataSource dataSource,
         TransactionTemplate transactionTemplate
     ) {
         this.properties = properties;
-        this.jdbcTemplate = jdbcTemplate;
+        this.dataSource = dataSource;
         this.transactionTemplate = transactionTemplate;
     }
 
@@ -80,7 +81,7 @@ public class PartitionedOrderEventListenerRunner implements CommandLineRunner {
                     return transactionTemplate.execute(status -> work.get());
                 }
             };
-            ConsumeOutboxStore<OrderEvent> outboxStore = new JdbcConsumeOutboxStore(jdbcTemplate);
+            ConsumeOutboxStore<OrderEvent> outboxStore = new JdbcConsumeOutboxStore(new JdbcDatasource(dataSource));
             TransactionalConsumePublishProcessor<OrderEvent, OrderEvent> processor =
                 new TransactionalConsumePublishProcessor<>(
                     listener,
