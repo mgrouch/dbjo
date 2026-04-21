@@ -184,6 +184,12 @@ public final class EnumIndex {
         return idx;
     }
 
+    public EnumIndex withEnumJavaPackage(String enumJavaPackage) {
+        this.enumJavaPackage = enumJavaPackage;
+        bindingCache.clear();
+        return this;
+    }
+
     /** Load overrides from file. */
     public EnumIndex loadOverrides(Path file) throws IOException {
         if (file == null) return this;
@@ -368,6 +374,7 @@ public final class EnumIndex {
         if (c0.endsWith("_id")) candidates.add(c0.substring(0, c0.length() - 3));
         if (c0.endsWith("_code")) candidates.add(c0.substring(0, c0.length() - 5));
         if (c0.endsWith("_cd")) candidates.add(c0.substring(0, c0.length() - 3));
+        if (isEnumTableName(c0)) candidates.add(normalize(stripEnumSuffix(c0)));
 
         for (String b : candidates) {
             EnumInfo e = bySchemaAndBase.get(key(schemaKey, b));
@@ -513,6 +520,7 @@ public final class EnumIndex {
     }
 
     private static boolean sqlTypeCompatible(int a, int b) {
+        if (a == Types.OTHER || b == Types.OTHER) return true;
         if (a == b) return true;
         return sqlTypeFamily(a) == sqlTypeFamily(b);
     }
