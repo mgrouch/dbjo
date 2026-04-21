@@ -17,6 +17,7 @@ import org.github.dbjo.codegen.rdb.RocksDaoGenerator;
 import org.github.dbjo.codegen.rdb.RocksJdbcCatalogGenerator;
 import org.github.dbjo.codegen.rdb.RocksSchemaGenerator;
 import org.github.dbjo.codegen.registry.MetaRegistryGenerator;
+import org.github.dbjo.codegen.util.EnumIndex;
 
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
@@ -62,9 +63,16 @@ public final class DbjoCodegen {
             System.out.println("Tables: " + tables.size());
             System.out.println();
 
+            EnumIndex enumIndex = null;
+            if (cfg.enumEnabled()) {
+                enumIndex = EnumIndex.fromTables(tables);
+                enumIndex.loadOverrides(cfg.enumOverridesFile());
+                enumIndex.withEnumJavaPackage(cfg.enumPkg());
+            }
+
             // 1) PROTO
             if (cfg.runMode().runProto()) {
-                ProtoGenerator pg = new ProtoGenerator(cfg);
+                ProtoGenerator pg = new ProtoGenerator(cfg, enumIndex);
                 var protos = pg.generateAll(tables);
                 System.out.println("Wrote " + protos.size() + " proto file(s) into: " + cfg.protoOutProto().toAbsolutePath());
 
@@ -77,7 +85,7 @@ public final class DbjoCodegen {
 
             // 2) ENTITY + META (<Entity>Meta)
             if (cfg.runMode().runEntity()) {
-                int n = new EntityGenerator(cfg).generateAll(tables);
+                int n = new EntityGenerator(cfg, enumIndex).generateAll(tables);
                 System.out.println("Generated entity/meta for " + n + " table(s) into: " + cfg.outBase().toAbsolutePath());
                 System.out.println();
 
@@ -146,7 +154,7 @@ public final class DbjoCodegen {
 
             // 7) PROTO MAPPERS
             if (cfg.runMode().runMapper()) {
-                int n = new ProtoMapperGenerator(cfg).generateAll(tables);
+                int n = new ProtoMapperGenerator(cfg, enumIndex).generateAll(tables);
                 System.out.println("Generated Proto mapper(s): " + n);
                 System.out.println();
             }

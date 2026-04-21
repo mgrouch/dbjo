@@ -3,6 +3,8 @@ package org.github.dbjo.codegen.entity;
 import org.github.dbjo.codegen.Config;
 import org.github.dbjo.meta.db.Col;
 import org.github.dbjo.meta.db.TableModel;
+import org.github.dbjo.codegen.types.TypeMappings;
+import org.github.dbjo.codegen.util.EnumIndex;
 import org.github.dbjo.codegen.util.FilesUtil;
 import org.github.dbjo.codegen.util.Naming;
 
@@ -15,9 +17,15 @@ import java.util.*;
 public final class EntityGenerator {
 
     private final Config cfg;
+    private final EnumIndex enumIndex;
 
     public EntityGenerator(Config cfg) {
+        this(cfg, null);
+    }
+
+    public EntityGenerator(Config cfg, EnumIndex enumIndex) {
         this.cfg = cfg;
+        this.enumIndex = enumIndex;
     }
 
     public int generateAll(List<TableModel> tables) throws IOException {
@@ -30,12 +38,12 @@ public final class EntityGenerator {
         for (TableModel tm : tables) {
             String beanClass = Naming.toClassName(tm.table().table());
 
-            String beanSrc = renderBean(cfg.beanPkg(), beanClass, tm);
+            String beanSrc = renderBean(cfg.beanPkg(), beanClass, tm, enumIndex);
             Path beanFile = beanDir.resolve(beanClass + ".java");
             FilesUtil.writeString(beanFile, beanSrc, cfg.overwrite());
 
             String metaClass = beanClass + "Meta";
-            String metaSrc = renderMeta(cfg.metaPkg(), cfg.baseMetaPkg(), cfg.beanPkg(), beanClass, metaClass, tm);
+            String metaSrc = renderMeta(cfg.metaPkg(), cfg.baseMetaPkg(), cfg.beanPkg(), beanClass, metaClass, tm, enumIndex);
             Path metaFile = metaDir.resolve(metaClass + ".java");
             FilesUtil.writeString(metaFile, metaSrc, cfg.overwrite());
 
@@ -47,18 +55,20 @@ public final class EntityGenerator {
         return count;
     }
 
-    private static String renderBean(String pkg, String className, TableModel tm) {
+    private static String renderBean(String pkg, String className, TableModel tm, EnumIndex enumIndex) {
         Set<String> imports = new TreeSet<>();
         imports.add("java.io.Serializable");
         imports.add("java.util.Objects");
 
         List<Field> fields = new ArrayList<>();
+        String schema = tm.table().schema();
+        String table = tm.table().table();
         boolean hasVersioned = false;
         boolean hasPartitioned = false;
         for (Col c : tm.cols()) {
             String fieldName = Naming.sanitizeJavaIdentifier(Naming.toFieldName(c.colName()));
             boolean isVersion = isVersionField(c, fieldName);
-            JavaType jt = resolveJavaType(c, fieldName, imports);
+            JavaType jt = resolveJavaType(c, fieldName, imports, enumIndex, schema, table);
             boolean isPk = tm.pkColsUpper().contains(c.colName().toUpperCase(Locale.ROOT));
             fields.add(new Field(fieldName, jt.javaType, jt.classLiteral, c, isPk));
             if (isVersion) {
@@ -192,7 +202,8 @@ public final class EntityGenerator {
             String beanPkg,
             String beanClass,
             String metaClass,
-            TableModel tm
+            TableModel tm,
+            EnumIndex enumIndex
     ) {
         Set<String> imports = new TreeSet<>();
         imports.add("java.io.Serializable");
@@ -203,10 +214,12 @@ public final class EntityGenerator {
         imports.add(baseMetaPkg + ".EntityMeta");
         imports.add(baseMetaPkg + ".PropertyMeta");
 
+        String schema = tm.table().schema();
+        String table = tm.table().table();
         List<MetaProp> props = new ArrayList<>();
         for (Col c : tm.cols()) {
             String propName = Naming.sanitizeJavaIdentifier(Naming.toFieldName(c.colName()));
-            JavaType jt = resolveJavaType(c, propName, imports);
+            JavaType jt = resolveJavaType(c, propName, imports, enumIndex, schema, table);
             boolean isPk = tm.pkColsUpper().contains(c.colName().toUpperCase(Locale.ROOT));
             String constName = Naming.toUpperSnake(propName);
             String getterName = "get" + Naming.capitalize(propName);
@@ -308,9 +321,16 @@ public final class EntityGenerator {
         };
     }
 
-    private static JavaType resolveJavaType(Col col, String fieldName, Set<String> imports) {
+    private static JavaType resolveJavaType(Col col, String fieldName, Set<String> imports, EnumIndex enumIndex, String schema, String table) {
         if (isVersionField(col, fieldName)) {
             return new JavaType("Integer", "Integer.class");
+        }
+        if (enumIndex != null) {
+            EnumIndex.Binding eb = enumIndex.find(schema, table, col.colName(), Types.OTHER, true);
+            if (eb != null) {
+                TypeMappings.JavaType jt = TypeMappings.mapSqlTypeToJava(eb.enumKeySqlType(), imports);
+                return new JavaType(jt.javaType(), jt.classLiteral());
+            }
         }
         return mapSqlTypeToJava(col.sqlType(), imports);
     }

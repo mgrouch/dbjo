@@ -6,6 +6,7 @@ import org.github.dbjo.meta.db.TableModel;
 import org.github.dbjo.codegen.util.EnumIndex;
 import org.github.dbjo.codegen.util.FilesUtil;
 import org.github.dbjo.codegen.util.Naming;
+import org.github.dbjo.codegen.types.TypeMappings;
 
 import java.io.IOException;
 import java.sql.Types;
@@ -66,21 +67,22 @@ public final class ProtoGenerator {
             boolean nullable = c.nullable();
             boolean isPk = tm.pkColsUpper().contains(c.colName().toUpperCase(Locale.ROOT));
 
-            ProtoType pt = mapSqlTypeToProto(c.sqlType());
-            if (pt.needsTimestamp) needTimestamp = true;
-
             String fieldName = Naming.toLowerSnake(
                     Naming.sanitizeProtoIdentifier(Naming.toFieldName(c.colName()))
             );
             int fieldNumber = Math.max(1, c.pos());
 
+            EnumIndex.Binding eb = (enumIndex == null) ? null : enumIndex.find(schema, table, c.colName(), Types.OTHER, true);
+            TypeMappings.ProtoType effectivePt = (eb == null)
+                    ? TypeMappings.mapSqlTypeToProto(c.sqlType(), c.typeName())
+                    : TypeMappings.mapSqlTypeToProto(eb.enumKeySqlType(), null);
+            if (effectivePt.needsTimestamp()) needTimestamp = true;
+
             // IMPORTANT: only emit proto3 optional if cfg says so.
             boolean protoOptionalEnabled = cfg.protoExperimentalOptional();
-            boolean isOptional = protoOptionalEnabled && nullable && pt.allowOptional;
+            boolean isOptional = protoOptionalEnabled && nullable && effectivePt.allowOptional();
 
-            EnumIndex.Binding eb = (enumIndex == null) ? null : enumIndex.find(schema, table, c.colName());
-
-            fields.add(new ProtoField(fieldName, pt.protoType, isOptional, fieldNumber, c, isPk, eb));
+            fields.add(new ProtoField(fieldName, effectivePt.protoType(), isOptional, fieldNumber, c, isPk, eb));
         }
 
         String schemaPart = schema.isBlank() ? "default" : schema;
@@ -118,34 +120,6 @@ public final class ProtoGenerator {
 
         sb.append("}\n");
         return sb.toString();
-    }
-
-    private static ProtoType mapSqlTypeToProto(int sqlType) {
-        return switch (sqlType) {
-            case Types.TINYINT, Types.SMALLINT, Types.INTEGER -> ProtoType.scalar("int32");
-            case Types.BIGINT -> ProtoType.scalar("int64");
-
-            case Types.FLOAT, Types.REAL -> ProtoType.scalar("float");
-            case Types.DOUBLE -> ProtoType.scalar("double");
-
-            case Types.DECIMAL, Types.NUMERIC, Types.CHAR, Types.VARCHAR, Types.LONGVARCHAR, Types.NCHAR, Types.NVARCHAR, Types.LONGNVARCHAR, Types.DATE, Types.TIME, Types.TIME_WITH_TIMEZONE -> ProtoType.scalar("string"); // portable
-
-            case Types.BIT, Types.BOOLEAN -> ProtoType.scalar("bool");
-
-            case Types.BINARY, Types.VARBINARY, Types.LONGVARBINARY, Types.BLOB -> ProtoType.scalar("bytes");
-
-            case Types.TIMESTAMP, Types.TIMESTAMP_WITH_TIMEZONE ->
-                    ProtoType.message("google.protobuf.Timestamp", true);
-
-            // portable
-
-            default -> ProtoType.scalar("string");
-        };
-    }
-
-    private record ProtoType(String protoType, boolean allowOptional, boolean needsTimestamp) {
-        static ProtoType scalar(String t) { return new ProtoType(t, true, false); }
-        static ProtoType message(String t, boolean ts) { return new ProtoType(t, false, ts); }
     }
 
     private record ProtoField(
