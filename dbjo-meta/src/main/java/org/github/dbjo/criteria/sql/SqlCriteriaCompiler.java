@@ -27,6 +27,8 @@ public final class SqlCriteriaCompiler {
 
         String where = b.whereSql();
         String sql = where.isEmpty() ? base : (base + " WHERE " + where);
+        String orderBy = b.orderBySql(q.orderBy());
+        if (!orderBy.isEmpty()) sql = sql + " ORDER BY " + orderBy;
         return new Compiled(sql, b.params.toArray());
     }
 
@@ -181,6 +183,24 @@ public final class SqlCriteriaCompiler {
                 sb.append('(').append(terms.get(i)).append(')');
             }
             return sb.toString();
+        }
+
+        private String orderBySql(List<? extends Query.Order<?, ?>> orderBy) {
+            if (orderBy == null || orderBy.isEmpty()) return "";
+            StringBuilder sb = new StringBuilder(orderBy.size() * 16);
+            for (int i = 0; i < orderBy.size(); i++) {
+                Query.Order<?, ?> o = orderBy.get(i);
+                if (i > 0) sb.append(", ");
+                sb.append(colRaw(o.prop().getPropertyName())).append(' ').append(o.dir().name());
+            }
+            return sb.toString();
+        }
+
+        private String colRaw(String propertyName) {
+            if (propertyName == null || propertyName.isBlank()) {
+                throw new IllegalArgumentException("PropertyMeta has blank propertyName");
+            }
+            return meta.columnSql(propertyName);
         }
     }
 }
