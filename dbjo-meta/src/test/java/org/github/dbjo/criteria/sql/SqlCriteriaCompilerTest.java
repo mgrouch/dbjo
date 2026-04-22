@@ -139,4 +139,30 @@ final class SqlCriteriaCompilerTest {
         assertEquals("SELECT * FROM foo WHERE created_at LIKE ?", out.sql());
         assertArrayEquals(new Object[]{"%2024%"}, out.params());
     }
+
+    @Test
+    void orderByAsc_compilesOrderByClause() {
+        org.github.dbjo.criteria.Query<Foo> q = org.github.dbjo.criteria.Query.from(META)
+                .orderByAsc(ID)
+                .build();
+
+        SqlCriteriaCompiler.Compiled out = SqlCriteriaCompiler.compileSelectAll(DB_META, q);
+
+        assertEquals("SELECT * FROM foo ORDER BY id ASC", out.sql());
+        assertArrayEquals(new Object[0], out.params());
+    }
+
+    @Test
+    void orderByMulti_withWhere_compilesOrderByAfterWhere() {
+        org.github.dbjo.criteria.Query<Foo> q = org.github.dbjo.criteria.Query.from(META)
+                .where(Conditions.eq(ID, 7))
+                .orderByDesc(CREATED_AT)
+                .orderByAsc(ID)
+                .build();
+
+        SqlCriteriaCompiler.Compiled out = SqlCriteriaCompiler.compileSelectAll(DB_META, q);
+
+        assertEquals("SELECT * FROM foo WHERE id = ? ORDER BY created_at DESC, id ASC", out.sql());
+        assertArrayEquals(new Object[]{7}, out.params());
+    }
 }

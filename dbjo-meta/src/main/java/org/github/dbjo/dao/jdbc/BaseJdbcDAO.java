@@ -9,6 +9,7 @@ import javax.sql.DataSource;
 import java.io.Serializable;
 import java.sql.*;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.regex.Pattern;
@@ -165,11 +166,28 @@ public abstract class BaseJdbcDAO<T, K> {
                 T e = meta.fromRow(rs);
                 if (QueryEvaluator.testRaw(q, e)) {
                     out.add(e);
-                    if (out.size() >= limit) break;
                 }
             }
         }
+        sortInMemory(out, q.orderBy());
+        if (out.size() > limit) return new ArrayList<>(out.subList(0, limit));
         return out;
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static <T> void sortInMemory(List<T> rows, List<? extends Query.Order<?, ?>> orderBy) {
+        if (rows == null || rows.size() <= 1 || orderBy == null || orderBy.isEmpty()) return;
+        Comparator<T> cmp = null;
+        for (Query.Order<?, ?> order : orderBy) {
+            var prop = (org.github.dbjo.meta.entity.PropertyMeta<Serializable, Serializable>) order.prop();
+            Comparator<T> c = Comparator.comparing(
+                    v -> (Comparable) prop.get((Serializable) v),
+                    Comparator.nullsFirst(Comparator.naturalOrder())
+            );
+            if (order.dir() == Query.OrderDirection.DESC) c = c.reversed();
+            cmp = (cmp == null) ? c : cmp.thenComparing(c);
+        }
+        if (cmp != null) rows.sort(cmp);
     }
 
     public int upsertById(T row) throws SQLException {
